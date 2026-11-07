@@ -10,9 +10,9 @@ Upload this exact file to the repository root:
 
 Expected SHA-256:
 
-`4a4d1fa4e95023d1e0a416ff40e81feb4466d221844359f895d19a69d841b9bb`
+`f3bd4b54bf835c28cdc8b7ed38f468e8dafb0304d65cf397d53f7e61b324b1ee`
 
-The source package includes Supabase PostgreSQL cloud-storage support, the applied ledger migration under `supabase/migrations/`, the Render Free Blueprint, backend API, tests, dashboard, and Android Gradle project. SQLite remains available for local development and tests.
+The source package includes Supabase PostgreSQL cloud-storage support, two Supabase migrations (ledger tables and a restricted server-side backend role), the Render Free Blueprint, backend API, tests, dashboard, and Android Gradle project. SQLite remains available for local development and tests.
 
 ## One-time upload
 
@@ -35,13 +35,14 @@ The artifact is a debug build, not a Play Store or production-signed release. It
 
 ## Cloud deployment
 
-The included Render Blueprint uses the Free web-service plan and Supabase PostgreSQL for persistent ledger storage. Render Free can sleep after inactivity, so background market scanning is not continuous or guaranteed 24/7. Add `DATABASE_URL`, `APP_PASSWORD` (at least 16 characters), and the generated `APP_AUTH_SECRET` in Render's protected environment settings. Never place database or exchange credentials in the APK, frontend, Git, or chat. The app validates the Supabase ledger schema at startup and requires the ledger migration to have been applied first.
+The included Render Blueprint uses the Free web-service plan and Supabase PostgreSQL for persistent ledger storage. Render Free can sleep after inactivity, so background market scanning is not continuous or guaranteed 24/7. Configure `DATABASE_URL`, `APP_PASSWORD` (at least 16 characters), and `APP_AUTH_SECRET` (at least 32 bytes) in Render's protected environment settings. Never place database or exchange credentials in the APK, frontend, Git, or chat. The app validates the Supabase ledger schema at startup and requires both migrations to be applied first. The `att_backend` database role is intentionally created with LOGIN disabled; enable it only after setting a strong password securely on the backend host, then use a server-side connection string.
 
 ## Verification status
 
 - Source archive SHA-256: verified locally against this expected value.
 - Source static release gate: PASS.
 - Python test suite: 142 passed.
+- PostgreSQL storage adapter: implemented; schema migrations applied to the linked Supabase project.
 - Android APK: **not yet built**; a successful GitHub Actions run is required before an APK can be claimed as ready.
 - Render deployment and authenticated exchange Testnet execution: not yet end-to-end verified.
 
