@@ -715,6 +715,27 @@ def test_testnet_auto_uses_opoco_net_received_quantity_and_fok_entry(monkeypatch
     assert db.get_setting("testnet_order_halted", False) is False
 
 
+def test_testnet_auto_does_not_claim_submission_without_working_order_id(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    original_request = exchange.request
+
+    def incomplete_post(path, api, method, params):
+        response = original_request(path, api, method, params)
+        if method == "POST":
+            response["orders"] = []
+            response["orderReports"] = []
+        return response
+
+    exchange.request = incomplete_post
+    result = trader.run([_make_auto_signal()], True)
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["submitted"] == []
+    assert any(item["reason"] == "order_list_response_requires_reconciliation" for item in result["rejected"])
+    assert row["status"] == "UNKNOWN"
+    assert row["working_order_id"] is None
+    assert db.count_open_testnet_auto_orders() == 1
+
+
 def test_testnet_auto_refuses_symbols_without_explicit_opoco_permissions(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch, permissions=False)
     result = trader.run([_make_auto_signal()], True)
@@ -1010,3 +1031,4 @@ def test_testnet_auto_kill_switch_preserves_exchange_native_exits_for_filled_ent
     assert not result["canceled_unfilled_order_lists"]
     assert not any(len(call) == 4 and call[2] == "DELETE" for call in exchange.calls)
     assert db.get_setting("testnet_auto_trading_enabled") is False
+    assert db.get_setting("testnet_order_halted") is True
