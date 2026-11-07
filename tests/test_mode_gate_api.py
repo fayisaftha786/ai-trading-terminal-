@@ -15,3 +15,13 @@ def test_trading_modes_endpoint_separates_demo_qualification_from_live_execution
     after = client.get("/api/trading/modes").json()
     assert after["demo"]["automation_enabled"] is True
     assert after["original"]["enabled"] is False
+
+
+def test_dashboard_displays_both_modes_and_keeps_live_button_disabled(client):
+    page = client.get("/").text
+    script = client.get("/static/app.js").text
+    assert 'id="tradingModes"' in page
+    assert "DEMO MODE" in page
+    assert "ORIGINAL / LIVE MODE" in page
+    assert "Live activation unavailable" in page
+    assert "loadTradingModes" in script
