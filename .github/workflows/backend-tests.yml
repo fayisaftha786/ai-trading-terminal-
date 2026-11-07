@@ -16,6 +16,8 @@ on:
       - "app/**"
       - "tests/**"
       - "requirements.txt"
+      - "static/**"
+      - "scripts/master_release.py"
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 
@@ -44,3 +46,5 @@ jobs:
           node-version: "22"
       - name: Check dashboard JavaScript syntax
         run: node --check static/app.js
+      - name: Run full release verification gate
+        run: python scripts/master_release.py
