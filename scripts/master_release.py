@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import zipfile
@@ -64,6 +65,16 @@ def main() -> int:
     android_manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
     android_gradle = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
     android_workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text(encoding="utf-8")
+    android_version_match = re.search(r'^\s*versionName\s*=\s*"([^"]+)"', android_gradle, re.MULTILINE)
+    android_code_match = re.search(r'^\s*versionCode\s*=\s*(\d+)', android_gradle, re.MULTILINE)
+    if not android_version_match or not android_code_match:
+        raise RuntimeError("Android Gradle versionName/versionCode missing")
+    android_version = android_version_match.group(1)
+    android_version_code = android_code_match.group(1)
+    apk_stem = f"AITradingTerminal-Android-v{android_version}-debug"
+    android_build_script = (ROOT / "build-android-debug.sh").read_text(encoding="utf-8")
+    local_paper_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/LocalPaperActivity.java").read_text(encoding="utf-8")
+    paper_auto_limits = (ROOT / "android/app/src/main/java/app/aitradingterminal/PaperAutoLimits.java").read_text(encoding="utf-8")
     frontend_source = "\n".join(
         path.read_text(encoding="utf-8").lower()
         for path in (ROOT / "static").glob("*")
@@ -93,13 +104,15 @@ def main() -> int:
         "android_cleartext_disabled_for_all_hosts": "android:usesCleartextTraffic=\"false\"" in android_manifest and "cleartextTrafficPermitted=\"false\"" in (ROOT / "android/app/src/main/res/xml/network_security_config.xml").read_text(),
         "android_https_cloud_backend_allowlist_present": 'return "https".equals(scheme)' in android_activity and 'your-service.onrender.com' in android_activity and 'http".equals(scheme)' not in android_activity,
         "android_no_webview_file_access": "setAllowFileAccess(false)" in android_activity and "setAllowContentAccess(false)" in android_activity,
-        "android_ci_apk_job_present": "AITradingTerminal-Android-v0.7.0-debug-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
-        "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in ("AITradingTerminal-Android-v0.7.0-debug.apk", "AITradingTerminal-Android-v0.7.0-debug.apk.sha256", "AITradingTerminal-Android-v0.7.0-build-info.txt")),
+        "android_ci_apk_job_present": f"{apk_stem}-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
+        "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in (f"{apk_stem}.apk", f"{apk_stem}.apk.sha256", f"AITradingTerminal-Android-v{android_version}-build-info.txt")),
         "android_local_build_verifies_sdk_and_signature": all(marker in (ROOT / "build-android-debug.sh").read_text() for marker in ("platforms/android-35/android.jar", "apksigner", "sha256sum")),
         "android_build_script_restricts_gradle_to_compatible_8x": "EXPECTED_GRADLE_MAX_MAJOR=\"8\"" in (ROOT / "build-android-debug.sh").read_text() and "parts[0] != 8" in (ROOT / "build-android-debug.sh").read_text(),
-        "android_apk_metadata_verified_after_build": all(marker in (ROOT / "build-android-debug.sh").read_text() for marker in ("aapt dump badging", "versionCode='47'", "sdkVersion:'26'", "targetSdkVersion:'35'")),
-        "android_gradle_version_code_matches_apk_verifier": 'versionCode = 47' in android_gradle and 'versionName = "0.7.0"' in android_gradle and "versionCode='47' versionName='0.7.0-debug'" in (ROOT / "build-android-debug.sh").read_text(),
+        "android_apk_metadata_verified_after_build": all(marker in android_build_script for marker in ("aapt dump badging", f"versionCode='{android_version_code}'", f"versionName='{android_version}-debug'", "sdkVersion:'26'", "targetSdkVersion:'35'")),
+        "android_gradle_version_code_matches_apk_verifier": f"versionCode = {android_version_code}" in android_gradle and f'versionName = "{android_version}"' in android_gradle and f"versionCode='{android_version_code}' versionName='{android_version}-debug'" in android_build_script,
         "android_auto_demo_is_opt_in_and_foreground_only": all(marker in (ROOT / "android/app/src/main/java/app/aitradingterminal/LocalPaperActivity.java").read_text() for marker in ("AUTO DEMO: OFF", "AUTO_REFRESH_MS=5L*60L*1000L", "onPause()", "PaperAutoLimits.rejectionReason", "fetchCandles(\"4h\"")) and all(marker in (ROOT / "android/app/src/main/java/app/aitradingterminal/PaperSignal.java").read_text() for marker in ("MAX_SPREAD_BPS = 25.0", "MIN_TOP10_DEPTH_USD = 5_000.0", "MIN_QUOTE_VOLUME_USD = 1_000_000.0", "expectedRange < roundTrip * 2.5")),
+        "android_manual_paper_fills_use_fresh_bid_ask": all(marker in local_paper_activity for marker in ("db.open(lastAsk)", 'db.closeOpen(lastBid,"MANUAL")', "cached prices cannot close a position", "PaperAutoLimits.isFreshExecutionQuote")) and all(marker in paper_auto_limits for marker in ("MAX_TICKER_AGE_MS", "MAX_BOOK_AGE_MS", "ask < bid")),
+        "android_release_published_only_from_main": "github.event_name == 'push' && github.ref == 'refs/heads/main'" in android_workflow,
         "android_ci_action_versions_currently_pinned": all(marker in android_workflow for marker in ("actions/setup-python@v7", "actions/setup-node@v7", "actions/upload-artifact@v7", "actions/checkout@v7", "actions/setup-java@v6", "android-actions/setup-android@v4", "gradle/actions/setup-gradle@v6")),
         "android_gradle_cache_uses_open_source_provider": "cache-provider: basic" in android_workflow,
         "production_api_authentication_present": "private_api_guard" in main_source and "create_access_token" in main_source and "APP_PASSWORD" in (ROOT / "app/settings.py").read_text(),

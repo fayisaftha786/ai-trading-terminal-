@@ -50,4 +50,19 @@ public final class PaperAutoLimitsTest {
         assertEquals("eligible",PaperAutoLimits.rejectionReason(
                 true,false,0,2,NOW-5*60*60_000L,NOW,NOW-120_000,NOW-60_000));
     }
+
+    @Test public void manualPaperExecutionRequiresFreshTwoSidedQuote() {
+        assertTrue(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW-1_000,NOW-500,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW-121_000,NOW-500,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW-1_000,NOW-16_000,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,0,NOW-500,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW-1_000,0,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.1,100.0,NOW-1_000,NOW-500,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(0,100.1,NOW-1_000,NOW-500,NOW));
+    }
+
+    @Test public void futureOrClockSkewedQuotesFailClosed() {
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW+6_000,NOW-500,NOW));
+        assertFalse(PaperAutoLimits.isFreshExecutionQuote(100.0,100.1,NOW-500,NOW+2_000,NOW));
+    }
 }
