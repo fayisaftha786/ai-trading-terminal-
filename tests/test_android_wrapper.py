@@ -51,19 +51,27 @@ def test_android_wrapper_does_not_embed_secrets_or_local_python_runtime():
 
 
 def test_ci_contains_native_debug_apk_build_and_artifact_upload():
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "android-debug-apk" in workflow
+    workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text()
+    assert "AITradingTerminal-Android-v0.5.0-debug-apk" in workflow
     assert "build-android-debug.sh" in workflow
     assert "upload-artifact@v7" in workflow
-    assert "AITradingTerminal-Android-v0.5.0-debug-apk" in workflow
     assert "dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256" in workflow
     assert "retention-days: 30" in workflow
     assert "android-actions/setup-android@v4" in workflow
     assert "gradle/actions/setup-gradle@v6" in workflow
     assert "cache-provider: basic" in workflow
-    assert 'accept-android-sdk-licenses: "yes"' in workflow
-    assert "needs: backend-and-release" in workflow
+    assert "accept-android-sdk-licenses: true" in workflow
+    assert "verify-and-build:" in workflow
     assert "actions/setup-java@v6" in workflow
+
+
+def test_android_release_workflow_uses_current_node24_compatible_actions():
+    workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text()
+    assert "actions/setup-python@v7" in workflow
+    assert "actions/setup-node@v7" in workflow
+    assert "actions/upload-artifact@v7" in workflow
+    assert 'gradle-version: "8.9"' in workflow
+    assert 'java-version: "17"' in workflow
 
 
 def test_android_build_script_checks_sdk_signs_and_hashes_apk():
