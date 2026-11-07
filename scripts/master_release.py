@@ -79,6 +79,16 @@ def main() -> int:
         "worker_sentiment_not_fabricated": '"status": "unavailable"' in (ROOT / "app/services/workers.py").read_text() and "No licensed news feed" in (ROOT / "app/services/workers.py").read_text(),
         "paper_auto_entry_defaults_off_and_persists_opt_in": 'app.state.auto_paper_enabled = bool(db.get_setting("auto_paper_enabled", False))' in main_source and 'db.set_setting("auto_paper_enabled", False)' in main_source,
         "kill_switch_route_present": '@app.post("/api/automation/kill-switch")' in main_source,
+        "global_kill_switch_waits_for_active_scan": (
+            '@app.post("/api/automation/kill-switch")' in main_source
+            and "async with scan_lock:" in main_source
+            and "app.state.scan_lock = scan_lock" in main_source
+        ),
+        "automation_control_transitions_are_serialized": (
+            "automation_control_lock = asyncio.Lock()" in main_source
+            and "async with automation_control_lock:" in main_source
+            and "app.state.automation_control_lock = automation_control_lock" in main_source
+        ),
         "sqlite_unique_open_market_guard_present": "idx_trades_one_open_per_market" in storage_source,
         "no_exchange_or_wallet_secrets_in_frontend": not any(
             marker in frontend_source for marker in ("api_secret", "secret_key", "private_key", "seed_phrase")
