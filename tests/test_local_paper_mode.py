@@ -52,7 +52,11 @@ def test_local_demo_kill_switch_is_persistent_and_blocks_entries_only():
     assert "setHalted(stopped)" in source
     assert "key='halted'" in source
     assert "new entries blocked; existing risk exits remain active" in source
-    assert "marketLive&&!stopped" in source
+    assert "marketLive&&freshQuote&&!stopped" in source
+    assert "db.open(lastAsk)" in source
+    assert 'db.closeOpen(lastBid,"MANUAL")' in source
+    assert "cached prices cannot close a position" in source
+    assert "PaperAutoLimits.isFreshExecutionQuote" in source
 
 
 def test_android_build_runs_jvm_tests_and_local_demo_has_no_live_executor():
