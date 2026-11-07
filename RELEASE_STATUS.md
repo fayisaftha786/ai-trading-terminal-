@@ -30,6 +30,7 @@
 - Main-branch Android release workflow completed successfully, including the full release gate, Gradle build, APK signature/metadata verification, artifact upload and GitHub Release publication.
 - Backend tests, Python/release checks and the read-only market scanner workflow completed successfully for the main commit.
 - Cloudflare Worker validation includes JavaScript syntax, unit tests, Wrangler dry-run and local workerd smoke tests for initialization, authentication, explicit PAPER opt-in, kill switch, reset and static dashboard serving.
+- A follow-up full-code audit identified and is correcting two cloud PAPER safety issues: Coinbase L2 freshness was relying on an undocumented REST book `time` field, and dashboard reads could update portfolio high-water marks/risk baselines from stale cached quotes. The fix is being tested in a separate PR; it is not part of the v0.7.1 APK.
 
 **Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
 
@@ -49,7 +50,7 @@ All three markets had 349 valid candles in both analyzed timeframes, with no rep
 
 The Cloudflare PAPER Worker source is merged into main and passed local validation. **It is not deployed to a Cloudflare account.** The remaining deployment requires the owner to use a Cloudflare account on the Free plan, connect the GitHub repository, and configure `ADMIN_PASSWORD` (16+ characters) and `SESSION_SECRET` (32+ characters) as Cloudflare runtime secrets. Do not send these secrets in chat or commit them to GitHub.
 
-After deployment, verify `/api/health`, owner authentication, all three live markets, 1h/6h candle integrity, fresh order-book timestamps, ledger persistence and the alarm schedule. Keep automatic PAPER entries OFF until all checks pass.
+After deployment, verify `/api/health`, owner authentication, all three live markets, 1h/6h candle integrity, fresh local order-book response retrieval age, ledger persistence and the alarm schedule. Keep automatic PAPER entries OFF until all checks pass.
 
 ## Safety boundary
 
