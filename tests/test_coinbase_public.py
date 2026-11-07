@@ -80,7 +80,7 @@ def test_fetch_candles_converts_coinbase_ohlcv_to_standard_order():
     try:
         rows = asyncio.run(adapter.fetch_candles("ETH/USDT", 3600))
     finally:
-        await client.aclose()
+        asyncio.run(client.aclose())
 
     assert rows == [[1794000000000, 95.0, 110.0, 90.0, 105.0, 1234.0]]
 
@@ -95,7 +95,7 @@ def test_fetch_candles_rejects_unsupported_timeframe():
         with pytest.raises(ValueError, match="do not support"):
             asyncio.run(adapter.fetch_candles("BTC/USDT", 14_400))
     finally:
-        await client.aclose()
+        asyncio.run(client.aclose())
 
 
 def test_public_http_errors_are_not_silently_treated_as_market_data():
@@ -108,4 +108,4 @@ def test_public_http_errors_are_not_silently_treated_as_market_data():
         with pytest.raises(httpx.HTTPStatusError):
             asyncio.run(adapter.fetch_market("BTC/USDT"))
     finally:
-        await client.aclose()
+        asyncio.run(client.aclose())
