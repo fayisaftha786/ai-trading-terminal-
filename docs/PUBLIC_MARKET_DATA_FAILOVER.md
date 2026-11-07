@@ -11,7 +11,7 @@ The Python FastAPI backend continues to prefer the configured CCXT exchange. If 
 - Coinbase book responses do not supply a trustworthy exchange event timestamp through this REST path. The adapter records local retrieval time as weaker provenance, and the existing 15-second freshness/depth/spread gates still apply.
 - The adapter is read-only. It has no order endpoint, wallet functionality or exchange credentials.
 
-## Fail-closed behavior
+Official references:\n- Coinbase Exchange candle endpoint: https://docs.cdp.coinbase.com/api-reference/exchange-api/rest-api/products/get-product-candles (granularities 60, 300, 900, 3600, 21600 and 86400 seconds; maximum 300 candles per request; historical gaps may occur).\n- Coinbase Exchange API FAQ: https://help.coinbase.com/en/pro/other-topics/api/faq-on-api (public REST rate limit 3 requests/second, up to 6 in bursts).\n\n## Fail-closed behavior
 
 If any endpoint fails, quote timestamps are missing/stale, candle history is incomplete, OHLCV rows are malformed, top-of-book depth is absent, spread exceeds the current limit, volume is too low, indicators do not qualify, or the 1h/6h regimes are not aligned, the strategy returns HOLD/no entry. If Coinbase is also unavailable from the user's cloud region, the backend remains without live CEX markets. Do not bypass HTTP 451 or other exchange regional restrictions through proxies or VPNs.
 
