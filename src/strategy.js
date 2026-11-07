@@ -1,6 +1,4 @@
 // Cloudflare deployment strategy: deterministic research-only PAPER signals.
-const isFiniteNumber = (value) => Number.isFinite(Number(value));
-
 export function ema(values, period) {
   if (!Array.isArray(values) || values.length < period || period < 1) return [];
   const alpha = 2 / (period + 1);
