@@ -140,6 +140,7 @@ def test_pwa_manifest_and_service_worker_are_served(client):
     sw = client.get("/sw.js")
     assert sw.status_code == 200
     assert "Service-Worker-Allowed" in sw.headers
+    assert "ai-trading-terminal-shell-v0.5.0-cloud-workers-1" in sw.text
     assert client.head("/sw.js").status_code == 200
     assert "/api/" in sw.text
     offline = client.get("/offline.html")
