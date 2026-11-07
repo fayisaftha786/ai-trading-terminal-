@@ -42,6 +42,8 @@ jobs:
           test -d "${RUNNER_TEMP}/att-source/ai-trading-terminal"
           if [ -f README.md ]; then cp README.md DELIVERY-README.md; fi
           cp -a "${RUNNER_TEMP}/att-source/ai-trading-terminal/." "${GITHUB_WORKSPACE}/"
+          # Keep this delivery workflow under its existing GitHub App authorization.
+          rm -f .github/workflows/ci.yml
           test -f requirements.txt
           test -f build-android-debug.sh
 
