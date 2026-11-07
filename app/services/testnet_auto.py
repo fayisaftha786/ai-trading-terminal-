@@ -49,7 +49,6 @@ class TestnetAutoTrader:
         if triggered and halted_day != day_start:
             # Persist the daily halt before returning; it survives process restarts.
             self.storage.set_setting("testnet_auto_loss_halt_day", day_start)
-            self.storage.set_setting("testnet_auto_trading_enabled", False)
             self.storage.log_event(
                 "testnet_auto_daily_loss_stop",
                 "Testnet automatic entries halted by daily realized-loss limit",
