@@ -133,8 +133,11 @@ class TestnetAutoTrader:
         if not raw_fees and isinstance(order.get("fee"), dict):
             raw_fees = [order["fee"]]
         if raw_fees:
-            return self._fees_to_quote(raw_fees, quote, base, average)
-
+            fee_quote, fee_exact = self._fees_to_quote(raw_fees, quote, base, average)
+            if fee_exact:
+                return fee_quote, True
+            # An order-level fee summary can be present but incomplete. Prefer
+            # verified execution-level commission records before giving up.
         fills: Any = None
         fetch_order_trades = getattr(exchange, "fetch_order_trades", None)
         if callable(fetch_order_trades):
