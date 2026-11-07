@@ -491,11 +491,22 @@ class TestnetAutoTrader:
                 reverse=True,
             )
             for item in ordered:
+                ticker = item.get("ticker") or {}
+                symbol = str(ticker.get("symbol") or item.get("symbol") or "")
+                ticker_provider = item.get("ticker_market_data_provider") or ticker.get("market_data_provider")
+                strategy_provider = item.get("strategy_market_data_provider")
+                # Testnet orders are Binance Spot USDT orders. A Coinbase USD fallback
+                # may keep PAPER research available, but must never authorize a Binance
+                # Testnet BUY using a different venue, quote basis, depth or candle feed.
+                if ticker_provider != "binance" or strategy_provider != "binance":
+                    result["rejected"].append({
+                        "symbol": symbol,
+                        "reason": "binance_testnet_requires_binance_ticker_and_strategy_data",
+                    })
+                    continue
                 allowed, reason, spread_bps = self.eligibility_engine._eligible(
                     item, now_ms if now_ms is not None else datetime.now(timezone.utc).timestamp() * 1000, risk
                 )
-                ticker = item.get("ticker") or {}
-                symbol = str(ticker.get("symbol") or item.get("symbol") or "")
                 if not allowed:
                     result["rejected"].append({"symbol": symbol, "reason": reason})
                     continue
@@ -542,6 +553,13 @@ class TestnetAutoTrader:
     ) -> dict[str, Any]:
         ticker = item.get("ticker") or {}
         symbol = str(ticker.get("symbol") or item.get("symbol") or "")
+        ticker_provider = item.get("ticker_market_data_provider") or ticker.get("market_data_provider")
+        strategy_provider = item.get("strategy_market_data_provider")
+        if ticker_provider != "binance" or strategy_provider != "binance":
+            return {
+                "accepted": False,
+                "reason": "binance_testnet_requires_binance_ticker_and_strategy_data",
+            }
         allowed_symbols = tuple(getattr(self.adapter.config, "cex_symbols", ()) or ())
         if symbol not in allowed_symbols or not symbol.endswith("/USDT"):
             return {"accepted": False, "reason": "testnet_symbol_not_allowlisted"}
