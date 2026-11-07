@@ -497,7 +497,7 @@ def test_testnet_enable_cannot_race_global_kill_switch_and_reset_stays_off(tmp_p
     routes = {
         (route.path, method): route.endpoint
         for route in application.routes
-        if hasattr(route, "path")
+        if hasattr(route, "path") and hasattr(route, "methods")
         for method in (route.methods or set())
     }
     kill_switch = routes[("/api/automation/kill-switch", "POST")]
