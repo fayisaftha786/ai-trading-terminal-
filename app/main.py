@@ -19,6 +19,7 @@ from app.schemas import (BacktestRequest, LoginRequest, PaperOrderRequest, RiskU
 from app.services.backtest import (run_ema_backtest, run_walk_forward, run_signal_backtest,
                                     run_signal_walk_forward)
 from app.services.automation import AutoPaperEngine
+from app.services.mode_gate import assess_demo_readiness
 from app.services.market_data import MarketDataService
 from app.services.paper import PaperBroker
 from app.services.performance import build_performance_report
@@ -462,6 +463,31 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
         result["exit_monitoring_required"] = cex_positions_open and not payload.enabled
         return result
+
+    @app.get("/api/trading/modes")
+    async def trading_modes() -> dict[str, Any]:
+        # Use the same realized, fee-aware 30-day report shown by the dashboard.
+        from datetime import datetime, timedelta, timezone
+        risk = db.get_risk()
+        fee_bps, slippage_bps = safe_cost_assumptions(risk)
+        base = db.portfolio_summary(
+            {},
+            fee_bps_per_side=fee_bps,
+            slippage_bps=slippage_bps,
+        )
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=30)).isoformat()
+        report = build_performance_report(
+            db.closed_trades_for_performance(),
+            float(base["initial_capital_usd"]),
+            30,
+            equity_snapshots=db.list_equity_snapshots(cutoff),
+        )
+        return assess_demo_readiness(
+            report,
+            auto_demo_enabled=bool(app.state.auto_paper_enabled),
+            open_positions=len(db.open_trades()),
+            production_executor_enabled=False,
+        )
 
     @app.post("/api/automation/kill-switch")
     async def kill_switch() -> dict[str, Any]:
