@@ -28,18 +28,18 @@ if parts < (8, 9) or parts[0] != 8:
 PY
 
 cd "$ROOT"
-gradle --no-daemon --stacktrace -p "$ROOT/android" clean assembleDebug
+gradle --no-daemon --stacktrace -p "$ROOT/android" clean testDebugUnitTest assembleDebug
 APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 [[ -s "$APK" ]] || fail "Gradle completed but APK output is missing."
 "$APKSIGNER" verify --verbose "$APK"
 # Verify package/version/minSdk/targetSdk with aapt dump badging.
 BADGING="$("$AAPT" dump badging "$APK")"
-printf '%s\n' "$BADGING" | grep -Fq "package: name='app.aitradingterminal.debug' versionCode='45' versionName='0.5.0-debug'" || fail "APK package/version metadata does not match v0.5.0 debug build."
+printf '%s\n' "$BADGING" | grep -Fq "package: name='app.aitradingterminal.debug' versionCode='46' versionName='0.6.0-debug'" || fail "APK package/version metadata does not match v0.6.0 debug build."
 printf '%s\n' "$BADGING" | grep -Fq "sdkVersion:'26'" || fail "APK minSdk is not 26."
 printf '%s\n' "$BADGING" | grep -Fq "targetSdkVersion:'35'" || fail "APK targetSdk is not 35."
 
 mkdir -p "$ROOT/dist"
-OUT="$ROOT/dist/AITradingTerminal-Android-v0.5.0-debug.apk"
+OUT="$ROOT/dist/AITradingTerminal-Android-v0.6.0-debug.apk"
 cp "$APK" "$OUT"
 (cd "$ROOT/dist" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
 python - "$OUT" "$ROOT/dist/AITradingTerminal-Android-v0.5.0-build-info.txt" "$GRADLE_VERSION" "$JAVA_VERSION" <<'PY'
@@ -48,7 +48,7 @@ apk = pathlib.Path(sys.argv[1])
 digest = hashlib.sha256(apk.read_bytes()).hexdigest()
 pathlib.Path(sys.argv[2]).write_text(
     "AI Trading Terminal Android debug build\n"
-    "Version: 0.5.0\n"
+    "Version: 0.6.0\n"
     f"Gradle: {sys.argv[3]}\nJava: {sys.argv[4]}\n"
     f"APK bytes: {apk.stat().st_size}\nSHA-256: {digest}\n"
     "Signing: Android debug key (testing only)\n"
