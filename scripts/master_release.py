@@ -71,7 +71,7 @@ def main() -> int:
         raise RuntimeError("Android Gradle versionName/versionCode missing")
     android_version = android_version_match.group(1)
     android_version_code = android_code_match.group(1)
-    apk_stem = f"AITradingTerminal-Android-{android_version}-debug"
+    apk_stem = f"AITradingTerminal-Android-v{android_version}-debug"
     android_build_script = (ROOT / "build-android-debug.sh").read_text(encoding="utf-8")
     local_paper_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/LocalPaperActivity.java").read_text(encoding="utf-8")
     paper_auto_limits = (ROOT / "android/app/src/main/java/app/aitradingterminal/PaperAutoLimits.java").read_text(encoding="utf-8")
