@@ -1,4 +1,4 @@
-name: AI Trading Terminal v0.5.0 — Cloud source verification and Android APK
+name: AI Trading Terminal v0.6.0 — Cloud source verification and Android APK
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: att-v050-cloud-apk-${{ github.ref }}
+  group: att-v060-cloud-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -76,11 +76,11 @@ jobs:
       - name: Upload installable debug APK and verification files
         uses: actions/upload-artifact@v7
         with:
-          name: AITradingTerminal-Android-v0.5.0-debug-apk
+          name: AITradingTerminal-Android-v0.6.0-debug-apk
           path: |
-            dist/AITradingTerminal-Android-v0.5.0-debug.apk
-            dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256
-            dist/AITradingTerminal-Android-v0.5.0-build-info.txt
+            dist/AITradingTerminal-Android-v0.6.0-debug.apk
+            dist/AITradingTerminal-Android-v0.6.0-debug.apk.sha256
+            dist/AITradingTerminal-Android-v0.6.0-build-info.txt
           if-no-files-found: error
           retention-days: 30
 
@@ -91,10 +91,10 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="v0.5.0-debug"
-          APK="dist/AITradingTerminal-Android-v0.5.0-debug.apk"
-          CHECKSUM="dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256"
-          BUILD_INFO="dist/AITradingTerminal-Android-v0.5.0-build-info.txt"
+          TAG="v0.6.0-debug"
+          APK="dist/AITradingTerminal-Android-v0.6.0-debug.apk"
+          CHECKSUM="dist/AITradingTerminal-Android-v0.6.0-debug.apk.sha256"
+          BUILD_INFO="dist/AITradingTerminal-Android-v0.6.0-build-info.txt"
           test -s "$APK"
           test -s "$CHECKSUM"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
@@ -103,6 +103,6 @@ jobs:
             gh release create "$TAG" "$APK" "$CHECKSUM" "$BUILD_INFO" \
               --repo "$GITHUB_REPOSITORY" \
               --target "$GITHUB_SHA" \
-              --title "AI Trading Terminal v0.5.0 Debug APK" \
+              --title "AI Trading Terminal v0.6.0 Debug APK" \
               --notes "Installable Android debug/test client. This is not a production-signed release. The app needs a separately deployed HTTPS backend URL to load the trading dashboard. Live-money trading is not enabled."
           fi
