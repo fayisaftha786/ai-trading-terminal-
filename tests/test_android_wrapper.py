@@ -53,6 +53,9 @@ def test_android_wrapper_does_not_embed_secrets_or_local_python_runtime():
 def test_ci_contains_native_debug_apk_build_and_artifact_upload():
     workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text()
     assert "AITradingTerminal-Android-v0.5.0-debug-apk" in workflow
+    assert 'test -s android/app/build.gradle.kts' in workflow
+    assert "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip" not in workflow
+    assert '"android/**"' in workflow
     assert "build-android-debug.sh" in workflow
     assert "upload-artifact@v7" in workflow
     assert "dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256" in workflow
