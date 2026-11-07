@@ -183,3 +183,27 @@ def test_market_data_marks_duplicate_candle_history_as_data_gap(monkeypatch):
     assert result["data_quality"]["contiguous_closed_candles"] is False
     assert result["analysis"]["signal"] == "HOLD"
     assert result["analysis"]["regime"] == "DATA_GAP"
+
+
+def test_market_momentum_reports_macd_roc_and_acceleration_states():
+    rising = make_candles([100 + 0.03 * i + 0.0005 * i * i for i in range(220)])
+    rising_result = analyze_candles(rising)
+    assert rising_result["momentum_state"] == "BULLISH_ACCELERATING"
+    assert rising_result["momentum_score"] > 50
+    assert rising_result["roc_5_pct"] > 0
+    assert rising_result["roc_10_pct"] > 0
+    assert rising_result["roc_20_pct"] > 0
+    assert rising_result["macd_histogram"] > 0
+    assert "MACD is above its signal line" in rising_result["momentum_reasons"]
+
+    falling = make_candles([200 - 0.03 * i - 0.0005 * i * i for i in range(220)])
+    falling_result = analyze_candles(falling)
+    assert falling_result["momentum_state"] == "BEARISH_ACCELERATING"
+    assert falling_result["momentum_score"] < 50
+    assert falling_result["roc_10_pct"] < 0
+    assert falling_result["macd_histogram"] < 0
+
+    flat = make_candles([100.0 for _ in range(220)])
+    flat_result = analyze_candles(flat)
+    assert flat_result["momentum_state"] == "MIXED_OR_NEUTRAL"
+    assert flat_result["momentum_score"] == 50

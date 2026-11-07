@@ -26,6 +26,7 @@ from app.services.risk import safe_cost_assumptions, validate_risk_profile
 from app.services.testnet import (BinanceSpotTestnet, TestnetOrderRejected,
                                    TestnetOrderUncertain, TestnetUnavailable)
 from app.services.strategy import analyze_candles, score_solana_token
+from app.services.workers import WorkerManager
 from app.settings import Settings, settings
 from app.storage import Storage
 from app.security import InvalidAccessToken, create_access_token, verify_access_token
@@ -52,6 +53,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     broker = PaperBroker(db)
     auto_paper = AutoPaperEngine(db, broker)
     testnet = BinanceSpotTestnet(cfg)
+    worker_manager = WorkerManager(concurrency=4, timeout_seconds=4.0, retries=1)
+    worker_analysis_lock = asyncio.Lock()
 
     async def _perform_scan_unlocked() -> dict[str, Any]:
         cex, sol = await asyncio.gather(market_data.cex_tickers(), market_data.solana_recent_tokens())
@@ -207,6 +210,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     app.state.market_data = market_data
     app.state.paper_broker = broker
     app.state.testnet = testnet
+    app.state.worker_manager = worker_manager
+    app.state.worker_analysis_lock = worker_analysis_lock
     app.state.settings = cfg
     # On restart, resume only read-only CEX exit monitoring when persisted CEX
     # paper positions remain open. New automatic entries always require a new opt-in.
@@ -619,6 +624,46 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         if result.get("status") != "live":
             raise HTTPException(status_code=502, detail=result.get("error") or "Market analysis unavailable")
         return result
+
+    @app.get("/api/workers")
+    async def list_workers() -> dict[str, Any]:
+        """Return the fixed, read-only specialist worker registry and capabilities."""
+        return worker_manager.registry()
+
+    @app.get("/api/workers/analyze/{symbol:path}")
+    async def analyze_with_workers(symbol: str, timeframe: str = "1h", limit: int = 300) -> dict[str, Any]:
+        """Run bounded specialist diagnostics for one CEX market; this endpoint never trades."""
+        supported_timeframes = {"1m", "5m", "15m", "30m", "1h", "2h", "4h", "1d"}
+        if timeframe not in supported_timeframes:
+            raise HTTPException(status_code=422, detail="Unsupported timeframe")
+        if not symbol.strip() or len(symbol) > 40:
+            raise HTTPException(status_code=422, detail="A valid exchange market symbol is required")
+        if limit < 60 or limit > 1000:
+            raise HTTPException(status_code=422, detail="Candle limit must be between 60 and 1000")
+
+        if worker_analysis_lock.locked():
+            raise HTTPException(status_code=429, detail="A specialist analysis is already running. Retry after it completes.")
+        async with worker_analysis_lock:
+            market = await market_data.cex_strategy_data(symbol.strip(), timeframe=timeframe, limit=limit)
+            if market.get("status") != "live":
+                raise HTTPException(status_code=502, detail=market.get("error") or "Market analysis unavailable")
+
+            risk = db.get_risk()
+            fee_bps, slippage_bps = safe_cost_assumptions(risk)
+            fresh_marks = app.state.latest_marks if time.time() - float(app.state.latest_marks_at) <= 120 else None
+            portfolio = db.portfolio_summary(
+                fresh_marks,
+                fee_bps_per_side=fee_bps,
+                slippage_bps=slippage_bps,
+            )
+            context = {
+                "market": market,
+                "risk": risk,
+                "portfolio": portfolio,
+                "open_positions": db.open_trades(),
+                "auto_paper_enabled": bool(app.state.auto_paper_enabled),
+            }
+            return await worker_manager.analyze(context)
 
     return app
 
