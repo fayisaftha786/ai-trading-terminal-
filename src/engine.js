@@ -186,7 +186,7 @@ export class TradingEngine extends DurableObject {
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
     const markBySymbol = new Map(markets
       .filter((market) => market.status === "live" && Number.isFinite(market.bid) && market.bid > 0 &&
-        Number.isFinite(Date.parse(market.ticker_time || "")) && Date.now() - Date.parse(market.ticker_time) <= MAX_QUOTE_AGE_MS)
+        Number.isFinite(Date.parse(market.ticker_time || "")) && Date.now() - Date.parse(market.ticker_time) >= -5000 && Date.now() - Date.parse(market.ticker_time) <= MAX_QUOTE_AGE_MS)
       .map((market) => [market.symbol, market.bid]));
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
