@@ -72,6 +72,9 @@ def main() -> int:
     safety_checks = {
         "release_version_is_consistent": 'version="0.5.0-cloud"' in main_source and "CLOUD EDITION" in (ROOT / "static/index.html").read_text() and "VERSION = \"0.5.0\"" in (ROOT / "scripts/master_release.py").read_text(),
         "live_endpoint_explicitly_locked": "HTTPException(status_code=423" in main_source,
+        "twelve_worker_read_only_manager_present": "WorkerManager(concurrency=4" in main_source and "execution_authorized" in (ROOT / "app/services/workers.py").read_text() and '"live_trading_enabled": False' in (ROOT / "app/services/workers.py").read_text(),
+        "worker_dashboard_and_tests_present": 'id="workers"' in (ROOT / "static/index.html").read_text() and (ROOT / "tests/test_workers.py").is_file() and (ROOT / "docs/MULTI_AGENT_WORKERS.md").is_file(),
+        "worker_sentiment_not_fabricated": '"status": "unavailable"' in (ROOT / "app/services/workers.py").read_text() and "No licensed news feed" in (ROOT / "app/services/workers.py").read_text(),
         "paper_auto_entry_defaults_off_and_persists_opt_in": 'app.state.auto_paper_enabled = bool(db.get_setting("auto_paper_enabled", False))' in main_source and 'db.set_setting("auto_paper_enabled", False)' in main_source,
         "kill_switch_route_present": '@app.post("/api/automation/kill-switch")' in main_source,
         "sqlite_unique_open_market_guard_present": "idx_trades_one_open_per_market" in storage_source,
@@ -182,7 +185,7 @@ def main() -> int:
             "Cloud deployment requires a paid always-on service with persistent storage; the Render Blueprint is the lowest configured production-style option and is not free.",
             "Cloud authentication is a single-user password login with short-lived HMAC bearer tokens and process-local login throttling; it is not yet multi-user or an enterprise identity system.",
             "A persistent Render disk enforces one service instance; the app must run one Uvicorn worker because its scheduler and SQLite ledger are designed for a single process.",
-            "Automatic paper mode still resets OFF after restart. No real-money order execution or Solana swap signing is enabled.",
+            "Paper auto-entry opt-in persists across ordinary restarts; the emergency kill switch and drawdown breaker keep new entries OFF. No real-money order execution or Solana swap signing is enabled.",
             "Native Android WebView wrapper Gradle source and a GitHub Actions debug-APK build job are included; this workspace has no Android SDK/build-tools, so no APK was built or installed on a physical device here.",
         ],
     }
