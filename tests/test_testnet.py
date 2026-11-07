@@ -699,6 +699,32 @@ def test_testnet_auto_idempotency_uses_closed_candle_not_live_ticker_timestamp(m
     assert second["reason"] == "duplicate_signal_already_recorded"
     assert sum(1 for call in exchange.calls if call[0] == "orderList/opoco" and call[2] == "POST") == 1
 
+def test_testnet_auto_executor_enforces_symbol_allowlist_before_exchange_call(monkeypatch):
+    from app.services.risk import validate_risk_profile
+
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    signal = _make_auto_signal()
+    signal["ticker"]["symbol"] = "DOGE/USDT"
+    risk = validate_risk_profile(db.get_risk())
+    result = trader._submit_protected_entry(signal, risk, 10.0)
+    assert result == {"accepted": False, "reason": "testnet_symbol_not_allowlisted"}
+    assert not any(call[0] == "orderList/opoco" and call[2] == "POST" for call in exchange.calls)
+    assert db.count_open_testnet_auto_orders() == 0
+
+
+def test_testnet_auto_executor_rejects_missing_closed_candle_even_when_ticker_timestamp_exists(monkeypatch):
+    from app.services.risk import validate_risk_profile
+
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    signal = _make_auto_signal()
+    signal["last_closed_candle_timestamp_ms"] = None
+    risk = validate_risk_profile(db.get_risk())
+    result = trader._submit_protected_entry(signal, risk, 10.0)
+    assert result == {"accepted": False, "reason": "closed_candle_timestamp_missing"}
+    assert not any(call[0] == "orderList/opoco" and call[2] == "POST" for call in exchange.calls)
+    assert db.count_open_testnet_auto_orders() == 0
+
+
 
 def test_testnet_auto_uses_opoco_net_received_quantity_and_fok_entry(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch)
