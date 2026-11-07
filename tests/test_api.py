@@ -475,6 +475,7 @@ def test_binance_production_connection_check_fails_closed_by_default(client):
 def test_testnet_enable_cannot_race_global_kill_switch_and_reset_stays_off(tmp_path):
     import asyncio
     import threading
+    import pytest
     from dataclasses import replace
 
     from fastapi import HTTPException
