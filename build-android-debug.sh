@@ -42,7 +42,7 @@ mkdir -p "$ROOT/dist"
 OUT="$ROOT/dist/AITradingTerminal-Android-v0.6.0-debug.apk"
 cp "$APK" "$OUT"
 (cd "$ROOT/dist" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
-python - "$OUT" "$ROOT/dist/AITradingTerminal-Android-v0.5.0-build-info.txt" "$GRADLE_VERSION" "$JAVA_VERSION" <<'PY'
+python - "$OUT" "$ROOT/dist/AITradingTerminal-Android-v0.6.0-build-info.txt" "$GRADLE_VERSION" "$JAVA_VERSION" <<'PY'
 import hashlib, pathlib, sys
 apk = pathlib.Path(sys.argv[1])
 digest = hashlib.sha256(apk.read_bytes()).hexdigest()
