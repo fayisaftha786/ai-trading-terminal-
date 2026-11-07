@@ -42,7 +42,6 @@ public final class LocalPaperActivity extends Activity {
     private static final long MAX_CANDLE_AGE_MS=2L*HOUR_MS;
     private static final long FOUR_HOURS_MS=4L*HOUR_MS;
     private static final long AUTO_REFRESH_MS=5L*60L*1000L;
-    private static final int MAX_AUTO_ENTRIES_PER_UTC_DAY=3;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private final Handler mainHandler=new Handler(Looper.getMainLooper());
     private final Runnable autoRefreshTask=new Runnable(){
@@ -449,22 +448,25 @@ public final class LocalPaperActivity extends Activity {
             if(!finitePositive(referencePrice)||signalCandleOpenTime<=0)return "invalid_entry_price_or_signal_time";
             SQLiteDatabase d=getWritableDatabase();d.beginTransaction();
             try {
-                if(!"1".equals(flagValueInternal(d,"auto_demo")))return "auto_demo_disabled";
-                if("1".equals(flagValueInternal(d,"halted")))return "emergency_stop_active";
-                if(openCountInternal(d)>0)return "position_already_open";
-
                 long now=System.currentTimeMillis();
                 long dayStartUtc=utcDayStart(now);
+                int entriesToday=0;
                 try(Cursor count=d.rawQuery("SELECT COUNT(*) FROM paper WHERE opened_at>=?",new String[]{String.valueOf(dayStartUtc)})) {
-                    if(count.moveToFirst()&&count.getInt(0)>=MAX_AUTO_ENTRIES_PER_UTC_DAY)return "daily_entry_limit";
+                    if(count.moveToFirst())entriesToday=count.getInt(0);
                 }
                 long lastTradeAt=(long)scalar(d,"SELECT COALESCE(MAX(CASE WHEN closed_at IS NULL THEN opened_at ELSE closed_at END),0) FROM paper");
-                if(lastTradeAt>0&&now-lastTradeAt<FOUR_HOURS_MS)return "four_hour_cooldown";
                 String previousSignal=flagValueInternal(d,"auto_last_signal_candle");
+                long previousSignalTime=0;
                 if(!previousSignal.isEmpty()) {
-                    try {if(signalCandleOpenTime<=Long.parseLong(previousSignal))return "signal_candle_already_processed";}
+                    try {previousSignalTime=Long.parseLong(previousSignal);}
                     catch(NumberFormatException ignored) {return "invalid_auto_signal_state";}
                 }
+                String gate=PaperAutoLimits.rejectionReason(
+                        "1".equals(flagValueInternal(d,"auto_demo")),
+                        "1".equals(flagValueInternal(d,"halted")),
+                        openCountInternal(d),entriesToday,lastTradeAt,now,
+                        previousSignalTime,signalCandleOpenTime);
+                if(!"eligible".equals(gate))return gate;
 
                 double entry=PaperMath.entryFill(referencePrice);
                 double quantity=PaperMath.POSITION_NOTIONAL_USD/entry;
