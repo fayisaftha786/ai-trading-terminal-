@@ -702,6 +702,45 @@ def test_testnet_auto_marks_bracket_completed_only_after_filled_exit_and_all_don
 
 
 
+
+def test_testnet_auto_schema_migrates_existing_table_and_exact_fee_ledger(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    # Fake exchange reports quote-denominated commissions for both sides.
+    exchange.orders["501"].update({
+        "status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99,
+        "fee": {"currency": "USDT", "cost": 0.01},
+    })
+    exchange.orders["502"].update({
+        "status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197,
+        "fee": {"currency": "USDT", "cost": 0.0102},
+    })
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["completed"] == 1
+    assert row["accounting_status"] == "EXACT"
+    assert row["entry_filled_qty"] == 0.0999
+    assert row["entry_cost_quote"] == 9.99
+    assert row["entry_fee_quote"] == 0.01
+    assert row["exit_filled_qty"] == 0.099
+    assert row["exit_proceeds_quote"] == 10.197
+    assert row["exit_fee_quote"] == 0.0102
+    assert round(row["realized_pnl_quote"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
+
+
+def test_testnet_auto_does_not_invent_pnl_when_fee_data_missing(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99})
+    exchange.orders["502"].update({"status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197})
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert row["status"] == "CLOSED"
+    assert row["accounting_status"] == "FEES_UNRESOLVED"
+    assert row["realized_pnl_quote"] is None
+
 def test_testnet_auto_emergency_stop_handles_all_done_filled_exit(monkeypatch):
     db, exchange, trader = _make_auto_trader(
         monkeypatch, working_status="closed", list_status="ALL_DONE"
