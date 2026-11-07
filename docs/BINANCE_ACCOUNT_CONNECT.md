@@ -25,7 +25,7 @@ The check reads the Spot account balance and returns non-zero asset names and US
 
 ## Isolated Binance Spot Testnet automatic strategy mode
 
-Strategy-driven Binance Spot Testnet automation is implemented on feature branch `feat/testnet-auto-oto-co-execution` in draft PR #15. Current backend and ARM64 CI have passed, but this remains unmerged and has not yet been authenticated against a real Spot Testnet account. It is disabled by default and must never be confused with the production read-only connector above.
+Strategy-driven Binance Spot Testnet automation is implemented on feature branch `feat/testnet-auto-oto-co-execution` in draft PR #15. Current backend and ARM64 CI have passed, but this remains unmerged and has not yet been authenticated against a real Spot Testnet account. It is disabled by default, requires a fresh dashboard opt-in after every backend restart, and must never be confused with the production read-only connector above.
 
 For an isolated Testnet run, configure only **Binance Spot Testnet** credentials in the private backend environment:
 
