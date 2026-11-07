@@ -65,7 +65,9 @@ async def collect_scan() -> dict[str, Any]:
         else:
             analysis = analysis_result
         detail = analysis.get("analysis", {}) if isinstance(analysis, dict) else {}
-        higher = (analysis.get("higher_timeframe") or {}).get("analysis", {}) if isinstance(analysis, dict) else {}
+        higher_payload = analysis.get("higher_timeframe") or {} if isinstance(analysis, dict) else {}
+        higher = higher_payload.get("analysis", {}) if isinstance(higher_payload, dict) else {}
+        confirmation_timeframe = higher_payload.get("timeframe", "unknown") if isinstance(higher_payload, dict) else "unknown"
         quality = analysis.get("data_quality", {}) if isinstance(analysis, dict) else {}
         safe_signal = detail.get("signal", "HOLD")
         if not fresh or analysis.get("status") != "live" or not quality.get("contiguous_closed_candles", False):
@@ -87,7 +89,8 @@ async def collect_scan() -> dict[str, Any]:
             "signal": safe_signal,
             "score": detail.get("score", 0),
             "regime_1h": detail.get("regime", "UNKNOWN"),
-            "regime_4h": higher.get("regime", "UNKNOWN"),
+            "confirmation_timeframe": confirmation_timeframe,
+            "regime_confirmation": higher.get("regime", "UNKNOWN"),
             "timeframe_confluence": analysis.get("timeframe_confluence", "UNKNOWN") if isinstance(analysis, dict) else "UNKNOWN",
             "data_quality": quality,
             "analysis_status": analysis.get("status", "error") if isinstance(analysis, dict) else "error",
@@ -122,14 +125,14 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Mode: `{report['mode']}`",
         f"- Fresh symbols with strategy data: {report['live_symbol_count']}/{len(report['results'])}",
         "",
-        "| Symbol | Fresh | Last | 1h signal | Score | 1h regime | 4h regime | Spread (bps) |",
+        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Spread (bps) |",
         "|---|---:|---:|---|---:|---|---|---:|",
     ]
     for row in report["results"]:
         lines.append(
             f"| {row['symbol']} | {'yes' if row['ticker_fresh'] else 'no'} | "
             f"{row['last'] if row['last'] is not None else '—'} | {row['signal']} | "
-            f"{row['score']} | {row['regime_1h']} | {row['regime_4h']} | "
+            f"{row['score']} | {row['regime_1h']} | {row['confirmation_timeframe']} {row['regime_confirmation']} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
         if row.get("error") or row.get("reason"):
