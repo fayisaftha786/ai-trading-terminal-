@@ -34,17 +34,17 @@
 
 **Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
 
-## Market scan — 2026-11-07 16:41 UTC
+## Latest market scan — 2026-11-07 16:58 UTC
 
-The GitHub scheduled read-only scanner used public Binance market data:
+The GitHub scheduled read-only scanner used public Binance market data on main commit `813376a96eab70214d3cfb596a15904202e2b8bb`:
 
-| Symbol | Data | Signal | 1h regime | 6h regime |
-|---|---|---|---|---|
-| BTC/USDT | Live | HOLD | DOWNTREND | DOWNTREND |
-| ETH/USDT | Live | HOLD | DOWNTREND | DOWNTREND |
-| SOL/USDT | Live | HOLD | RANGE_OR_TRANSITION | DOWNTREND |
+| Symbol | Data | Last | Signal | Score | 1h regime | 6h regime | Spread |
+|---|---|---:|---|---:|---|---|---:|
+| BTC/USDT | Live | $75,646.99 | HOLD | 22 | DOWNTREND | DOWNTREND | 0.0013 bps |
+| ETH/USDT | Live | $2,230.92 | HOLD | 22 | DOWNTREND | DOWNTREND | 0.0448 bps |
+| SOL/USDT | Live | $89.41 | HOLD | 22 | RANGE_OR_TRANSITION | DOWNTREND | 1.1184 bps |
 
-All three markets had 349 valid candles in both analyzed timeframes, with no reported missing intervals, duplicate timestamps, malformed rows or off-grid timestamps. All signals were HOLD. This scanner is read-only: it sent no orders and created no paper positions.
+All three symbols were fresh. Each symbol had 349 valid closed candles in both 1h and 6h history, with zero gaps, duplicate timestamps, malformed rows or off-grid timestamps. All three signals were HOLD; no signal qualified for an entry. This scheduled scan is read-only: it sent no orders and created no paper positions. The GitHub schedule is best-effort, not a continuous 24/7 trading service.
 
 ## Cloud backend status
 
