@@ -149,6 +149,13 @@
           <div class="panel-head"><div class="engine-icon purple">AI</div><div class="engine-title"><h3>Strategy-driven Testnet auto trading</h3><p>Qualified signals only · virtual funds · separate from paper mode</p></div><span id="testnetAutoBadge" class="tag neutral">OFF</span></div>
           <p id="testnetAutoMessage" class="muted small">Default OFF. Requires Testnet credentials and the explicit Testnet order gate. Each automatic entry uses Binance OPOCO: FOK limit BUY plus exchange-native TP/SL sized from net received quantity.</p>
           <div class="testnet-actions"><button id="testnetAutoToggleBtn" class="btn secondary" type="button" disabled>Enable Testnet auto</button><span class="muted small" id="testnetAutoCount">0 active order lists</span></div>
+          <div class="testnet-status-grid">
+            <div><span>Exact realized P&amp;L</span><b id="testnetAutoPnl">—</b></div>
+            <div><span>Exact closed trades</span><b id="testnetAutoExactTrades">—</b></div>
+            <div><span>Fee unresolved</span><b id="testnetAutoUnresolved">—</b></div>
+            <div><span>Daily loss guard (UTC)</span><b id="testnetAutoDailyRisk">—</b></div>
+          </div>
+          <p id="testnetAutoPerformanceNote" class="muted small">Only fully closed Testnet auto-trades with verified quote-denominated fees are included in realized P&amp;L. This is not account-wide equity P&amp;L.</p>
           <div class="table-wrap"><table><thead><tr><th>Market</th><th>State</th><th>Entry limit</th><th>Stop</th><th>Target</th><th>USDT</th><th>Order list</th></tr></thead><tbody id="testnetAutoOrderRows"><tr><td colspan="7" class="empty">No automatic Testnet order lists.</td></tr></tbody></table></div>
         </div>
         <form id="testnetOrderForm" class="testnet-order-form">
