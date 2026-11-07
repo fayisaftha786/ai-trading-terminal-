@@ -45,6 +45,12 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 
 These are initial conservative assumptions for a simulation; review them after measured paper data. The 15 bps fee assumption is not a statement of your actual Coinbase fee tier.
 
+## Temporary preview deployment (optional)
+
+Cloudflare supports an agent-run temporary preview using Wrangler 4.102.0 or later and `wrangler deploy --temporary`. This can deploy a Worker and supported Durable Object migrations before the owner has a permanent Cloudflare account. The preview remains available for 60 minutes. The owner must accept Cloudflare's Terms of Service and Privacy Policy, then complete the claim flow within that 60-minute window; otherwise Cloudflare deletes the temporary account and its resources. The claim URL is a bearer credential and must only be delivered to the intended owner. This is a short verification/claim bridge, not a permanent production account or ongoing CI/CD setup.
+
+Official guide: https://developers.cloudflare.com/workers/platform/claim-deployments/
+
 ## Setup through Cloudflare Dashboard (no Termux or local Node install)
 
 This is the recommended route for a phone-only setup. Cloudflare Workers Builds can connect a GitHub repository and deploy on pushes. Cloudflare can generate its own deployment token for that integration; do not create or share a token in chat.
