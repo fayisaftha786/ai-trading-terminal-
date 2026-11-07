@@ -68,6 +68,11 @@ def _depth_quote(levels: Any) -> float | None:
 class CoinbasePublicAdapter:
     """Read-only Coinbase Exchange adapter with shared public-request pacing."""
 
+    # Share the limiter across adapter instances so parallel symbol research cannot
+    # multiply the public endpoint rate. The FastAPI backend uses one event loop.
+    _shared_request_lock = asyncio.Lock()
+    _shared_last_request_at = 0.0
+
     def __init__(
         self,
         *,
@@ -84,9 +89,6 @@ class CoinbasePublicAdapter:
         )
         self._owns_client = client is None
         self._min_gap = max(0.0, float(min_request_gap_seconds))
-        self._request_lock = asyncio.Lock()
-        self._last_request_at = 0.0
-
     async def __aenter__(self) -> "CoinbasePublicAdapter":
         return self
 
@@ -97,12 +99,12 @@ class CoinbasePublicAdapter:
     async def _get_json(self, path: str) -> Any:
         # Coinbase's published public REST limit is 3 requests/second. Keep one
         # serialized request stream shared across all concurrent symbol lookups.
-        async with self._request_lock:
-            wait = self._min_gap - (time.monotonic() - self._last_request_at)
+        async with self._shared_request_lock:
+            wait = self._min_gap - (time.monotonic() - type(self)._shared_last_request_at)
             if wait > 0:
                 await asyncio.sleep(wait)
             response = await self._client.get(path)
-            self._last_request_at = time.monotonic()
+            type(self)._shared_last_request_at = time.monotonic()
         response.raise_for_status()
         payload = response.json()
         if not isinstance(payload, (dict, list)):
