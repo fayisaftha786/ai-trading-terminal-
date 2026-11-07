@@ -104,10 +104,14 @@ class AutoPaperEngine:
         if primary_stamp is None or confirm_stamp is None:
             return False, "closed_candle_timestamp_missing", spread_bps
         primary_age = now_ms - (primary_stamp + 3_600_000)
-        confirm_age = now_ms - (confirm_stamp + 4 * 3_600_000)
+        confirm_interval_ms = self._finite_number(item.get("higher_timeframe_interval_ms"))
+        if confirm_interval_ms is None or confirm_interval_ms <= 0:
+            confirm_interval_ms = 4 * 3_600_000
+        confirm_max_age_ms = max(self.MAX_CONFIRM_CANDLE_AGE_MS, confirm_interval_ms + 3_600_000)
+        confirm_age = now_ms - (confirm_stamp + confirm_interval_ms)
         if primary_age < -1_000 or primary_age > self.MAX_PRIMARY_CANDLE_AGE_MS:
             return False, "primary_closed_candle_stale", spread_bps
-        if confirm_age < -1_000 or confirm_age > self.MAX_CONFIRM_CANDLE_AGE_MS:
+        if confirm_age < -1_000 or confirm_age > confirm_max_age_ms:
             return False, "higher_timeframe_closed_candle_stale", spread_bps
         score = self._finite_number(primary.get("score"))
         if primary.get("signal") != "BUY_CANDIDATE" or score is None or score < 75 or score > 100:
