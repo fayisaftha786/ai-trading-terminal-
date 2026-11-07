@@ -1,6 +1,6 @@
 'use strict';
 
-const CACHE_NAME = 'ai-trading-terminal-shell-v0.5.0-cloud';
+const CACHE_NAME = 'ai-trading-terminal-shell-v0.5.0-cloud-workers-1';
 const APP_SHELL = [
   '/',
   '/manifest.webmanifest',
