@@ -9,7 +9,6 @@ on:
       - "public/**"
       - "wrangler.jsonc"
       - "package.json"
-      - ".github/workflows/cloudflare-paper-validation.yml"
   push:
     branches: [main]
     paths:
