@@ -58,6 +58,8 @@ public final class LocalPaperActivity extends Activity {
     private Button openButton, closeButton, stopButton, autoButton;
     private volatile List<Candle> candles=new ArrayList<>();
     private volatile double lastPrice=0;
+    private volatile double lastBid=0,lastAsk=0;
+    private volatile long lastTickerTimestamp=0,lastBookRetrievedAt=0;
     private volatile boolean marketLive=false;
     private volatile boolean stopped=false;
 
@@ -137,8 +139,17 @@ public final class LocalPaperActivity extends Activity {
         super.onPause();
     }
 
+    private boolean hasFreshExecutionQuote() {
+        return PaperAutoLimits.isFreshExecutionQuote(lastBid,lastAsk,lastTickerTimestamp,
+                lastBookRetrievedAt,System.currentTimeMillis());
+    }
+
     private void refreshMarket() {
         marketLive=false;
+        lastBid=0;
+        lastAsk=0;
+        lastTickerTimestamp=0;
+        lastBookRetrievedAt=0;
         status.setText("Fetching fresh closed 1h/4h candles, ticker, spread and top-10 order-book depth…");
         updateControls();
         io.execute(()->{
@@ -148,6 +159,10 @@ public final class LocalPaperActivity extends Activity {
                 Candle latest=loaded.get(loaded.size()-1);
                 candles=loaded;
                 lastPrice=snapshot.quote.last;
+                lastBid=snapshot.quote.bid;
+                lastAsk=snapshot.quote.ask;
+                lastTickerTimestamp=snapshot.quote.tickerTimestamp;
+                lastBookRetrievedAt=snapshot.quote.bookTimestamp;
                 db.cache(loaded);
                 String automaticExit=db.evaluateExits(loaded);
                 PaperSignal.Analysis primary=PaperSignal.analyze(toBars(loaded,HOUR_MS),24);
@@ -325,19 +340,19 @@ public final class LocalPaperActivity extends Activity {
 
     private void openPaper() {
         if(stopped){toast("Emergency stop is active");return;}
-        if(!marketLive||lastPrice<=0){toast("A fresh live market refresh is required before opening");return;}
+        if(!marketLive||!hasFreshExecutionQuote()||lastAsk<=0){toast("A fresh live bid/ask quote is required before opening");return;}
         if(db.openCount()>0){toast("Only one BTC paper position is allowed");return;}
-        try {db.open(lastPrice); updateWallet(); updateControls(); scheduleRefreshIfNeeded(); toast("Paper position opened — fees and slippage reserved; no real order sent");}
+        try {db.open(lastAsk); updateWallet(); updateControls(); scheduleRefreshIfNeeded(); toast("Paper position opened at modeled ask — fees and slippage reserved; no real order sent");}
         catch(Exception ex){toast("Paper entry rejected: "+ex.getMessage());}
     }
 
     private void closePaper() {
-        if(lastPrice<=0){toast("Refresh market data first");return;}
         if(db.openCount()==0){toast("No open paper position");return;}
+        if(!marketLive||!hasFreshExecutionQuote()||lastBid<=0){toast("A fresh live bid quote is required; cached prices cannot close a position");return;}
         try {
-            db.closeOpen(lastPrice,"MANUAL");
+            db.closeOpen(lastBid,"MANUAL");
             updateWallet(); updateControls(); scheduleRefreshIfNeeded();
-            toast(marketLive?"Paper position closed with modeled costs":"Paper position locally closed at a cached estimate");
+            toast("Paper position closed at modeled bid with fees and slippage; no real order sent");
         } catch(Exception ex){toast("Paper exit failed: "+ex.getMessage());}
     }
 
@@ -352,8 +367,9 @@ public final class LocalPaperActivity extends Activity {
 
     private void updateControls() {
         if(openButton==null)return;
-        openButton.setEnabled(marketLive&&!stopped&&lastPrice>0&&db.openCount()==0&&db.availableCash()>=PaperMath.POSITION_NOTIONAL_USD*(1+PaperMath.FEE_RATE));
-        closeButton.setEnabled(lastPrice>0&&db.openCount()>0);
+        boolean freshQuote=hasFreshExecutionQuote();
+        openButton.setEnabled(marketLive&&freshQuote&&!stopped&&lastAsk>0&&db.openCount()==0&&db.availableCash()>=PaperMath.POSITION_NOTIONAL_USD*(1+PaperMath.FEE_RATE));
+        closeButton.setEnabled(marketLive&&freshQuote&&lastBid>0&&db.openCount()>0);
         updateAutoButton();
     }
     private TextView label(String s,int size,boolean bold,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);t.setPadding(0,dp(8),0,dp(8));return t;}
