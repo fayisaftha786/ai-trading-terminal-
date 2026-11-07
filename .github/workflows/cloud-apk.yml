@@ -27,7 +27,7 @@ jobs:
           set -euo pipefail
           FILE="AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip"
           test -s "$FILE" || { echo "Upload the v0.5.0 source ZIP to the repository root first."; exit 2; }
-          echo "fa884a10abeaac4203949168b76e3adf1e5cd9e79483809a0e860022d4786f3b  $FILE" | sha256sum -c -
+          echo "4a4d1fa4e95023d1e0a416ff40e81feb4466d221844359f895d19a69d841b9bb  $FILE" | sha256sum -c -
 
       - name: Extract project
         shell: bash
