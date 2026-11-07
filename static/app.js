@@ -161,6 +161,11 @@ async function analyzeCex(i) {
         <span>Higher TF <b>${esc(higher.analysis?.regime || '—')}</b></span>
         <span>Confluence <b>${esc(result.timeframe_confluence || '—')}</b></span>
         <span>Candle integrity <b>${dataQualityOk ? 'CLEAN / CONTIGUOUS' : 'BLOCKED'}</b></span>
+        <span>Momentum <b>${esc(analysis.momentum_state || '—')}</b></span>
+        <span>Momentum score <b>${analysis.momentum_score ?? '—'}/100</b></span>
+        <span>ROC 5 / 10 / 20 <b>${analysis.roc_5_pct ?? '—'}% / ${analysis.roc_10_pct ?? '—'}% / ${analysis.roc_20_pct ?? '—'}%</b></span>
+        <span>MACD / Signal <b>${analysis.macd_line ?? '—'} / ${analysis.macd_signal ?? '—'}</b></span>
+        <span>MACD histogram <b>${analysis.macd_histogram ?? '—'} (${analysis.macd_histogram_slope ?? '—'} Δ)</b></span>
         <span>Wilder RSI14 <b>${analysis.rsi14 ?? '—'}</b></span>
         <span>ATR % <b>${analysis.atr_pct ?? '—'}</b></span>
         <span>ADX14 <b>${analysis.adx14 ?? '—'}</b></span>
@@ -172,6 +177,7 @@ async function analyzeCex(i) {
         ${emaBaseline ? `<span>EMA-only baseline <b class="${emaBaseline.net_return_pct >= 0 ? 'pnl-positive' : 'pnl-negative'}">${emaBaseline.net_return_pct}%</b></span><span>EMA baseline DD <b class="pnl-negative">${emaBaseline.max_drawdown_pct}%</b></span>` : ''}
       </div>
       <div class="analysis-reason">${esc(integrityDetails)}</div>
+      <div class="analysis-reason"><b>Momentum read:</b> ${(analysis.momentum_reasons || []).map(esc).join(' · ') || 'Not enough momentum data'}.</div>
       <div class="analysis-reason">${(analysis.reasons || []).map(esc).join(' · ') || esc(analysis.reason || 'No strong setup')}</div>
       <div class="analysis-reason">${esc(walkForwardText)}</div>
       <div class="analysis-reason">Research limits: the strategy walk-forward uses the same primary signal and closed 4h trend confirmation and the saved server risk profile. Historical candles cannot replay historical spread, top-book depth, live freshness, queue position or real fills. The EMA-only baseline is separate, uses fixed 10 bps fee and 10 bps slippage per side, and is not the live automatic-paper entry rules. Cost stress is an assumption, not a forecast; historical results do not guarantee future performance.</div>`;
