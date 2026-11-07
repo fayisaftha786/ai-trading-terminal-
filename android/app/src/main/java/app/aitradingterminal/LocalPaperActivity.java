@@ -46,7 +46,7 @@ public final class LocalPaperActivity extends Activity {
     private final Handler mainHandler=new Handler(Looper.getMainLooper());
     private final Runnable autoRefreshTask=new Runnable(){
         @Override public void run(){
-            if(db!=null&&!isFinishing()&&db.isAutoEnabled()){
+            if(db!=null&&!isFinishing()&&(db.isAutoEnabled()||db.openCount()>0)){
                 refreshMarket();
                 mainHandler.postDelayed(this,AUTO_REFRESH_MS);
             }
@@ -94,7 +94,7 @@ public final class LocalPaperActivity extends Activity {
         body.addView(label("PAPER ASSUMPTIONS",12,true,ACCENT));
         body.addView(card(label("$1,000 virtual capital · $100 fixed position · 0.10% fee + 0.05% slippage per side · 2% SL / 4% TP. AUTO DEMO is opt-in, paper-only and refreshes every 5 minutes while this screen stays in the foreground.",12,false,MUTED)));
         history=label("No paper trades yet.",12,false,TEXT); body.addView(card(history));
-        analysis=label("12-worker diagnostics will appear here.\nNews sentiment is unavailable without a connected provider.",13,false,TEXT);
+        analysis=label("Market diagnostics and AUTO DEMO gate will appear here.\nNews sentiment is unavailable without a connected provider.",13,false,TEXT);
         body.addView(card(analysis));
         Button back=button("BACK TO CONNECTION SCREEN"); body.addView(back); back.setOnClickListener(v->finish());
         setContentView(scroll);
@@ -108,14 +108,12 @@ public final class LocalPaperActivity extends Activity {
         db.setAutoEnabled(enabled);
         updateAutoButton();
         if(enabled) {
-            status.setText("AUTO DEMO enabled — entries require fresh 1h/4h agreement, spread, depth, liquidity and risk checks. Foreground only.");
+            status.setText("AUTO DEMO enabled — strict 1h/4h and execution-quality gates apply. Foreground only.");
             refreshMarket();
-            mainHandler.removeCallbacks(autoRefreshTask);
-            mainHandler.postDelayed(autoRefreshTask,AUTO_REFRESH_MS);
         } else {
-            mainHandler.removeCallbacks(autoRefreshTask);
-            status.setText("AUTO DEMO disabled — existing paper exits continue on successful market refreshes.");
+            status.setText("AUTO DEMO disabled — any open paper position continues to be checked while this screen stays in the foreground.");
         }
+        scheduleRefreshIfNeeded();
         updateControls();
     }
 
@@ -125,10 +123,13 @@ public final class LocalPaperActivity extends Activity {
 
     @Override protected void onResume() {
         super.onResume();
-        if(db!=null&&db.isAutoEnabled()) {
-            mainHandler.removeCallbacks(autoRefreshTask);
+        scheduleRefreshIfNeeded();
+    }
+
+    private void scheduleRefreshIfNeeded() {
+        mainHandler.removeCallbacks(autoRefreshTask);
+        if(db!=null&&(db.isAutoEnabled()||db.openCount()>0))
             mainHandler.postDelayed(autoRefreshTask,AUTO_REFRESH_MS);
-        }
     }
 
     @Override protected void onPause() {
@@ -159,6 +160,8 @@ public final class LocalPaperActivity extends Activity {
                     else automaticEntry="BLOCKED · "+decision.reason;
                 }
                 List<String> results=analyze(loaded,primary,higher,decision,snapshot.quote);
+                if(db.isAutoEnabled()) results.add(worker("AUTO DEMO ENTRY GATE",
+                        "OPENED".equals(automaticEntry)?"A virtual position was opened":automaticEntry==null?"Awaiting signal":automaticEntry));
                 marketLive=true;
                 final String exitResult=automaticExit;
                 final String entryResult=automaticEntry;
@@ -324,7 +327,7 @@ public final class LocalPaperActivity extends Activity {
         if(stopped){toast("Emergency stop is active");return;}
         if(!marketLive||lastPrice<=0){toast("A fresh live market refresh is required before opening");return;}
         if(db.openCount()>0){toast("Only one BTC paper position is allowed");return;}
-        try {db.open(lastPrice); updateWallet(); updateControls(); toast("Paper position opened — fees and slippage reserved; no real order sent");}
+        try {db.open(lastPrice); updateWallet(); updateControls(); scheduleRefreshIfNeeded(); toast("Paper position opened — fees and slippage reserved; no real order sent");}
         catch(Exception ex){toast("Paper entry rejected: "+ex.getMessage());}
     }
 
@@ -333,7 +336,7 @@ public final class LocalPaperActivity extends Activity {
         if(db.openCount()==0){toast("No open paper position");return;}
         try {
             db.closeOpen(lastPrice,"MANUAL");
-            updateWallet(); updateControls();
+            updateWallet(); updateControls(); scheduleRefreshIfNeeded();
             toast(marketLive?"Paper position closed with modeled costs":"Paper position locally closed at a cached estimate");
         } catch(Exception ex){toast("Paper exit failed: "+ex.getMessage());}
     }
