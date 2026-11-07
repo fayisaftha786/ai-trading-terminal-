@@ -142,7 +142,7 @@ public final class LocalPaperActivity extends Activity {
     }
     private void updateWallet(){if(wallet!=null)wallet.setText("PAPER LEDGER\nOpen positions: "+db.openCount()+" · Initial virtual capital: $1,000\nRealized P&L: "+String.format(Locale.US,"$%.2f",db.realized()));}
     private TextView label(String s,int size,boolean bold,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);t.setPadding(0,dp(8),0,dp(8));return t;}
-    private android.view.View card(TextView t){LinearLayout box=new LinearLayout(this);box.setPadding(dp(14),dp(10),dp(14),dp(10));box.setBackgroundColor(CARD);box.addView(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(10);body.addView(box,p);return new TextView(this);}
+    private android.view.View card(TextView t){LinearLayout box=new LinearLayout(this);box.setPadding(dp(14),dp(10),dp(14),dp(10));box.setBackgroundColor(CARD);box.addView(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(10);return box;}
     private Button button(String s){Button b=new Button(this);b.setText(s);b.setTextColor(Color.WHITE);b.setAllCaps(false);b.setBackgroundTintList(android.content.res.ColorStateList.valueOf(ACCENT));LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(9);body.addView(b,p);return b;}
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
     private String fmt(double v){return String.format(Locale.US,"%.2f",v);}
