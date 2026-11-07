@@ -230,3 +230,84 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+
+
+// Specialist-worker dashboard. All worker requests are read-only diagnostics.
+function workerTag(status){
+  const label=String(status||'unknown').replaceAll('_',' ').toUpperCase();
+  const tone=status==='complete'?'safe':status==='blocked'?'warn':status==='error'?'bad':'neutral';
+  return `<span class="tag ${tone}">${esc(label)}</span>`;
+}
+function renderWorkerCards(workers){
+  const grid=$('workerGrid');
+  if(!Array.isArray(workers)||!workers.length){
+    grid.innerHTML='<div class="worker-empty">No worker registry data is available.</div>';
+    return;
+  }
+  grid.innerHTML=workers.map(worker=>{
+    const result=worker.result||{};
+    const findings=Array.isArray(result.findings)?result.findings.slice(0,3):[];
+    const metrics=Object.entries(result.metrics||{})
+      .filter(([,value])=>value!==null&&['string','number','boolean'].includes(typeof value))
+      .slice(0,4);
+    const summary=result.summary||worker.description||'Waiting for a run.';
+    return `<article class="worker-card">
+      <div class="worker-card-head"><div><h3>${esc(worker.name)}</h3><div class="worker-id">${esc(worker.id)}</div></div>${workerTag(worker.status||worker.availability)}</div>
+      <p>${esc(summary)}</p>
+      ${findings.length?`<ul class="worker-findings">${findings.map(item=>`<li>${esc(item)}</li>`).join('')}</ul>`:''}
+      ${metrics.length?`<div class="worker-metric-list">${metrics.map(([key,value])=>`<span>${esc(key.replaceAll('_',' '))}: ${esc(String(value))}</span>`).join('')}</div>`:''}
+      <div class="worker-meta"><span>${worker.attempts?esc(String(worker.attempts))+' attempt(s)':'READ ONLY'}</span><span>${worker.duration_ms!=null?esc(String(worker.duration_ms))+' ms':esc(worker.execution_mode||'specialist')}</span></div>
+    </article>`;
+  }).join('');
+}
+async function loadWorkerRegistry(){
+  try{
+    const registry=await api('/api/workers');
+    $('workerTotal').textContent=String(registry.worker_count??12);
+    $('workerReady').textContent=String(registry.ready_count??'—');
+    $('workerUnavailable').textContent=String(registry.unavailable_count??'—');
+    $('workerSystemTag').textContent='REGISTRY READY';
+    $('workerSystemTag').className='tag safe';
+    $('workerGrid').innerHTML='<div class="worker-empty">Registry loaded. Run the specialist team to inspect a market.</div>';
+    renderWorkerCards((registry.workers||[]).map(worker=>({...worker,status:worker.availability,
+      result:{summary:worker.description,findings:worker.id==='news_sentiment'?['No provider configured; no sentiment score is fabricated.']:[]}})));
+    return registry;
+  }catch(error){
+    $('workerSystemTag').textContent='REGISTRY ERROR';
+    $('workerSystemTag').className='tag bad';
+    $('workerNote').textContent='Worker registry could not be loaded: '+error.message;
+    return null;
+  }
+}
+async function runSpecialistWorkers(){
+  const button=$('runWorkersBtn');
+  const symbol=$('workerSymbol').value;
+  const timeframe=$('workerTimeframe').value;
+  button.disabled=true;
+  button.textContent='Workers running…';
+  $('workerSystemTag').textContent='ANALYZING';
+  $('workerSystemTag').className='tag warn';
+  $('workerNote').textContent=`Fetching one closed-candle snapshot for ${symbol} (${timeframe}); specialist workers are analyzing it in parallel.`;
+  try{
+    const result=await api(`/api/workers/analyze/${encodeURIComponent(symbol)}?timeframe=${encodeURIComponent(timeframe)}&limit=300`);
+    $('workerTotal').textContent=String(result.worker_count??12);
+    $('workerCompleted').textContent=String(result.counts?.complete??0);
+    $('workerUnavailable').textContent=String((result.counts?.unavailable??0)+(result.counts?.blocked??0)+(result.counts?.error??0));
+    $('workerDuration').textContent=Number(result.duration_ms||0).toFixed(0)+' ms';
+    $('workerSystemTag').textContent=String(result.status||'unknown').replaceAll('_',' ').toUpperCase();
+    $('workerSystemTag').className='tag '+(result.status==='complete'?'safe':result.status==='failed'?'bad':'warn');
+    renderWorkerCards(result.workers||[]);
+    $('workerNote').textContent=`Run ${result.run_id} · ${symbol} · ${timeframe} · max parallel workers: ${result.max_concurrency}. ${result.supervisor_note||''} News sentiment is unavailable without a connected provider. This run did not execute any order.`;
+  }catch(error){
+    $('workerSystemTag').textContent='RUN FAILED';
+    $('workerSystemTag').className='tag bad';
+    $('workerNote').textContent='Worker analysis failed: '+error.message;
+    toast(error.message);
+  }finally{
+    button.disabled=false;
+    button.textContent='▶ Run 12 workers';
+  }
+}
+$('runWorkersBtn')?.addEventListener('click',runSpecialistWorkers);
+$('refreshWorkersBtn')?.addEventListener('click',loadWorkerRegistry);
+(async()=>{await loadWorkerRegistry()})();
