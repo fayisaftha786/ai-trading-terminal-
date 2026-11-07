@@ -686,7 +686,11 @@ class TestnetAutoTrader:
                 working_order_id = reports[0].get("orderId")
             exchange_list_id = response.get("orderListId")
             list_state = str(response.get("listOrderStatus") or "").upper()
-            status = "EXECUTING" if list_state == "EXECUTING" and exchange_list_id is not None else "UNKNOWN"
+            status = (
+                "EXECUTING"
+                if list_state == "EXECUTING" and exchange_list_id is not None and working_order_id is not None
+                else "UNKNOWN"
+            )
             self.storage.update_testnet_auto_order(list_client_id, {
                 "exchange_list_id": str(exchange_list_id) if exchange_list_id is not None else None,
                 "working_order_id": str(working_order_id) if working_order_id is not None else None,
@@ -726,6 +730,10 @@ class TestnetAutoTrader:
 
     def emergency_stop(self) -> dict[str, Any]:
         with self._lock:
+            # Latch the shared manual + automatic Testnet gate before any network I/O.
+            # This closes the window where a concurrent API request could re-enable
+            # automatic entries before the manual Testnet kill-switch persists its lock.
+            self.storage.set_setting("testnet_order_halted", True)
             self.storage.set_setting("testnet_auto_trading_enabled", False)
             canceled: list[str] = []
             completed: list[str] = []
