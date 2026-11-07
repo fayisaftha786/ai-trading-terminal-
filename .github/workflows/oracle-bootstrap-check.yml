@@ -1,0 +1,25 @@
+name: Oracle bootstrap validation
+
+on:
+  pull_request:
+    paths:
+      - "deploy/oracle-always-free/**"
+      - ".github/workflows/oracle-bootstrap-check.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  shell-validation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Bash syntax check
+        run: bash -n deploy/oracle-always-free/bootstrap.sh
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+      - name: ShellCheck
+        run: shellcheck --severity=warning deploy/oracle-always-free/bootstrap.sh
