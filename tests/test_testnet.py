@@ -670,6 +670,22 @@ def test_testnet_auto_refuses_symbols_without_explicit_opoco_permissions(monkeyp
 
 
 
+def test_testnet_auto_keeps_terminal_entry_with_any_fill_unprotected(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    # Defensive case: even though the working order is FOK, a terminal order
+    # reporting a positive fill must never be cleared as NOT_FILLED.
+    exchange.orders["501"].update({"status": "canceled", "filled": 0.0005})
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["unresolved"] == 1
+    assert row["status"] == "UNPROTECTED"
+    assert row["error_code"] == "PARTIALLY_FILLED_ENTRY_WITHOUT_PROTECTED_EXIT"
+    blocked = trader.run([_make_auto_signal()], True)
+    assert blocked["status"] == "blocked_unresolved_order_list"
+    assert db.count_open_testnet_auto_orders() == 1
+
+
 def test_testnet_auto_does_not_mark_cancelled_exit_child_as_completed(monkeypatch):
     db, exchange, trader = _make_auto_trader(
         monkeypatch, working_status="closed", list_status="ALL_DONE"
