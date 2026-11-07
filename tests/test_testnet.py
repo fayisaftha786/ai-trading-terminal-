@@ -750,7 +750,7 @@ def test_testnet_auto_daily_loss_limit_persistently_blocks_new_entries(monkeypat
     assert result["daily_risk"]["halted"] is True
     assert db.get_setting("testnet_auto_loss_halt_day") == day
     assert db.get_setting("testnet_auto_trading_enabled") is False
-    assert not any(call[0] == "request" and len(call) > 1 and call[1] == "orderList/opoco"
+    assert not any(call[0] == "orderList/opoco" and call[2] == "POST"
                    for call in exchange.calls)
 
 
