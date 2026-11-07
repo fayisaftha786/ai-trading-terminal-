@@ -447,8 +447,30 @@ class TestnetAutoTrader:
                                 working = exchange.fetch_order(working_id, row["symbol"])
                                 working_status = str(working.get("status") or "unknown").lower()
                                 if working_status == "closed":
-                                    # Entry is filled: leave native TP/SL orders untouched.
-                                    protected.append(row["list_client_order_id"])
+                                    exit_ids = [
+                                        item.get("orderId") for item in child_orders
+                                        if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
+                                    ]
+                                    exit_states = []
+                                    for order_id in exit_ids:
+                                        exit_order = exchange.fetch_order(order_id, row["symbol"])
+                                        exit_states.append(str(exit_order.get("status") or "unknown").lower())
+                                    if "closed" in exit_states:
+                                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                            "status": "CLOSED", "error_code": None,
+                                        })
+                                        canceled.append(row["list_client_order_id"])
+                                    elif any(state in {"open", "pending"} for state in exit_states):
+                                        # Entry is filled and at least one native TP/SL exit remains active.
+                                        protected.append(row["list_client_order_id"])
+                                    else:
+                                        # Never cancel an exit list or claim protection when its
+                                        # live child orders cannot be verified.
+                                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                            "status": "UNPROTECTED",
+                                            "error_code": "FILLED_ENTRY_WITHOUT_LIVE_EXIT_ORDERS",
+                                        })
+                                        unresolved.append(row["list_client_order_id"])
                                     continue
                                 if working_status in {"canceled", "cancelled", "expired", "rejected"}:
                                     self.storage.update_testnet_auto_order(row["list_client_order_id"], {
