@@ -269,8 +269,9 @@ async function loadWorkerRegistry(){
     $('workerSystemTag').textContent='REGISTRY READY';
     $('workerSystemTag').className='tag safe';
     $('workerGrid').innerHTML='<div class="worker-empty">Registry loaded. Run the specialist team to inspect a market.</div>';
-    renderWorkerCards((registry.workers||[]).map(worker=>({...worker,status:worker.availability,
-      result:{summary:worker.description,findings:worker.id==='news_sentiment'?['No provider configured; no sentiment score is fabricated.']:[]}})));
+    renderWorkerCards((registry.workers||[]).map(worker=>({...worker,status:worker.health_status||worker.availability,
+      duration_ms:worker.last_duration_ms,
+      result:{summary:worker.last_summary||worker.description,findings:worker.id==='news_sentiment'?['No provider configured; no sentiment score is fabricated.']:[]}})));
     return registry;
   }catch(error){
     $('workerSystemTag').textContent='REGISTRY ERROR';
