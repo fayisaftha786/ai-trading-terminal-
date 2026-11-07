@@ -30,7 +30,7 @@ No Cloudflare account is connected or deployed by this repository yet. The owner
 3. In Workers & Pages, connect the GitHub repository `fayisaftha786/ai-trading-terminal-`, production branch `main`, and configure the root Worker build using the exact instructions in [CLOUDFLARE_FREE_PAPER_AUTOMATION.md](CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
 4. Configure `ADMIN_PASSWORD` (at least 16 characters) and `SESSION_SECRET` (at least 32 characters) using Cloudflare's secret manager. Never paste secrets into chat, issue comments or source files.
 5. Deploy and verify the HTTPS Worker health response: `status=ok`, `mode=paper_only`, `live_trading_enabled=false`, `binance_testnet_enabled=false`.
-6. Sign in and validate fresh market data, 1h/6h closed-candle integrity, Coinbase book timestamps (15-second maximum for automatic entries), persistence after refresh/restart, and recurring alarm cadence.
+6. Sign in and validate fresh market data, 1h/6h closed-candle integrity, local Coinbase order-book response-retrieval age (15-second maximum for automatic entries; not an exchange event timestamp), persistence after refresh/restart, and recurring alarm cadence.
 7. Keep automatic PAPER entries OFF until these checks pass. Enabling them is a separate, explicit owner action and authorizes virtual trades only.
 
 A temporary 60-minute preview is optional and requires the owner to accept Cloudflare's Terms and Privacy Policy and complete Cloudflare's claim flow. It is a temporary verification bridge, not a permanent deployment. See the Cloudflare documentation linked above.
@@ -48,7 +48,7 @@ A temporary 60-minute preview is optional and requires the owner to accept Cloud
 ## Next verification after deployment
 
 - Confirm the Worker remains healthy and authentication rejects bad passwords/tokens.
-- Confirm all three Coinbase markets are live and the ticker/book timestamps meet freshness gates.
+- Confirm all three Coinbase markets are live and the ticker and local order-book retrieval ages meet freshness gates.
 - Confirm candle audits show sufficient closed history and zero gaps/duplicates/off-grid rows.
 - Confirm SQLite Durable Object ledger, events and halt state persist after refresh and deployment restart.
 - Confirm scheduled alarms resume and produce fresh scans at approximately 15-minute intervals.
