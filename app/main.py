@@ -95,7 +95,10 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                         "higher_timeframe": (data.get("higher_timeframe") or {}).get("analysis", {}),
                         "timeframe_confluence": data.get("timeframe_confluence"),
                         "last_closed_candle_timestamp_ms": data.get("last_closed_candle_timestamp_ms"),
-                        "higher_timeframe_last_closed_candle_timestamp_ms": data.get("higher_timeframe_last_closed_candle_timestamp_ms")}
+                        "higher_timeframe_last_closed_candle_timestamp_ms": data.get("higher_timeframe_last_closed_candle_timestamp_ms"),
+                        "higher_timeframe_interval_ms": data.get("higher_timeframe_interval_ms", 4 * 3_600_000),
+                        "ticker_market_data_provider": market.get("market_data_provider"),
+                        "strategy_market_data_provider": data.get("provider")}
             researched = await asyncio.gather(*(research_market(m) for m in fresh_markets), return_exceptions=True)
             research = [x for x in researched if isinstance(x, dict)]
 
@@ -106,13 +109,19 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         testnet_reconciliation_required = (
             open_testnet_auto_orders > 0 or unaccounted_testnet_auto_orders > 0
         )
-        testnet_auto_result = testnet_auto.run(
-            research if app.state.auto_testnet_enabled else [],
-            bool(app.state.auto_testnet_enabled),
-        ) if (app.state.auto_testnet_enabled or testnet_reconciliation_required) else {
-            "enabled": False, "mode": "testnet_only", "status": "disabled",
-            "submitted": [], "rejected": [], "live_trading_enabled": False,
-        }
+        if app.state.auto_testnet_enabled or testnet_reconciliation_required:
+            # CCXT/Testnet adapter calls are synchronous network I/O; never block
+            # FastAPI's asyncio event loop while submitting or reconciling OPOCO lists.
+            testnet_auto_result = await asyncio.to_thread(
+                testnet_auto.run,
+                research if app.state.auto_testnet_enabled else [],
+                bool(app.state.auto_testnet_enabled),
+            )
+        else:
+            testnet_auto_result = {
+                "enabled": False, "mode": "testnet_only", "status": "disabled",
+                "submitted": [], "rejected": [], "live_trading_enabled": False,
+            }
         if testnet_auto_result.get("submitted"):
             db.log_event("testnet_auto_entry", "AI strategy submitted a protected Binance Testnet OTOCO order list", {
                 "symbol": testnet_auto_result["submitted"][0].get("symbol"),
