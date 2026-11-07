@@ -45,23 +45,42 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 
 These are initial conservative assumptions for a simulation; review them after measured paper data. The 15 bps fee assumption is not a statement of your actual Coinbase fee tier.
 
-## Setup without paid resources
+## Setup through Cloudflare Dashboard (no Termux or local Node install)
 
-1. Create a free Cloudflare account using your own contact details. No account or Cloudflare resources are created by this repository change. Confirm the dashboard shows the Free plan and do not enter any paid upgrade or billing step.
-2. Install Node.js 22+ and npm on a trusted computer. Install Wrangler locally:
-   npm install --save-dev wrangler
-3. Install dependencies:
-   npm install
-4. Set the two Worker secrets using Wrangler prompts. Do not paste them into chat or commit them:
-   npx wrangler secret put ADMIN_PASSWORD
-   npx wrangler secret put SESSION_SECRET
-   Use a unique dashboard password of at least 16 characters and a random session secret of at least 32 characters. ADMIN_USERNAME may be set as a non-secret var in wrangler.jsonc or as a Worker variable; the default is admin.
-5. Deploy only after verifying that Wrangler targets the Free plan and this one SQLite Durable Object:
-   npx wrangler deploy
-6. Open the Worker URL in a browser. The first /api/health request initializes the recurring Durable Object alarm. Sign in with the configured username/password. Confirm the API says paper_only, live_trading_enabled=false, and Binance Testnet is disabled.
-7. Confirm Coinbase data status is live for all three pairs, candle integrity shows 150+ closed candles on both timeframes, and scan time advances. If it says unavailable or reports provider errors, do not enable paper automation.
-8. Automatic PAPER entry is initially OFF. Review the displayed conditions and deliberately enable it from the dashboard only after verifying provider availability.
-9. Set up your Android app's WebView start URL to the deployed HTTPS Worker URL only after the web dashboard has passed health, authentication, scheduled-scan and persistence checks.
+This is the recommended route for a phone-only setup. Cloudflare Workers Builds can connect a GitHub repository and deploy on pushes. Cloudflare can generate its own deployment token for that integration; do not create or share a token in chat.
+
+1. Open [Cloudflare Dashboard](https://dash.cloudflare.com/) and sign in or create your own account. Use the Free plan only. Do not choose an upgrade, paid add-on or billing-based plan.
+2. Open **Workers & Pages** → **Create application** → choose **GitHub**. Authorize the Cloudflare GitHub app for this repository only if GitHub offers a repository-selection screen.
+3. Select repository `fayisaftha786/ai-trading-terminal-` and production branch `main`.
+4. Configure the Worker from the repository root:
+   - Root directory: `/` (repository root)
+   - Build command: `npm run check && npm test`
+   - Deploy command: `npx wrangler@4 deploy`
+   - Worker name must remain `ai-trading-terminal-free-paper`, matching `wrangler.jsonc`
+   - Do not add D1, KV, R2, Queues, Containers, paid compute, or any other product. The required SQLite Durable Object is declared in `wrangler.jsonc`.
+5. Select **Save and Deploy**. The first deployment applies the SQLite Durable Object migration. A failed login before secrets are configured is expected; no trading will start.
+6. Open the new Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**. Add these two runtime secrets:
+   - `ADMIN_PASSWORD`: a unique password at least 16 characters long.
+   - `SESSION_SECRET`: a randomly generated secret at least 32 characters long.
+   Save/deploy the Worker after adding both secrets. Do not reuse your GitHub or email password, and never send either value here. `ADMIN_USERNAME` defaults to `admin`; it can be overridden as a non-secret variable.
+7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`.
+8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, book timestamp under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
+9. Confirm the scan timestamp advances after the first alarm and again roughly every 15 minutes. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
+10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real trading and Binance Testnet remain disabled.
+11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
+
+Cloudflare's Git integration instructions: [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) and [build configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/). Runtime secrets are configured separately from build variables; see [Cloudflare Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
+
+### Optional command-line route
+
+For a trusted computer with Node.js 22+:
+```sh
+npm install
+npx wrangler@4 deploy
+npx wrangler secret put ADMIN_PASSWORD
+npx wrangler secret put SESSION_SECRET
+```
+The dashboard Git integration route above avoids needing Termux or a local Node installation.
 
 ## Secret and deployment safety
 
