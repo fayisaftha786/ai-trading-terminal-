@@ -313,11 +313,17 @@ class TestnetAutoTrader:
                 max(0.0, self._number(row.get("notional_usdt")) or 0.0)
                 for row in self.storage.list_active_testnet_auto_orders()
             )
-            reconstructed_usdt_equity = free_usdt + current_auto_exposure
+            current_manual_exposure = sum(
+                max(0.0, self._number(row.get("notional_usdt")) or 0.0)
+                for row in self.storage.list_active_testnet_orders()
+                if row.get("status") in {"OPEN", "PARTIALLY_FILLED", "SUBMITTING", "UNKNOWN"}
+            )
+            current_total_exposure = current_auto_exposure + current_manual_exposure
+            reconstructed_usdt_equity = free_usdt + current_total_exposure
             exposure_cap = max(
                 0.0,
                 reconstructed_usdt_equity * float(risk["max_total_exposure_pct"]) / 100.0
-                - current_auto_exposure,
+                - current_total_exposure,
             )
             max_order = float(self.adapter.config.binance_testnet_max_order_usdt)
             notional = min(risk_sized_notional, exposure_cap, max_order, free_usdt / 1.002)
