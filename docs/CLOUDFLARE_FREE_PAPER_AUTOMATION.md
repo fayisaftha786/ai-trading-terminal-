@@ -74,3 +74,6 @@ These are initial conservative assumptions for a simulation; review them after m
 ## Verification scope
 
 GitHub Actions runs JavaScript syntax checks, strategy-unit tests and a Wrangler dry-run build. These do not prove that Cloudflare deployment, Coinbase network access, Durable Object alarms, account-level Free quotas or Android WebView connectivity work in the user's Cloudflare account. Those require a live post-deployment check.
+
+
+The local smoke test runs Wrangler in local workerd mode and checks SQLite Durable Object initialization, unauthenticated API rejection, owner login, dashboard reads, explicit PAPER enable, emergency stop, reset and static asset serving. It uses disposable local test credentials and makes no cloud deployment.
