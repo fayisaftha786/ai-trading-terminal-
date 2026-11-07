@@ -194,3 +194,20 @@ def test_worker_panel_is_present_and_discloses_deterministic_read_only_scope(cli
     assert "12-worker market intelligence" in page.text
     assert "not 12 separately trained AI models" in page.text
     assert 'id="runWorkersBtn"' in page.text
+
+
+
+def test_worker_analysis_route_rejects_overlapping_request(client):
+    lock = client.app.state.worker_analysis_lock
+    assert lock.locked() is False
+
+    async def hold_lock():
+        await lock.acquire()
+
+    asyncio.run(hold_lock())
+    try:
+        response = client.get("/api/workers/analyze/BTC%2FUSDT")
+        assert response.status_code == 429
+        assert "already running" in response.json()["detail"]
+    finally:
+        lock.release()
