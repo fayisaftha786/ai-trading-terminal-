@@ -147,6 +147,17 @@ class Storage:
                     signal_score REAL NOT NULL DEFAULT 0,
                     status TEXT NOT NULL,
                     error_code TEXT,
+                    entry_filled_qty REAL,
+                    entry_cost_quote REAL,
+                    entry_fee_quote REAL,
+                    exit_filled_qty REAL,
+                    exit_proceeds_quote REAL,
+                    exit_fee_quote REAL,
+                    realized_pnl_quote REAL,
+                    accounting_status TEXT NOT NULL DEFAULT 'PENDING',
+                    above_order_id TEXT,
+                    below_order_id TEXT,
+                    closed_at TEXT,
                     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
                     updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
                 );
@@ -156,6 +167,27 @@ class Storage:
                     ON testnet_auto_orders(created_at);
                 """
             )
+            # Idempotent additive migration for existing SQLite deployments.
+            # CREATE TABLE IF NOT EXISTS does not add columns to an older table.
+            auto_columns = {
+                "entry_filled_qty": "REAL",
+                "entry_cost_quote": "REAL",
+                "entry_fee_quote": "REAL",
+                "exit_filled_qty": "REAL",
+                "exit_proceeds_quote": "REAL",
+                "exit_fee_quote": "REAL",
+                "realized_pnl_quote": "REAL",
+                "accounting_status": "TEXT NOT NULL DEFAULT 'PENDING'",
+                "above_order_id": "TEXT",
+                "below_order_id": "TEXT",
+                "closed_at": "TEXT",
+            }
+            existing_auto_columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(testnet_auto_orders)").fetchall()
+            }
+            for column, definition in auto_columns.items():
+                if column not in existing_auto_columns:
+                    conn.execute(f"ALTER TABLE testnet_auto_orders ADD COLUMN {column} {definition}")
             conn.execute(
                 "INSERT OR IGNORE INTO portfolio(id, initial_capital_usd) VALUES(1, ?)",
                 (float(initial_capital),),
@@ -440,7 +472,13 @@ class Storage:
         return dict(row) if row is not None else None
 
     def update_testnet_auto_order(self, list_client_order_id: str, values: dict[str, Any]) -> None:
-        allowed = {"exchange_list_id", "working_order_id", "status", "error_code"}
+        allowed = {
+            "exchange_list_id", "working_order_id", "status", "error_code",
+            "entry_filled_qty", "entry_cost_quote", "entry_fee_quote",
+            "exit_filled_qty", "exit_proceeds_quote", "exit_fee_quote",
+            "realized_pnl_quote", "accounting_status", "above_order_id",
+            "below_order_id", "closed_at",
+        }
         updates = {key: value for key, value in values.items() if key in allowed}
         if not updates:
             return
@@ -467,6 +505,25 @@ class Storage:
                 "SELECT * FROM testnet_auto_orders ORDER BY id DESC LIMIT ?", (safe_limit,)
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def testnet_auto_realized_pnl_since(self, timestamp: str) -> float:
+        """Return only fully fee-accounted, completed Testnet auto-trades."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(realized_pnl_quote),0) AS pnl "
+                "FROM testnet_auto_orders WHERE status='CLOSED' "
+                "AND accounting_status='EXACT' AND closed_at >= ?",
+                (timestamp,),
+            ).fetchone()
+        return float(row["pnl"] or 0.0)
+
+    def testnet_auto_unaccounted_closed_count(self) -> int:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM testnet_auto_orders "
+                "WHERE status='CLOSED' AND accounting_status!='EXACT'"
+            ).fetchone()
+        return int(row["n"] or 0)
 
     def count_testnet_auto_entries_since(self, timestamp: str) -> int:
         with self.connection() as conn:
