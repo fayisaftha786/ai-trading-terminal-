@@ -30,7 +30,7 @@ export class TradingEngine extends DurableObject {
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN';" +
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms);" +
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}');" +
-      "CREATE TABLE IF NOT EXISTS equity_snapshots(at_ms INTEGER PRIMARY KEY,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL);"
+      "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL);"
     );
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
@@ -311,12 +311,12 @@ export class TradingEngine extends DurableObject {
     const exitPrice = bid * (1 - risk.slippage_bps / 10000);
     const exitFee = exitPrice * trade.quantity * risk.fee_bps_per_side / 10000;
     const netPnl = (exitPrice - trade.entry_price) * trade.quantity - trade.fees_usd - exitFee;
-    const result = this.sql.exec(
-      "UPDATE trades SET status='CLOSED',closed_at_ms=?,exit_price=?,fees_usd=?,pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN'",
+    const updated = this.sql.exec(
+      "UPDATE trades SET status='CLOSED',closed_at_ms=?,exit_price=?,fees_usd=?,pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN' RETURNING id",
       nowMs, exitPrice, trade.fees_usd + exitFee, netPnl,
       JSON.stringify({ ...trade.metadata, close_reason: reason, close_reference_price: bid }), trade.id
-    );
-    if (result.rowsWritten !== 1) throw new Error("paper_trade_already_closed");
+    ).toArray();
+    if (updated.length !== 1) throw new Error("paper_trade_already_closed");
     this.logEvent("paper_exit", "Paper position closed by owner", {
       trade_id: trade.id, symbol: trade.symbol, net_pnl_usd: netPnl, reason
     });
@@ -440,16 +440,20 @@ export class TradingEngine extends DurableObject {
         execution: "simulated_market_buy_at_ask_plus_slippage"
       })
     };
+    let id;
     try {
-      this.sql.exec(
-        "INSERT INTO trades(symbol,status,entry_price,quantity,notional_usd,stop_loss,take_profit,fees_usd,pnl_usd,opened_at_ms,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+      const inserted = this.sql.exec(
+        "INSERT INTO trades(symbol,status,entry_price,quantity,notional_usd,stop_loss,take_profit,fees_usd,pnl_usd,opened_at_ms,metadata_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) RETURNING id",
         trade.symbol, trade.status, trade.entry_price, trade.quantity, trade.notional_usd,
         trade.stop_loss, trade.take_profit, trade.fees_usd, trade.pnl_usd, trade.opened_at_ms, trade.metadata_json
-      );
+      ).toArray();
+      id = inserted[0]?.id;
+      if (!Number.isSafeInteger(Number(id)) || Number(id) < 1) {
+        return { ok: false, reason: "ledger_insert_id_unavailable" };
+      }
     } catch {
       return { ok: false, reason: "ledger_insert_failed_or_duplicate_open_trade" };
     }
-    const id = this.sql.exec("SELECT last_insert_rowid() AS id").toArray()[0]?.id;
     this.logEvent("paper_entry", "Automatic paper position opened", { trade_id: id, symbol: trade.symbol, notional_usd: notional });
     return { ok: true, trade: { ...trade, id } };
   }
