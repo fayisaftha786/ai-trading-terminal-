@@ -6,6 +6,7 @@ on:
     paths:
       - "src/**"
       - "test/**"
+      - "scripts/**"
       - "public/**"
       - "wrangler.jsonc"
       - "package.json"
