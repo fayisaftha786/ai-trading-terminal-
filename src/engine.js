@@ -23,16 +23,17 @@ export class TradingEngine extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
-    this.sql.exec(
-      "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL);" +
-      "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL);" +
-      "CREATE TABLE IF NOT EXISTS trades(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),entry_price REAL NOT NULL,quantity REAL NOT NULL,notional_usd REAL NOT NULL,stop_loss REAL NOT NULL,take_profit REAL NOT NULL,fees_usd REAL NOT NULL DEFAULT 0,pnl_usd REAL,opened_at_ms INTEGER NOT NULL,closed_at_ms INTEGER,exit_price REAL,metadata_json TEXT NOT NULL DEFAULT '{}');" +
-      "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN';" +
-      "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms);" +
-      "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}');" +
-      "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL);" +
-      "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL);"
-    );
+    const schemaStatements = [
+      "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS trades(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),entry_price REAL NOT NULL,quantity REAL NOT NULL,notional_usd REAL NOT NULL,stop_loss REAL NOT NULL,take_profit REAL NOT NULL,fees_usd REAL NOT NULL DEFAULT 0,pnl_usd REAL,opened_at_ms INTEGER NOT NULL,closed_at_ms INTEGER,exit_price REAL,metadata_json TEXT NOT NULL DEFAULT '{}')",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN'",
+      "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms)",
+      "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}')",
+      "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)"
+    ];
+    for (const statement of schemaStatements) this.sql.exec(statement);
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
@@ -196,7 +197,40 @@ export class TradingEngine extends DurableObject {
         const snapshot = await fetchProductSnapshot(product, Date.now());
         const primary = analyzeTimeframe(snapshot.one_hour_audit);
         const higher = analyzeTimeframe(snapshot.six_hour_audit);
-        const market = { ...snapshot, primary, higher, signal: primary.signal, score: primary.score, regime_1h: primary.regime, regime_6h: higher.regime };
+        // Persist concise market evidence only; keep raw 300-candle arrays out of every dashboard response.
+        const market = {
+          symbol: snapshot.symbol,
+          product: snapshot.product,
+          status: "live",
+          fetched_at_ms: snapshot.fetched_at_ms,
+          ticker_time: snapshot.ticker_time,
+          bid: snapshot.bid,
+          ask: snapshot.ask,
+          last: snapshot.last,
+          spread_bps: snapshot.spread_bps,
+          quote_volume_usd: snapshot.quote_volume_usd,
+          bid_depth_quote: snapshot.bid_depth_quote,
+          ask_depth_quote: snapshot.ask_depth_quote,
+          data_quality: snapshot.data_quality,
+          one_hour_audit_summary: {
+            ok: snapshot.one_hour_audit.ok,
+            issues: snapshot.one_hour_audit.issues,
+            valid_closed_bars: snapshot.one_hour_audit.valid_closed_bars,
+            missing_intervals: snapshot.one_hour_audit.missing_intervals
+          },
+          six_hour_audit_summary: {
+            ok: snapshot.six_hour_audit.ok,
+            issues: snapshot.six_hour_audit.issues,
+            valid_closed_bars: snapshot.six_hour_audit.valid_closed_bars,
+            missing_intervals: snapshot.six_hour_audit.missing_intervals
+          },
+          primary,
+          higher,
+          signal: primary.signal,
+          score: primary.score,
+          regime_1h: primary.regime,
+          regime_6h: higher.regime
+        };
         this.saveMarket(market, "live");
         markets.push(market);
       } catch (error) {
