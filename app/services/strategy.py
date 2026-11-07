@@ -199,6 +199,21 @@ def analyze_candles(candles: list[list[float]], bars_per_day: float = 24.0) -> d
     volumes = [row[5] for row in rows]
     fast, slow = ema(closes, 20), ema(closes, 50)
     current_rsi = rsi(closes, 14)
+    # MACD is calculated from closed closes only; the signal line is an EMA of MACD.
+    ema12, ema26 = ema(closes, 12), ema(closes, 26)
+    macd_series = [fast_value - slow_value for fast_value, slow_value in zip(ema12, ema26)]
+    macd_signal_series = ema(macd_series, 9)
+    macd_line = macd_series[-1]
+    macd_signal = macd_signal_series[-1]
+    macd_histogram = macd_line - macd_signal
+    previous_histogram = macd_series[-2] - macd_signal_series[-2]
+    macd_histogram_slope = macd_histogram - previous_histogram
+    def rate_of_change(period: int) -> float:
+        base = closes[-period - 1]
+        return ((closes[-1] / base) - 1.0) * 100.0 if base > 0 else 0.0
+    roc_5 = rate_of_change(5)
+    roc_10 = rate_of_change(10)
+    roc_20 = rate_of_change(20)
     atr, adx, plus_di, minus_di = _wilder_atr_adx(rows, 14)
     if atr is None or adx is None or current_rsi is None:
         return {"signal": "HOLD", "score": 0, "regime": "INSUFFICIENT_INDICATOR_HISTORY",
@@ -227,6 +242,39 @@ def analyze_candles(candles: list[list[float]], bars_per_day: float = 24.0) -> d
         regime = "DOWNTREND"
     else:
         regime = "RANGE_OR_TRANSITION"
+
+    momentum_score = 50
+    momentum_reasons: list[str] = []
+    for label, value, weight in (("5-bar", roc_5, 10), ("10-bar", roc_10, 20), ("20-bar", roc_20, 10)):
+        if value > 0:
+            momentum_score += weight
+            momentum_reasons.append(f"{label} price momentum is positive")
+        elif value < 0:
+            momentum_score -= weight
+            momentum_reasons.append(f"{label} price momentum is negative")
+    if macd_histogram > 0:
+        momentum_score += 15
+        momentum_reasons.append("MACD is above its signal line")
+    elif macd_histogram < 0:
+        momentum_score -= 15
+        momentum_reasons.append("MACD is below its signal line")
+    if macd_histogram_slope > 0:
+        momentum_score += 10
+        momentum_reasons.append("MACD histogram is expanding upward")
+    elif macd_histogram_slope < 0:
+        momentum_score -= 10
+        momentum_reasons.append("MACD histogram is weakening")
+    momentum_score = max(0, min(100, momentum_score))
+    if roc_10 > 0 and macd_histogram > 0 and macd_histogram_slope > 0:
+        momentum_state = "BULLISH_ACCELERATING"
+    elif roc_10 > 0 and macd_histogram > 0:
+        momentum_state = "BULLISH_FADING"
+    elif roc_10 < 0 and macd_histogram < 0 and macd_histogram_slope < 0:
+        momentum_state = "BEARISH_ACCELERATING"
+    elif roc_10 < 0 and macd_histogram < 0:
+        momentum_state = "BEARISH_FADING"
+    else:
+        momentum_state = "MIXED_OR_NEUTRAL"
 
     score = 50
     reasons: list[str] = []
@@ -263,6 +311,11 @@ def analyze_candles(candles: list[list[float]], bars_per_day: float = 24.0) -> d
     ) else "HOLD"
     return {
         "signal": signal, "score": score, "regime": regime,
+        "momentum_state": momentum_state, "momentum_score": momentum_score,
+        "momentum_reasons": momentum_reasons,
+        "roc_5_pct": round(roc_5, 4), "roc_10_pct": round(roc_10, 4), "roc_20_pct": round(roc_20, 4),
+        "macd_line": round(macd_line, 10), "macd_signal": round(macd_signal, 10),
+        "macd_histogram": round(macd_histogram, 10), "macd_histogram_slope": round(macd_histogram_slope, 10),
         "rsi14": round(current_rsi, 2), "ema20": round(fast[-1], 10), "ema50": round(slow[-1], 10),
         "ema20_slope_pct": round(ema20_slope_pct, 5), "atr14": round(atr, 10),
         "atr_pct": round(atr_pct, 4), "adx14": round(adx, 3),
@@ -270,7 +323,7 @@ def analyze_candles(candles: list[list[float]], bars_per_day: float = 24.0) -> d
         "realized_volatility_pct_approx": round(realized_vol_pct, 4),
         "volume_ratio_20": round(volume_ratio, 4) if volume_ratio is not None else None,
         "breakout_20": breakout, "valid_candles": len(rows), "reasons": reasons,
-        "method": "SMA-seeded EMA20/50 + Wilder RSI14/ATR14/ADX14 + directional movement + closed-bar volume ratio + 20-bar breakout + volatility guard",
+        "method": "SMA-seeded EMA20/50 + Wilder RSI14/ATR14/ADX14 + MACD12/26/9 + ROC5/10/20 + directional movement + closed-bar volume ratio + 20-bar breakout + volatility guard",
         "warning": "Research signal only. It does not predict or guarantee returns; automatic paper entries additionally require higher-timeframe alignment, fresh executable quotes, spread, depth, liquidity and portfolio risk approval."
     }
 
