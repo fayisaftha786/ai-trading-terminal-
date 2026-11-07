@@ -67,6 +67,8 @@ def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monkeypatch
     assert result["exchange"] == "coinbase_public_fallback"
     assert len(result["markets"]) == 3
     assert all(row["status"] == "live" for row in result["markets"])
+    assert all(row["market_data_provider"] == "coinbase_public_fallback" for row in result["markets"])
+    assert all(row["quote_currency"] == "USD" for row in result["markets"])
     assert all(row["orderbook_timestamp_source"] == "retrieval_fallback" for row in result["markets"])
 
 
