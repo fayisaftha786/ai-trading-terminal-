@@ -278,3 +278,24 @@ def test_auto_paper_fails_closed_on_invalid_persisted_risk_profile():
     assert result["status"] == "blocked_invalid_risk_profile"
     assert result["paper_entries"] == []
     assert result["halt_automation"] is True
+
+def test_auto_paper_accepts_fresh_six_hour_confirmation_candle_from_fallback():
+    db, _, engine = _engine()
+    candidate = _candidate()
+    now_ms = time.time() * 1000
+    candidate["higher_timeframe_last_closed_candle_timestamp_ms"] = now_ms - 12 * 3_600_000
+    candidate["higher_timeframe_interval_ms"] = 6 * 3_600_000
+    eligible, reason, _ = engine._eligible(candidate, now_ms, db.get_risk())
+    assert eligible is True
+    assert reason == "eligible"
+
+
+def test_auto_paper_still_rejects_stale_six_hour_confirmation_candle():
+    db, _, engine = _engine()
+    candidate = _candidate()
+    now_ms = time.time() * 1000
+    candidate["higher_timeframe_last_closed_candle_timestamp_ms"] = now_ms - 15 * 3_600_000
+    candidate["higher_timeframe_interval_ms"] = 6 * 3_600_000
+    eligible, reason, _ = engine._eligible(candidate, now_ms, db.get_risk())
+    assert eligible is False
+    assert reason == "higher_timeframe_closed_candle_stale"

@@ -93,7 +93,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                         "higher_timeframe": (data.get("higher_timeframe") or {}).get("analysis", {}),
                         "timeframe_confluence": data.get("timeframe_confluence"),
                         "last_closed_candle_timestamp_ms": data.get("last_closed_candle_timestamp_ms"),
-                        "higher_timeframe_last_closed_candle_timestamp_ms": data.get("higher_timeframe_last_closed_candle_timestamp_ms")}
+                        "higher_timeframe_last_closed_candle_timestamp_ms": data.get("higher_timeframe_last_closed_candle_timestamp_ms"),
+                        "higher_timeframe_interval_ms": data.get("higher_timeframe_interval_ms", 4 * 3_600_000)}
             researched = await asyncio.gather(*(research_market(m) for m in fresh_markets), return_exceptions=True)
             research = [x for x in researched if isinstance(x, dict)]
 
