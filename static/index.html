@@ -21,6 +21,7 @@
       <nav>
         <a class="active" href="#overview">▦ <span>Overview</span></a>
         <a href="#engines">⌁ <span>Engines</span></a>
+        <a href="#workers">⚙ <span>Workers (12)</span></a>
         <a href="#paper">◉ <span>Paper execution</span></a>
         <a href="#testnet">⌁ <span>Testnet orders</span></a>
         <a href="#risk">⛨ <span>Risk controls</span></a>
@@ -76,6 +77,45 @@
           <div id="analysisResults" class="analysis-box">Analyze shows Wilder RSI/ATR/ADX, directional strength, the signal-aligned primary + 4h trend backtest, walk-forward cost stress, and a clearly separate EMA20/50 baseline; that EMA-only baseline is not the automatic-entry strategy. Historical tests cannot reproduce live spread, depth or real fills.</div>
           <div class="panel-foot">Exchange access varies by country. Verify eligibility before connecting an account.</div>
         </article>
+      </section>
+
+      <section class="panel workers-panel" id="workers">
+        <div class="section-head compact">
+          <div><div class="eyebrow">02 / SPECIALIST ANALYSIS TEAM</div><h2>12-worker market intelligence</h2></div>
+          <span id="workerSystemTag" class="tag neutral">REGISTRY LOADING</span>
+        </div>
+        <div class="worker-disclosure">Deterministic, read-only analysis workers — not 12 separately trained AI models. The supervisor gathers one market-data snapshot and distributes it to bounded specialist checks. Workers cannot place, approve, or sign exchange orders.</div>
+        <div class="worker-toolbar">
+          <label>Market
+            <select id="workerSymbol">
+              <option value="BTC/USDT">BTC/USDT</option>
+              <option value="ETH/USDT">ETH/USDT</option>
+              <option value="SOL/USDT">SOL/USDT</option>
+            </select>
+          </label>
+          <label>Timeframe
+            <select id="workerTimeframe">
+              <option value="5m">5 minutes</option>
+              <option value="15m">15 minutes</option>
+              <option value="1h" selected>1 hour</option>
+              <option value="4h">4 hours</option>
+              <option value="1d">1 day</option>
+            </select>
+          </label>
+          <button id="runWorkersBtn" class="btn primary" type="button">▶ Run 12 workers</button>
+          <button id="refreshWorkersBtn" class="btn ghost" type="button">Refresh registry</button>
+        </div>
+        <div class="worker-metrics">
+          <div><span>Total specialists</span><b id="workerTotal">12</b></div>
+          <div><span>Ready</span><b id="workerReady">—</b></div>
+          <div><span>Completed</span><b id="workerCompleted">—</b></div>
+          <div><span>Unavailable / blocked</span><b id="workerUnavailable">—</b></div>
+          <div><span>Last run duration</span><b id="workerDuration">—</b></div>
+        </div>
+        <div id="workerGrid" class="worker-grid">
+          <div class="worker-empty">Loading specialist worker registry…</div>
+        </div>
+        <div id="workerNote" class="ledger-note">Run workers to inspect trend, momentum, volume, timeframe agreement, patterns, volatility, strategy, risk, research readiness and paper portfolio diagnostics. News sentiment remains unavailable until a data source is connected.</div>
       </section>
 
       <section class="panel testnet-panel" id="testnet">
