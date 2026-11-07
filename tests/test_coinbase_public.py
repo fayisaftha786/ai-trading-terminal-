@@ -44,7 +44,7 @@ def test_fetch_market_normalizes_public_ticker_volume_and_depth():
     try:
         result = asyncio.run(adapter.fetch_market("BTC/USDT"))
     finally:
-        await client.aclose()
+        asyncio.run(client.aclose())
 
     assert result["status"] == "live"
     assert result["provider_symbol"] == "BTC-USD"
@@ -85,8 +85,7 @@ def test_fetch_candles_converts_coinbase_ohlcv_to_standard_order():
     assert rows == [[1794000000000, 95.0, 110.0, 90.0, 105.0, 1234.0]]
 
 
-@pytest.mark.asyncio
-async def test_fetch_candles_rejects_unsupported_timeframe():
+def test_fetch_candles_rejects_unsupported_timeframe():
     client = httpx.AsyncClient(
         base_url="https://api.exchange.coinbase.com",
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=[])),
