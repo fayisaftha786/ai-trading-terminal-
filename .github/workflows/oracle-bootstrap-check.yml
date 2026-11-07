@@ -5,12 +5,6 @@ on:
     paths:
       - "deploy/oracle-always-free/**"
       - ".github/workflows/oracle-bootstrap-check.yml"
-  push:
-    branches:
-      - "feat/oracle-always-free-deploy"
-    paths:
-      - "deploy/oracle-always-free/**"
-      - ".github/workflows/oracle-bootstrap-check.yml"
 
 permissions:
   contents: read
