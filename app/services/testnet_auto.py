@@ -198,9 +198,10 @@ class TestnetAutoTrader:
 
             active = self.storage.list_active_testnet_auto_orders()
             max_positions = max(1, min(int(state["maximum_open_orders"]), 3))
-            if len(active) >= max_positions:
+            total_active_orders = self.storage.count_open_testnet_orders()
+            if total_active_orders >= max_positions:
                 result["status"] = "active_position_limit"
-                result["rejected"].append({"reason": "maximum_active_testnet_order_lists_reached"})
+                result["rejected"].append({"reason": "maximum_combined_manual_and_automatic_testnet_orders_reached"})
                 return result
 
             now = datetime.now(timezone.utc)
@@ -227,8 +228,11 @@ class TestnetAutoTrader:
                 if not symbol.endswith("/USDT"):
                     result["rejected"].append({"symbol": symbol, "reason": "testnet_auto_trading_requires_usdt_spot_pair"})
                     continue
-                if any(row["symbol"] == symbol for row in active):
-                    result["rejected"].append({"symbol": symbol, "reason": "active_testnet_order_list_exists"})
+                manual_active = self.storage.list_active_testnet_orders()
+                if (any(row["symbol"] == symbol for row in active)
+                        or any(row["symbol"] == symbol and row["status"] in {"OPEN", "PARTIALLY_FILLED", "SUBMITTING", "UNKNOWN"}
+                               for row in manual_active)):
+                    result["rejected"].append({"symbol": symbol, "reason": "active_testnet_order_exists_for_symbol"})
                     continue
                 last_order = self.storage.last_testnet_auto_entry(symbol)
                 if last_order:
@@ -291,12 +295,25 @@ class TestnetAutoTrader:
             slippage_bps = float(risk["slippage_bps"])
             stop_pct = float(risk["stop_loss_pct"])
             target_pct = float(risk["take_profit_pct"])
-            risk_cost_fraction = stop_pct / 100.0 + (2.0 * (fee_bps + slippage_bps)) / 10_000.0
+            risk_cost_fraction = (
+                stop_pct / 100.0
+                + (2.0 * (fee_bps + slippage_bps) + max(0.0, spread_bps)) / 10_000.0
+            )
             if not isfinite(risk_cost_fraction) or risk_cost_fraction <= 0:
                 return {"accepted": False, "reason": "invalid_risk_cost_assumption"}
             risk_budget = free_usdt * float(risk["risk_per_trade_pct"]) / 100.0
             risk_sized_notional = risk_budget / risk_cost_fraction
-            exposure_cap = free_usdt * float(risk["max_total_exposure_pct"]) / 100.0
+            # Reconstruct the USDT equity slice already committed to this bot so the
+            # exposure cap applies to the whole open book, not separately to every entry.
+            current_auto_exposure = sum(
+                max(0.0, self._number(row.get("notional_usdt")) or 0.0) for row in active
+            )
+            reconstructed_usdt_equity = free_usdt + current_auto_exposure
+            exposure_cap = max(
+                0.0,
+                reconstructed_usdt_equity * float(risk["max_total_exposure_pct"]) / 100.0
+                - current_auto_exposure,
+            )
             max_order = float(self.adapter.config.binance_testnet_max_order_usdt)
             notional = min(risk_sized_notional, exposure_cap, max_order, free_usdt / 1.002)
             if not isfinite(notional) or notional <= 0:
