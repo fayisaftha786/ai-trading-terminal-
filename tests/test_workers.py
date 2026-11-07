@@ -70,6 +70,7 @@ def test_worker_manager_runs_isolated_diagnostics_without_execution_permission()
     assert len({worker["id"] for worker in result["workers"]}) == 12
     risk = next(worker for worker in result["workers"] if worker["id"] == "risk_guard")
     assert risk["result"]["metrics"]["execution_authorized"] is False
+    assert risk["status"] == "blocked"
     assert risk["result"]["metrics"]["checks"]["existing_strategy_candidate"] is False
 
 
