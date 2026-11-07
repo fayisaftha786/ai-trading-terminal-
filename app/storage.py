@@ -454,6 +454,14 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_testnet_auto_orders(self, limit: int = 50) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit), 100))
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM testnet_auto_orders ORDER BY id DESC LIMIT ?", (safe_limit,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def count_testnet_auto_entries_since(self, timestamp: str) -> int:
         with self.connection() as conn:
             row = conn.execute(
