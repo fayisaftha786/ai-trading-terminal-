@@ -100,7 +100,7 @@ def test_android_gradle_version_code_matches_post_build_apk_verifier():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     script = (ROOT / "build-android-debug.sh").read_text()
     assert "versionCode = 48" in gradle
-    assert "versionName = \"0.7.0\"" in gradle
+    assert "versionName = \"0.7.1\"" in gradle
     assert "versionCode='48' versionName='0.7.1-debug'" in script
 
 
