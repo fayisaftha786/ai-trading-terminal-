@@ -1,4 +1,4 @@
-# Android native wrapper — Cloud Edition 0.5.0
+# Android native wrapper — Cloud Edition 0.6.0
 
 The Android app is a thin WebView client. It does not include Python or exchange credentials. On first launch, enter the private backend's HTTPS origin (for example, `https://your-service.onrender.com`). The wrapper rejects HTTP, localhost, IP-only hosts, embedded credentials, query strings, and URL paths.
 
