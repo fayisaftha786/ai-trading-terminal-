@@ -95,6 +95,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         auto_result = auto_paper.run(research, marks, bool(app.state.auto_paper_enabled))
         if auto_result.get("halt_automation"):
             app.state.auto_paper_enabled = False
+            db.set_setting("auto_paper_enabled", False)
             db.log_event("auto_paper_halted", "Automatic paper trading halted by portfolio drawdown circuit breaker", {})
         app.state.latest_marks = marks
         app.state.latest_marks_at = time.time()
@@ -212,8 +213,10 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     cex_positions_open_at_startup = any(
         trade.get("engine") == "multi_crypto" for trade in db.open_trades()
     )
-    app.state.auto_scan_enabled = cex_positions_open_at_startup
-    app.state.auto_paper_enabled = False  # Always require a fresh manual opt-in after process restart.
+    # Paper automation is opt-in, then persisted across ordinary process restarts.
+    # The emergency kill switch and drawdown circuit breaker persistently turn it OFF.
+    app.state.auto_paper_enabled = bool(db.get_setting("auto_paper_enabled", False))
+    app.state.auto_scan_enabled = cex_positions_open_at_startup or app.state.auto_paper_enabled
     app.state.startup_exit_recovery = cex_positions_open_at_startup
     app.state.latest_marks = {}
     app.state.latest_marks_at = 0.0
@@ -439,11 +442,14 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     @app.put("/api/automation/paper-trading")
     async def set_paper_trading_automation(payload: ScanAutomationRequest) -> dict[str, Any]:
         app.state.auto_paper_enabled = bool(payload.enabled)
+        db.set_setting("auto_paper_enabled", app.state.auto_paper_enabled)
         cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
-        if not payload.enabled and cex_positions_open:
+        if payload.enabled or cex_positions_open:
+            # Auto-entry requires the scheduler even when no positions exist yet.
+            # Open positions also require read-only exit monitoring after entries are disabled.
             app.state.auto_scan_enabled = True
-        # The opt-in is intentionally process-local and resets OFF after restart;
-        # when disabling entries, read-only exit monitoring stays enabled as needed.
+        # Explicit user opt-in persists across restarts; explicit OFF remains OFF.
+        # When disabling entries, read-only exit monitoring stays enabled as needed.
         db.log_event("auto_paper_trading", "Automatic paper trading switched", {
             "enabled": bool(payload.enabled), "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
             "live_trading_enabled": False})
@@ -455,6 +461,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     @app.post("/api/automation/kill-switch")
     async def kill_switch() -> dict[str, Any]:
         app.state.auto_paper_enabled = False
+        db.set_setting("auto_paper_enabled", False)
         # Keep read-only scanning alive when positions remain open so stop/target
         # exits continue to be monitored; no new automatic entries can be opened.
         cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
