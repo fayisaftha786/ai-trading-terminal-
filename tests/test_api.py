@@ -469,3 +469,83 @@ def test_binance_production_connection_check_fails_closed_by_default(client):
     response = client.post("/api/binance/account/connection-check")
     assert response.status_code == 409
     assert "disabled" in response.json()["detail"].lower()
+
+
+
+def test_testnet_enable_cannot_race_global_kill_switch_and_reset_stays_off(tmp_path):
+    import asyncio
+    import threading
+    from dataclasses import replace
+
+    from fastapi import HTTPException
+    from app.main import create_app
+    from app.schemas import ScanAutomationRequest, TestnetKillSwitchResetRequest
+    from app.settings import settings
+
+    database_path = tmp_path / "testnet-control-race.db"
+    config = replace(
+        settings,
+        database_path=database_path,
+        initial_capital_usd=100.0,
+        binance_testnet_enabled=True,
+        binance_testnet_api_key="TEST_KEY",
+        binance_testnet_api_secret="TEST_SECRET",
+        binance_testnet_order_enabled=True,
+    )
+    application = create_app(config=config, db_path=database_path)
+    routes = {
+        (route.path, method): route.endpoint
+        for route in application.routes
+        if hasattr(route, "path")
+        for method in (route.methods or set())
+    }
+    kill_switch = routes[("/api/automation/kill-switch", "POST")]
+    enable_testnet = routes[("/api/automation/testnet-trading", "PUT")]
+    reset_kill_switch = routes[("/api/testnet/kill-switch/reset", "POST")]
+
+    stop_started = threading.Event()
+    allow_stop_to_finish = threading.Event()
+    original_stop = application.state.testnet_auto.emergency_stop
+
+    def delayed_stop():
+        stop_started.set()
+        if not allow_stop_to_finish.wait(timeout=5):
+            raise TimeoutError("test did not release the delayed emergency stop")
+        return original_stop()
+
+    application.state.testnet_auto.emergency_stop = delayed_stop
+
+    async def exercise_race():
+        stop_task = asyncio.create_task(kill_switch())
+        assert await asyncio.to_thread(stop_started.wait, 2), "kill switch did not enter its stop phase"
+
+        enable_task = asyncio.create_task(enable_testnet(ScanAutomationRequest(enabled=True)))
+        await asyncio.sleep(0.05)
+        assert not enable_task.done(), "automation toggle bypassed the emergency-stop serialization lock"
+
+        allow_stop_to_finish.set()
+        stopped = await stop_task
+        assert stopped["stopped"] is True
+        with pytest.raises(HTTPException) as rejected:
+            await enable_task
+        assert rejected.value.status_code == 409
+
+        assert application.state.auto_testnet_enabled is False
+        assert application.state.db.get_setting("testnet_auto_trading_enabled") is False
+        assert application.state.db.get_setting("testnet_order_halted") is True
+
+        # A reset only clears the order latch; it must not silently re-enable strategy entries.
+        application.state.auto_testnet_enabled = True
+        application.state.db.set_setting("testnet_auto_trading_enabled", True)
+        reset = await reset_kill_switch(
+            TestnetKillSwitchResetRequest(confirmation="RESET TESTNET ORDER LOCK")
+        )
+        assert reset["halted"] is False
+        assert reset["automatic_testnet_trading_enabled"] is False
+        assert application.state.auto_testnet_enabled is False
+        assert application.state.db.get_setting("testnet_auto_trading_enabled") is False
+
+    try:
+        asyncio.run(exercise_race())
+    finally:
+        allow_stop_to_finish.set()
