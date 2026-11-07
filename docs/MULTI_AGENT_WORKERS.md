@@ -32,12 +32,12 @@ Supported timeframes are 1m, 5m, 15m, 30m, 1h, 2h, 4h, and 1d. Candle limits are
 
 ## Runtime controls
 
-- At most four worker handlers execute at once, including concurrent analysis requests.
-- Each handler has a four-second timeout and at most one bounded retry after an exception/timeout.
+- At most four worker handlers execute at once; only one market-analysis request is accepted per backend instance at a time, with overlapping requests receiving HTTP 429.
+- Each handler has a four-second response timeout and at most one bounded retry after an exception/timeout. Python threads cannot be forcibly terminated; a timed-out handler retains its concurrency slot until it returns, preventing additional handler execution from exceeding the bound.
 - A faulty worker is isolated; other worker results are still returned.
 - Worker outputs expose complete, blocked, unavailable, or error states with attempts and duration.
 - The registry retains the latest in-process run status for health visibility. It is not a durable event history.
-- The API fetches market data once per run, not once per worker.
+- The API fetches market data once per run, not once per worker. The single-flight gate also avoids overlapping market-provider fetches from this dashboard endpoint.
 
 ## Safety boundary
 
