@@ -72,7 +72,7 @@ def test_auto_demo_daily_cap_cooldown_and_signal_replay_are_enforced_transaction
 
 
 def test_auto_demo_remains_paper_only_and_live_execution_is_not_embedded():
-    source = (JAVA / "android/app/src/main/java/app/aitradingterminal/LocalPaperActivity.java").read_text().lower()
+    source = (JAVA / "LocalPaperActivity.java").read_text().lower()
     signal = (JAVA / "PaperSignal.java").read_text().lower()
     assert "no real order sent" in source
     assert "createorder" not in source
