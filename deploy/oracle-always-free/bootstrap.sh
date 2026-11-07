@@ -34,7 +34,7 @@ else
 fi
 
 echo "Building current main-branch PAPER backend for this VM architecture..."
-cd "$APP_DIR"
+cd "$APP_DIR" || exit 1
 docker build --pull -t "$IMAGE" .
 
 read -r -p "Dashboard username [admin]: " APP_USERNAME
@@ -85,11 +85,12 @@ docker run -d \
 echo
 echo "Backend container started. Waiting briefly for health check..."
 health_ok=false
-for attempt in $(seq 1 30); do
+for attempt in {1..30}; do
   if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
     health_ok=true
     break
   fi
+  echo "Health check attempt $attempt/30; retrying..."
   sleep 2
 done
 
