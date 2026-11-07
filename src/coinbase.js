@@ -76,12 +76,15 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   const bidDepth = parseBookSide(book.bids);
   const askDepth = parseBookSide(book.asks);
   const tickerMs = Date.parse(ticker.time || "");
+  const bookMs = Date.parse(book.time || "");
   return {
     symbol,
     product,
     status: "live",
     fetched_at_ms: nowMs,
     ticker_time: Number.isFinite(tickerMs) ? new Date(tickerMs).toISOString() : null,
+    book_timestamp_ms: Number.isFinite(bookMs) ? bookMs : null,
+    book_age_ms: Number.isFinite(bookMs) ? nowMs - bookMs : null,
     bid,
     ask,
     last,
