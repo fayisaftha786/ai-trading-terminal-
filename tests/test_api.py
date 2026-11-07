@@ -411,3 +411,31 @@ def test_auto_paper_opt_in_persists_across_process_restart_and_kill_switch_clear
 
     after_kill = create_app(config=config, db_path=database_path)
     assert after_kill.state.auto_paper_enabled is False
+
+
+def test_scan_automation_status_reports_scheduler_health_and_scan_age(client):
+    import time
+
+    app = client.app
+    idle = client.get("/api/automation/scan").json()
+    assert idle["scanner_status"] == "idle"
+    assert idle["scheduler_running"] is True
+    assert idle["last_scan_at"] is None
+
+    app.state.auto_scan_enabled = True
+    app.state.last_scan_at = time.time() - 600
+    stale = client.get("/api/automation/scan").json()
+    assert stale["scanner_status"] == "stale"
+    assert stale["last_scan_age_seconds"] >= 600
+
+    app.state.last_scan_error = "simulated market-data timeout"
+    failed = client.get("/api/automation/scan").json()
+    assert failed["scanner_status"] == "error"
+    assert failed["last_scan_error"] == "simulated market-data timeout"
+
+    app.state.last_scan_at = time.time()
+    app.state.last_scan_error = None
+    healthy = client.get("/api/automation/scan").json()
+    assert healthy["scanner_status"] == "healthy"
+    assert healthy["scheduler_running"] is True
+    assert healthy["last_scan_error"] is None
