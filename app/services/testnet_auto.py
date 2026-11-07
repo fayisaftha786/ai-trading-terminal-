@@ -502,6 +502,8 @@ class TestnetAutoTrader:
                 "halted": True,
                 "new_auto_entries_disabled": True,
                 "canceled_unfilled_order_lists": canceled,
+                # Retain the old response keys consumed by existing API clients/tests.
+                "canceled_order_lists": canceled,
                 "protection_preserved_for_filled_entries": protected,
                 "unresolved_order_lists": unresolved,
                 "live_trading_enabled": False,
