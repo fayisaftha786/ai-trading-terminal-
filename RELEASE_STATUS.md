@@ -30,7 +30,7 @@
 - Main-branch Android release workflow completed successfully, including the full release gate, Gradle build, APK signature/metadata verification, artifact upload and GitHub Release publication.
 - Backend tests, Python/release checks and the read-only market scanner workflow completed successfully for the main commit.
 - Cloudflare Worker validation includes JavaScript syntax, unit tests, Wrangler dry-run and local workerd smoke tests for initialization, authentication, explicit PAPER opt-in, kill switch, reset and static dashboard serving.
-- A follow-up full-code audit identified and is correcting two cloud PAPER safety issues: Coinbase L2 freshness was relying on an undocumented REST book `time` field, and dashboard reads could update portfolio high-water marks/risk baselines from stale cached quotes. The fix is being tested in a separate PR; it is not part of the v0.7.1 APK.
+- A follow-up full-code audit fix was merged in PR #27 (main commit `813376a96eab70214d3cfb596a15904202e2b8bb`): Coinbase L2 freshness now uses an explicitly labelled local response-retrieval time, stale/crossed ticker snapshots cannot mark portfolio positions, and incomplete marks cannot update the equity high-water mark or create new daily/weekly risk baselines. Regression tests cover the new gates. These Worker fixes do not change the v0.7.1 Android APK.
 
 **Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
 
