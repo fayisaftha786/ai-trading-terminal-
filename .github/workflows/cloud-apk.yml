@@ -102,7 +102,7 @@ jobs:
           TAG="v0.5.0-debug"
           APK="dist/AITradingTerminal-Android-v0.5.0-debug.apk"
           CHECKSUM="dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256"
-          BUILD_INFO="dist/AITradingTerminal-v0.5.0-build-info.txt"
+          BUILD_INFO="dist/AITradingTerminal-Android-v0.5.0-build-info.txt"
           test -s "$APK"
           test -s "$CHECKSUM"
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
