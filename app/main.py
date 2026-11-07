@@ -86,7 +86,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                     pass
 
         research: list[dict[str, Any]] = []
-        if app.state.auto_paper_enabled or app.state.auto_testnet_enabled or db.count_open_testnet_auto_orders() > 0:
+        if app.state.auto_paper_enabled or app.state.auto_testnet_enabled:
             async def research_market(market: dict[str, Any]) -> dict[str, Any] | None:
                 data = await market_data.cex_strategy_data(market["symbol"], timeframe="1h", limit=300)
                 if data.get("status") != "live":
@@ -101,9 +101,15 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
         # Jupiter /recent is discovery-only. It is never used as a Solana execution mark.
         auto_result = auto_paper.run(research, marks, bool(app.state.auto_paper_enabled))
+        open_testnet_auto_orders = db.count_open_testnet_auto_orders()
+        unaccounted_testnet_auto_orders = db.testnet_auto_unaccounted_closed_count()
+        testnet_reconciliation_required = (
+            open_testnet_auto_orders > 0 or unaccounted_testnet_auto_orders > 0
+        )
         testnet_auto_result = testnet_auto.run(
-            research, bool(app.state.auto_testnet_enabled)
-        ) if (app.state.auto_testnet_enabled or db.count_open_testnet_auto_orders() > 0) else {
+            research if app.state.auto_testnet_enabled else [],
+            bool(app.state.auto_testnet_enabled),
+        ) if (app.state.auto_testnet_enabled or testnet_reconciliation_required) else {
             "enabled": False, "mode": "testnet_only", "status": "disabled",
             "submitted": [], "rejected": [], "live_trading_enabled": False,
         }
@@ -162,7 +168,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     async def auto_scan_loop() -> None:
         while True:
             if (app.state.auto_scan_enabled or app.state.auto_paper_enabled or app.state.auto_testnet_enabled
-                    or db.count_open_testnet_auto_orders() > 0):
+                    or db.count_open_testnet_auto_orders() > 0
+                    or db.testnet_auto_unaccounted_closed_count() > 0):
                 try:
                     await perform_scan()
                 except Exception as exc:
@@ -243,11 +250,18 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         trade.get("engine") == "multi_crypto" for trade in db.open_trades()
     )
     # Paper automation is opt-in, then persisted across ordinary process restarts.
-    # The emergency kill switch and drawdown circuit breaker persistently turn it OFF.
+    # Testnet exchange auto-entry deliberately requires a fresh opt-in after EVERY
+    # backend restart; already-submitted OPOCO exits remain exchange-side protected.
     app.state.auto_paper_enabled = bool(db.get_setting("auto_paper_enabled", False))
-    app.state.auto_testnet_enabled = bool(db.get_setting("testnet_auto_trading_enabled", False))
-    app.state.auto_scan_enabled = (cex_positions_open_at_startup or app.state.auto_paper_enabled
-                                   or app.state.auto_testnet_enabled or db.count_open_testnet_auto_orders() > 0)
+    app.state.auto_testnet_enabled = False
+    db.set_setting("testnet_auto_trading_enabled", False)
+    open_testnet_auto_orders_at_startup = db.count_open_testnet_auto_orders()
+    unaccounted_testnet_auto_orders_at_startup = db.testnet_auto_unaccounted_closed_count()
+    app.state.auto_scan_enabled = bool(
+        cex_positions_open_at_startup or app.state.auto_paper_enabled
+        or open_testnet_auto_orders_at_startup > 0
+        or unaccounted_testnet_auto_orders_at_startup > 0
+    )
     app.state.startup_exit_recovery = cex_positions_open_at_startup
     app.state.latest_marks = {}
     app.state.latest_marks_at = 0.0
@@ -458,7 +472,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                 "startup_exit_recovery": bool(app.state.startup_exit_recovery),
                 "testnet_auto_trading_enabled": bool(app.state.auto_testnet_enabled),
                 "testnet_order_lists_to_reconcile": db.count_open_testnet_auto_orders(),
-                "scope": "scheduled market discovery, paper strategy processing, isolated Testnet auto-entry and native bracket reconciliation"}
+                "testnet_closed_trades_awaiting_accounting": db.testnet_auto_unaccounted_closed_count(),
+                "scope": "scheduled market discovery, paper strategy processing, Testnet native bracket reconciliation and fee-ledger recovery"}
 
     @app.put("/api/automation/scan")
     async def set_scan_automation(payload: ScanAutomationRequest) -> dict[str, Any]:
@@ -537,7 +552,8 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
             ))
         app.state.auto_testnet_enabled = requested
         db.set_setting("testnet_auto_trading_enabled", requested)
-        if requested or db.count_open_testnet_auto_orders() > 0:
+        if (requested or db.count_open_testnet_auto_orders() > 0
+                or db.testnet_auto_unaccounted_closed_count() > 0):
             app.state.auto_scan_enabled = True
         db.log_event("testnet_auto_trading", "Automatic strategy-driven Binance Testnet trading switched", {
             "enabled": requested, "mode": "testnet_only", "live_trading_enabled": False,
