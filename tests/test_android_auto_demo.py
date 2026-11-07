@@ -30,7 +30,8 @@ def test_auto_demo_fetches_only_closed_contiguous_1h_and_4h_candles():
     assert 'fetchCandles("4h",180,FOUR_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS)' in source
     assert "if(closeTime>=now) continue" in source
     assert "openTime-previousOpen!=intervalMs" in source
-    assert "At least "+'"+PaperSignal.MIN_HISTORY+"'+" closed "+'"+interval+"'"+" candles are required" in source
+    assert "PaperSignal.MIN_HISTORY" in source
+    assert 'interval+" candles are required' in source
 
 
 def test_auto_demo_checks_live_ticker_spread_depth_and_daily_quote_volume():
