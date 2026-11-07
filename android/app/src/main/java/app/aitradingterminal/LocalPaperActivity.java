@@ -448,7 +448,7 @@ public final class LocalPaperActivity extends Activity {
         }
 
         synchronized String openAuto(double referencePrice,long signalCandleOpenTime) {
-            if(!finitePositive(referencePrice)||signalCandleOpenTime<=0)return "invalid_entry_price_or_signal_time";
+            if(!Double.isFinite(referencePrice)||referencePrice<=0||signalCandleOpenTime<=0)return "invalid_entry_price_or_signal_time";
             SQLiteDatabase d=getWritableDatabase();d.beginTransaction();
             try {
                 long now=System.currentTimeMillis();
