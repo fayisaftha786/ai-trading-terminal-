@@ -255,7 +255,9 @@ export class TradingEngine extends DurableObject {
       updatedPortfolio.open_positions, updatedPortfolio.drawdown_pct_from_peak
     );
     this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
+    const priorRuntime = this.getState("runtime") || {};
     const runtime = {
+      next_alarm_at_ms: priorRuntime.next_alarm_at_ms ?? null,
       last_scan_at_ms: Date.now(),
       last_scan_status: markets.some((market) => market.status === "live") ? "completed" : "unavailable",
       last_scan_error: markets.every((market) => market.status !== "live") ? "All public market providers were unavailable" : null,
