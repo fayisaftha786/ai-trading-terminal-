@@ -52,6 +52,98 @@ class TestnetAutoTrader:
             "live_trading_enabled": False,
         }
 
+    @staticmethod
+    def _order_fee_quote(order: dict[str, Any], quote: str, base: str, average: float) -> tuple[float | None, bool]:
+        """Convert reported fees to quote currency; unknown third-asset fees stay unresolved."""
+        raw_fees = order.get("fees")
+        if not raw_fees and isinstance(order.get("fee"), dict):
+            raw_fees = [order["fee"]]
+        if not raw_fees:
+            return None, False
+        total = 0.0
+        for fee in raw_fees:
+            if not isinstance(fee, dict):
+                return None, False
+            cost = TestnetAutoTrader._number(fee.get("cost"))
+            currency = str(fee.get("currency") or "").upper()
+            if cost is None or cost < 0 or not currency:
+                return None, False
+            if currency == quote:
+                total += cost
+            elif currency == base:
+                total += cost * average
+            else:
+                # Third-asset conversion needs a fresh FX mark. Do not silently
+                # treat BNB/other fees as zero or invent an exchange rate.
+                return None, False
+        return total, True
+
+    def _record_closed_fill_ledger(
+        self, exchange: Any, row: dict[str, Any], working_id: Any,
+        exit_orders: list[dict[str, Any]],
+    ) -> None:
+        """Persist exact fills and quote-denominated P&L only when both fees are known."""
+        entry = exchange.fetch_order(working_id, row["symbol"])
+        filled_exits = [
+            item for item in exit_orders
+            if str(item.get("status") or "").lower() == "closed"
+            and (self._number(item.get("filled")) or 0.0) > 0
+        ]
+        if not filled_exits:
+            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                "accounting_status": "FILL_DATA_UNAVAILABLE",
+            })
+            return
+        base, quote = row["symbol"].split("/", 1)
+        entry_qty = self._number(entry.get("filled"))
+        entry_avg = self._number(entry.get("average"))
+        entry_cost = self._number(entry.get("cost"))
+        if entry_cost is None and entry_qty is not None and entry_avg is not None:
+            entry_cost = entry_qty * entry_avg
+        exit_qty = 0.0
+        exit_proceeds = 0.0
+        exit_fee_total = 0.0
+        exit_fees_exact = True
+        for order in filled_exits:
+            qty = self._number(order.get("filled"))
+            avg = self._number(order.get("average"))
+            cost = self._number(order.get("cost"))
+            if cost is None and qty is not None and avg is not None:
+                cost = qty * avg
+            if qty is None or cost is None or qty <= 0 or cost < 0 or avg is None or avg <= 0:
+                self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                    "accounting_status": "FILL_DATA_UNAVAILABLE",
+                })
+                return
+            fee_quote, fee_exact = self._order_fee_quote(order, quote, base, avg)
+            if fee_exact and fee_quote is not None:
+                exit_fee_total += fee_quote
+            else:
+                exit_fees_exact = False
+            exit_qty += qty
+            exit_proceeds += cost
+        entry_fee, entry_fee_exact = self._order_fee_quote(
+            entry, quote, base, entry_avg or 0.0
+        ) if entry_avg and entry_avg > 0 else (None, False)
+        if entry_qty is None or entry_cost is None or entry_qty <= 0 or entry_cost <= 0:
+            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                "accounting_status": "FILL_DATA_UNAVAILABLE",
+            })
+            return
+        exact = entry_fee_exact and entry_fee is not None and exit_fees_exact
+        pnl = exit_proceeds - entry_cost - entry_fee - exit_fee_total if exact else None
+        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+            "entry_filled_qty": entry_qty,
+            "entry_cost_quote": entry_cost,
+            "entry_fee_quote": entry_fee,
+            "exit_filled_qty": exit_qty,
+            "exit_proceeds_quote": exit_proceeds,
+            "exit_fee_quote": exit_fee_total if exit_fees_exact else None,
+            "realized_pnl_quote": pnl,
+            "accounting_status": "EXACT" if exact else "FEES_UNRESOLVED",
+            "above_order_id": str(filled_exits[0].get("id") or ""),
+        })
+
     def _reconcile_locked(self) -> dict[str, int]:
         rows = self.storage.list_active_testnet_auto_orders()
         counts = {"checked": 0, "executing": 0, "completed": 0, "unresolved": 0}
@@ -112,10 +204,14 @@ class TestnetAutoTrader:
                             )
                         )
                         if completed_exit:
+                            self._record_closed_fill_ledger(
+                                exchange, row, working_id, exit_orders
+                            )
                             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                 "working_order_id": str(working_id),
                                 "status": "CLOSED",
                                 "error_code": None,
+                                "closed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             })
                             counts["completed"] += 1
                         elif list_status in {"EXECUTING", "EXEC_STARTED"} and any(
@@ -518,8 +614,12 @@ class TestnetAutoTrader:
                                         )
                                     )
                                     if completed_exit:
+                                        self._record_closed_fill_ledger(
+                                            exchange, row, working_id, exit_orders
+                                        )
                                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                             "status": "CLOSED", "error_code": None,
+                                            "closed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                                         })
                                         canceled.append(row["list_client_order_id"])
                                     elif any(state in {"open", "pending"} for state in exit_states):
