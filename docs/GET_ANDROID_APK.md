@@ -1,17 +1,21 @@
-# Install the Android DEMO APK — v0.6.0
+# Install the Android AUTO DEMO APK — v0.7.0
 
-No Termux is required. GitHub Actions builds the APK directly from this repository.
+No Termux is required. GitHub Actions builds the installable debug APK from this repository.
 
 1. Open this repository's **Actions** tab.
-2. Select **AI Trading Terminal v0.6.0 — Cloud source verification and Android APK**.
+2. Select **AI Trading Terminal v0.7.0 — Cloud source verification and Android APK**.
 3. Run the workflow on the `main` branch and wait for every verification step to pass.
-4. Download `AITradingTerminal-Android-v0.6.0-debug-apk` from the Artifacts section. It contains the APK, SHA-256 checksum, and build information.
+4. Download `AITradingTerminal-Android-v0.7.0-debug-apk` from the Artifacts section. It contains the APK, SHA-256 checksum, and build information.
 5. Verify the APK against its checksum before installing it.
 
-## Use the local DEMO mode
+## Local DEMO and AUTO DEMO
 
-Open the app and choose **OPEN ON-DEVICE PAPER TERMINAL**. A cloud backend is not required for this local demo. The simulated wallet starts with $1,000 virtual capital and uses a $100 position size. Its assumptions are 0.10% fee per side, 0.05% slippage per fill, a 2% stop-loss, and a 4% take-profit. Candle timestamps and the paper ledger are saved locally on the phone.
+The on-device terminal uses a $1,000 virtual ledger and $100 fixed-size positions. Modeled fees are 0.10% and slippage 0.05% per side, with a 2% stop-loss and 4% take-profit. The ledger, candle timestamps, and emergency stop are stored locally on the phone.
 
-**Important limits:** this is a paper simulation, not an exchange account. Automatic stop/target exits are evaluated only when the app successfully refreshes complete, closed 1-hour candles while the app is running. Android may suspend background activity; this is not a 24/7 execution service. Cached market data cannot open new positions, and a manual close on cached data is only an estimate. Live-money order execution is not implemented and remains disabled.
+**AUTO DEMO is OFF by default and requires an explicit in-app opt-in.** It evaluates closed 1-hour and 4-hour candles plus public BTC/USDT ticker, bid/ask spread, top-10 order-book depth, 24-hour quote volume, trend/momentum and modeled round-trip costs. It allows no more than 3 entries per UTC day, one open position at a time, and a 4-hour cooldown. The same signal candle cannot be reused.
 
-The APK is debug-signed for testing, not Play Store distribution. It has not been physically tested on a Vivo Android 16 device. The optional cloud dashboard requires a separately deployed HTTPS backend; no paid hosting is included.
+Automatic market refresh and stop/target evaluation happen only while the terminal screen is in the foreground, approximately every 5 minutes. Android can suspend the app; this is not a 24/7 service, and a phone/network outage can delay or prevent paper exits. Cached data cannot create automatic entries.
+
+This is a deterministic, explainable paper strategy, not a trained ML model or a profit guarantee. It uses public Binance market data, sends no orders, and does not need exchange API keys. ORIGINAL/LIVE trading remains unavailable and locked. Demo results never automatically enable live trading.
+
+The APK is debug-signed for testing, not Play Store production distribution. Physical-device testing is still required. The cloud dashboard requires a separately deployed HTTPS backend; this workflow does not deploy paid hosting.
