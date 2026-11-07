@@ -44,6 +44,28 @@
         <article class="stat-card warning-card"><div class="stat-label">PRODUCTION EXECUTION <span>STATUS</span></div><div class="stat-value locked">LOCKED</div><div class="stat-foot">Testnet is separate · no real-money orders</div></article>
       </section>
 
+      <section class="panel" id="tradingModes" style="margin:18px 0;padding:18px">
+        <div class="section-head compact"><div><div class="eyebrow">DUAL MODE / EXECUTION CONTROL</div><h2>Choose trading environment</h2></div><span class="tag neutral">LIVE LOCKED BY DEFAULT</span></div>
+        <div class="engine-grid">
+          <article class="panel engine-panel">
+            <div class="panel-head"><div class="engine-icon purple">D</div><div class="engine-title"><h3>DEMO MODE</h3><p>Automatic paper trading · virtual funds only</p></div><span id="demoModeBadge" class="tag neutral">OFF</span></div>
+            <p class="muted small" id="demoModeDetails">Uses public market data and the paper ledger. No real funds or exchange orders.</p>
+            <div class="performance-grid">
+              <div><span>Closed trades</span><b id="demoClosedTrades">0</b></div>
+              <div><span>Net P&amp;L</span><b id="demoNetPnl">—</b></div>
+              <div><span>Profit factor</span><b id="demoProfitFactor">—</b></div>
+              <div><span>Observed drawdown</span><b id="demoDrawdown">—</b></div>
+            </div>
+            <div id="demoQualification" class="ledger-note">Demo qualification has not been assessed yet.</div>
+          </article>
+          <article class="panel engine-panel">
+            <div class="panel-head"><div class="engine-icon orange">L</div><div class="engine-title"><h3>ORIGINAL / LIVE MODE</h3><p>Real exchange account · real funds at risk</p></div><span id="liveModeBadge" class="tag warn">LOCKED</span></div>
+            <p class="muted small" id="liveModeDetails">Production order execution is not implemented or enabled in this build. Demo success never moves real funds automatically.</p>
+            <button class="btn secondary" type="button" disabled>Live activation unavailable</button>
+          </article>
+        </div>
+      </section>
+
       <section class="panel" id="performance" style="margin:18px 0;padding:18px">
         <div class="section-head compact"><div><div class="eyebrow">FORWARD TEST / VERIFIED PAPER LEDGER</div><h2>Trading performance</h2></div><div class="performance-actions"><select id="performanceDays" aria-label="Performance period"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">365 days</option></select><button id="refreshPerformance" class="btn ghost">Refresh</button><a id="exportPerformance" class="btn ghost" href="#export-performance">Export CSV</a></div></div>
         <div class="performance-grid">
