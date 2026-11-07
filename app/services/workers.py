@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 import time
 import uuid
-import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -204,7 +204,7 @@ def _research(context: dict[str, Any]) -> dict[str, Any]:
     higher_count = len(((market.get("higher_timeframe") or {}).get("candles") or []))
     integrity = bool(quality.get("contiguous_closed_candles"))
     sufficient = integrity and primary_count >= 200 and higher_count >= 150
-    return {"status": "complete" if integrity else "blocked",
+    return {"status": "complete" if sufficient else "blocked",
             "summary": "Closed-candle history is sufficient for a separate strategy research run."
                        if sufficient else "Research readiness is limited by candle integrity or history depth.",
             "findings": ["This Worker checks research readiness only; it does not claim a backtest was run."],
@@ -269,7 +269,8 @@ class WorkerManager:
             last = last_results.get(worker_id) or {}
             workers.append({"id": worker_id, "name": name, "description": description,
                             "availability": availability,
-                            "health_status": "active" if active_runs else (last.get("status") or "idle"),
+                            "health_status": "unavailable" if availability == "unavailable"
+                                             else ("active" if active_runs else (last.get("status") or "idle")),
                             "last_status": last.get("status"),
                             "last_duration_ms": last.get("duration_ms"),
                             "execution_mode": "read_only"})
