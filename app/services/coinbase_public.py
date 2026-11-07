@@ -89,6 +89,7 @@ class CoinbasePublicAdapter:
         )
         self._owns_client = client is None
         self._min_gap = max(0.0, float(min_request_gap_seconds))
+
     async def __aenter__(self) -> "CoinbasePublicAdapter":
         return self
 
