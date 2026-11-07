@@ -352,10 +352,11 @@ class TestnetAutoTrader:
                 symbol, entry_price * (1.0 + target_pct / 100.0)
             ))
             last_price = self._number(ticker.get("last"))
-            if (stop_price is not None and target_price is not None
-                    and exit_amount < min_amount
-                    or stop_price is not None and exit_amount * stop_price < min_cost
-                    or target_price is not None and exit_amount * target_price < min_cost):
+            if (
+                exit_amount < min_amount
+                or (stop_price is not None and exit_amount * stop_price < min_cost)
+                or (target_price is not None and exit_amount * target_price < min_cost)
+            ):
                 return {"accepted": False, "reason": "protected_exit_quantity_below_exchange_minimum"}
             if (stop_price is None or target_price is None or last_price is None
                     or stop_price <= 0 or target_price <= last_price or stop_price >= last_price):
