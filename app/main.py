@@ -444,7 +444,9 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         app.state.auto_paper_enabled = bool(payload.enabled)
         db.set_setting("auto_paper_enabled", app.state.auto_paper_enabled)
         cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
-        if not payload.enabled and cex_positions_open:
+        if payload.enabled or cex_positions_open:
+            # Auto-entry requires the scheduler even when no positions exist yet.
+            # Open positions also require read-only exit monitoring after entries are disabled.
             app.state.auto_scan_enabled = True
         # Explicit user opt-in persists across restarts; explicit OFF remains OFF.
         # When disabling entries, read-only exit monitoring stays enabled as needed.
