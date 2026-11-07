@@ -19,6 +19,7 @@ from app.schemas import (BacktestRequest, LoginRequest, PaperOrderRequest, RiskU
 from app.services.backtest import (run_ema_backtest, run_walk_forward, run_signal_backtest,
                                     run_signal_walk_forward)
 from app.services.automation import AutoPaperEngine
+from app.services.binance_account import BinanceAccountUnavailable, BinanceSpotReadOnly
 from app.services.mode_gate import assess_demo_readiness
 from app.services.market_data import MarketDataService
 from app.services.paper import PaperBroker
@@ -54,6 +55,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     broker = PaperBroker(db)
     auto_paper = AutoPaperEngine(db, broker)
     testnet = BinanceSpotTestnet(cfg)
+    binance_readonly = BinanceSpotReadOnly(cfg)
     worker_manager = WorkerManager(concurrency=4, timeout_seconds=4.0, retries=1)
     worker_analysis_lock = asyncio.Lock()
 
@@ -211,6 +213,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     app.state.market_data = market_data
     app.state.paper_broker = broker
     app.state.testnet = testnet
+    app.state.binance_readonly = binance_readonly
     app.state.worker_manager = worker_manager
     app.state.worker_analysis_lock = worker_analysis_lock
     app.state.settings = cfg
@@ -272,6 +275,23 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         token = create_access_token(cfg.auth_username, cfg.auth_secret, cfg.auth_token_ttl_minutes)
         db.log_event("auth_login", "Dashboard sign-in succeeded", {"source": client_host})
         return {"access_token": token, "token_type": "Bearer", "expires_in": cfg.auth_token_ttl_minutes * 60}
+
+    @app.get("/api/binance/account/status")
+    async def binance_account_status() -> dict[str, Any]:
+        return binance_readonly.status()
+
+    @app.post("/api/binance/account/connection-check")
+    async def binance_account_connection_check() -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(binance_readonly.check_account)
+            db.log_event("binance_readonly_connection", "Binance production read-only account check succeeded", {
+                "environment": "production_read_only",
+                "asset_count": result.get("asset_count", 0),
+                "live_trading_enabled": False,
+            })
+            return result
+        except BinanceAccountUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.get("/api/testnet/status")
     async def testnet_status() -> dict[str, Any]:
