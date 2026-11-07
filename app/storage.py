@@ -506,6 +506,20 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def list_unaccounted_testnet_auto_orders(self, limit: int = 100) -> list[dict[str, Any]]:
+        """Closed trades whose fill/commission ledger may become complete on retry."""
+        safe_limit = max(1, min(int(limit), 500))
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM testnet_auto_orders "
+                "WHERE status='CLOSED' AND accounting_status!='EXACT' "
+                "AND working_order_id IS NOT NULL "
+                "AND (above_order_id IS NOT NULL OR below_order_id IS NOT NULL) "
+                "ORDER BY id ASC LIMIT ?",
+                (safe_limit,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def testnet_auto_performance(self) -> dict[str, Any]:
         with self.connection() as conn:
             row = conn.execute(

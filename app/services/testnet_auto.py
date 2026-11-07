@@ -89,13 +89,22 @@ class TestnetAutoTrader:
             "live_trading_enabled": False,
         }
 
+    @classmethod
+    def _is_fully_filled_order(cls, order: dict[str, Any]) -> bool:
+        """Require exchange status and quantity agreement before clearing exposure."""
+        if str(order.get("status") or "").lower() != "closed":
+            return False
+        amount = cls._number(order.get("amount"))
+        filled = cls._number(order.get("filled"))
+        if amount is None or filled is None or amount <= 0 or filled <= 0:
+            return False
+        return filled >= amount - max(1e-12, amount * 1e-8)
+
     @staticmethod
-    def _order_fee_quote(order: dict[str, Any], quote: str, base: str, average: float) -> tuple[float | None, bool]:
-        """Convert reported fees to quote currency; unknown third-asset fees stay unresolved."""
-        raw_fees = order.get("fees")
-        if not raw_fees and isinstance(order.get("fee"), dict):
-            raw_fees = [order["fee"]]
-        if not raw_fees:
+    def _fees_to_quote(
+        raw_fees: Any, quote: str, base: str, fill_price: float
+    ) -> tuple[float | None, bool]:
+        if not isinstance(raw_fees, list) or not raw_fees:
             return None, False
         total = 0.0
         for fee in raw_fees:
@@ -108,83 +117,141 @@ class TestnetAutoTrader:
             if currency == quote:
                 total += cost
             elif currency == base:
-                total += cost * average
+                total += cost * fill_price
             else:
-                # Third-asset conversion needs a fresh FX mark. Do not silently
-                # treat BNB/other fees as zero or invent an exchange rate.
+                # Third-asset conversion requires its historical fill-time FX price.
+                # Never use a later spot quote or silently record zero fees.
                 return None, False
         return total, True
+
+    def _order_fee_quote(
+        self, exchange: Any, order: dict[str, Any], order_id: Any, symbol: str,
+        quote: str, base: str, average: float,
+    ) -> tuple[float | None, bool]:
+        """Prefer actual trade-level commissions because order snapshots can omit fees."""
+        raw_fees = order.get("fees")
+        if not raw_fees and isinstance(order.get("fee"), dict):
+            raw_fees = [order["fee"]]
+        if raw_fees:
+            return self._fees_to_quote(raw_fees, quote, base, average)
+
+        fills: Any = None
+        fetch_order_trades = getattr(exchange, "fetch_order_trades", None)
+        if callable(fetch_order_trades):
+            try:
+                fills = fetch_order_trades(order_id, symbol)
+            except Exception:
+                fills = None
+        if not fills:
+            # Binance myTrades returns commission and commissionAsset per execution.
+            fetch_my_trades = getattr(exchange, "fetch_my_trades", None)
+            if callable(fetch_my_trades):
+                try:
+                    numeric_order_id = int(order_id) if str(order_id).isdigit() else order_id
+                    fills = fetch_my_trades(symbol, None, None, {"orderId": numeric_order_id})
+                except Exception:
+                    fills = None
+        if not isinstance(fills, list) or not fills:
+            return None, False
+
+        expected_filled = self._number(order.get("filled"))
+        if expected_filled is None or expected_filled <= 0:
+            return None, False
+        observed_filled = 0.0
+        total_fee = 0.0
+        for trade in fills:
+            if not isinstance(trade, dict):
+                return None, False
+            trade_order_id = trade.get("order")
+            if trade_order_id is not None and str(trade_order_id) != str(order_id):
+                return None, False
+            qty = self._number(trade.get("amount"))
+            price = self._number(trade.get("price"))
+            if qty is None or qty <= 0 or price is None or price <= 0:
+                return None, False
+            trade_fees = trade.get("fees")
+            if not trade_fees and isinstance(trade.get("fee"), dict):
+                trade_fees = [trade["fee"]]
+            fee_quote, fee_exact = self._fees_to_quote(trade_fees, quote, base, price)
+            if not fee_exact or fee_quote is None:
+                return None, False
+            observed_filled += qty
+            total_fee += fee_quote
+
+        tolerance = max(1e-12, expected_filled * 1e-8)
+        if abs(observed_filled - expected_filled) > tolerance:
+            return None, False
+        return total_fee, True
 
     def _record_closed_fill_ledger(
         self, exchange: Any, row: dict[str, Any], working_id: Any,
         exit_orders: list[dict[str, Any]],
     ) -> None:
-        """Persist exact fills and quote-denominated P&L only when both fees are known."""
-        entry = exchange.fetch_order(working_id, row["symbol"])
-        filled_exits = [
+        """Persist only a fully exited position and verified trade-level commissions."""
+        positive_exits = [
             item for item in exit_orders
-            if str(item.get("status") or "").lower() == "closed"
-            and (self._number(item.get("filled")) or 0.0) > 0
+            if (self._number(item.get("filled")) or 0.0) > 0
         ]
-        if not filled_exits:
+        # Save child IDs before checking fill details so temporary provider omissions
+        # can be retried later without losing the exchange trade link.
+        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+            "above_order_id": str(exit_orders[0].get("id") or "") if exit_orders else None,
+            "below_order_id": str(exit_orders[1].get("id") or "") if len(exit_orders) > 1 else None,
+        })
+        entry = exchange.fetch_order(working_id, row["symbol"])
+        if (not self._is_fully_filled_order(entry) or len(positive_exits) != 1
+                or not self._is_fully_filled_order(positive_exits[0])):
             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                 "accounting_status": "FILL_DATA_UNAVAILABLE",
             })
             return
+
         base, quote = row["symbol"].split("/", 1)
         entry_qty = self._number(entry.get("filled"))
         entry_avg = self._number(entry.get("average"))
         entry_cost = self._number(entry.get("cost"))
         if entry_cost is None and entry_qty is not None and entry_avg is not None:
             entry_cost = entry_qty * entry_avg
-        exit_qty = 0.0
-        exit_proceeds = 0.0
-        exit_fee_total = 0.0
-        exit_fees_exact = True
-        for order in filled_exits:
-            qty = self._number(order.get("filled"))
-            avg = self._number(order.get("average"))
-            cost = self._number(order.get("cost"))
-            if cost is None and qty is not None and avg is not None:
-                cost = qty * avg
-            if qty is None or cost is None or qty <= 0 or cost < 0 or avg is None or avg <= 0:
-                self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                    "accounting_status": "FILL_DATA_UNAVAILABLE",
-                })
-                return
-            fee_quote, fee_exact = self._order_fee_quote(order, quote, base, avg)
-            if fee_exact and fee_quote is not None:
-                exit_fee_total += fee_quote
-            else:
-                exit_fees_exact = False
-            exit_qty += qty
-            exit_proceeds += cost
-        entry_fee, entry_fee_exact = self._order_fee_quote(
-            entry, quote, base, entry_avg or 0.0
-        ) if entry_avg and entry_avg > 0 else (None, False)
-        if entry_qty is None or entry_cost is None or entry_qty <= 0 or entry_cost <= 0:
+        exit_order = positive_exits[0]
+        exit_qty = self._number(exit_order.get("filled"))
+        exit_avg = self._number(exit_order.get("average"))
+        exit_proceeds = self._number(exit_order.get("cost"))
+        if exit_proceeds is None and exit_qty is not None and exit_avg is not None:
+            exit_proceeds = exit_qty * exit_avg
+        if (entry_qty is None or entry_cost is None or entry_avg is None or entry_qty <= 0
+                or entry_cost <= 0 or exit_qty is None or exit_proceeds is None
+                or exit_avg is None or exit_qty <= 0 or exit_proceeds <= 0):
             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                 "accounting_status": "FILL_DATA_UNAVAILABLE",
             })
             return
-        exact = entry_fee_exact and entry_fee is not None and exit_fees_exact
-        pnl = exit_proceeds - entry_cost - entry_fee - exit_fee_total if exact else None
+
+        entry_fee, entry_fee_exact = self._order_fee_quote(
+            exchange, entry, working_id, row["symbol"], quote, base, entry_avg
+        )
+        exit_order_id = exit_order.get("id")
+        exit_fee, exit_fee_exact = self._order_fee_quote(
+            exchange, exit_order, exit_order_id, row["symbol"], quote, base, exit_avg
+        ) if exit_order_id is not None else (None, False)
+        exact = entry_fee_exact and entry_fee is not None and exit_fee_exact and exit_fee is not None
+        pnl = exit_proceeds - entry_cost - entry_fee - exit_fee if exact else None
         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
             "entry_filled_qty": entry_qty,
             "entry_cost_quote": entry_cost,
             "entry_fee_quote": entry_fee,
             "exit_filled_qty": exit_qty,
             "exit_proceeds_quote": exit_proceeds,
-            "exit_fee_quote": exit_fee_total if exit_fees_exact else None,
+            "exit_fee_quote": exit_fee,
             "realized_pnl_quote": pnl,
             "accounting_status": "EXACT" if exact else "FEES_UNRESOLVED",
-            "above_order_id": str(filled_exits[0].get("id") or ""),
         })
 
     def _reconcile_locked(self) -> dict[str, int]:
         rows = self.storage.list_active_testnet_auto_orders()
-        counts = {"checked": 0, "executing": 0, "completed": 0, "unresolved": 0}
-        if not rows:
+        counts = {"checked": 0, "executing": 0, "completed": 0, "unresolved": 0,
+                  "accounting_retried": 0, "accounting_resolved": 0}
+        unaccounted = self.storage.list_unaccounted_testnet_auto_orders()
+        if not rows and not unaccounted:
             return counts
         exchange = None
         try:
@@ -228,6 +295,14 @@ class TestnetAutoTrader:
                         continue
 
                     if working_status == "closed":
+                        if not self._is_fully_filled_order(working):
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "UNPROTECTED",
+                                "error_code": "CLOSED_ENTRY_FILL_QUANTITY_MISMATCH",
+                            })
+                            counts["unresolved"] += 1
+                            continue
                         exit_ids = [
                             item.get("orderId") for item in orders
                             if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
@@ -241,16 +316,16 @@ class TestnetAutoTrader:
                         exit_states = [
                             str(item.get("status") or "unknown").lower() for item in exit_orders
                         ]
-                        # A child order can be terminal without having executed (for
-                        # example, the sibling OCO leg canceled it). Only ALL_DONE plus
-                        # a positive fill on an exit child proves the bracket completed.
+                        # ALL_DONE alone is not enough: exactly one exit leg must be
+                        # fully filled. A partial SELL can leave residual unprotected base.
+                        positive_exit_fills = [
+                            item for item in exit_orders
+                            if (self._number(item.get("filled")) or 0.0) > 0
+                        ]
                         completed_exit = (
                             list_status == "ALL_DONE"
-                            and any(
-                                str(item.get("status") or "").lower() == "closed"
-                                and (self._number(item.get("filled")) or 0.0) > 0
-                                for item in exit_orders
-                            )
+                            and len(positive_exit_fills) == 1
+                            and self._is_fully_filled_order(positive_exit_fills[0])
                         )
                         if completed_exit:
                             self._record_closed_fill_ledger(
@@ -283,6 +358,15 @@ class TestnetAutoTrader:
                             counts["unresolved"] += 1
                         continue
 
+                    if working_status in {"open", "pending"} and (self._number(working.get("filled")) or 0.0) > 0:
+                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                            "working_order_id": str(working_id),
+                            "status": "UNPROTECTED",
+                            "error_code": "PARTIALLY_FILLED_WORKING_ORDER_HAS_NO_ACTIVE_OPOCO_EXITS",
+                        })
+                        counts["unresolved"] += 1
+                        continue
+
                     if working_status in {"open", "pending"} and list_status in {"EXECUTING", "EXEC_STARTED"}:
                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                             "working_order_id": str(working_id),
@@ -303,6 +387,27 @@ class TestnetAutoTrader:
                         "status": "UNKNOWN", "error_code": "RECONCILIATION_UNAVAILABLE",
                     })
                     counts["unresolved"] += 1
+            # Retry closed records whose commissions/fill details were temporarily
+            # unavailable. Never guess fees or reopen a completed position.
+            for row in unaccounted:
+                try:
+                    working_id = row.get("working_order_id")
+                    if not working_id:
+                        continue
+                    entry = exchange.fetch_order(working_id, row["symbol"])
+                    child_ids = [row.get("above_order_id"), row.get("below_order_id")]
+                    exit_orders = [
+                        exchange.fetch_order(order_id, row["symbol"])
+                        for order_id in child_ids if order_id
+                    ]
+                    counts["accounting_retried"] += 1
+                    self._record_closed_fill_ledger(exchange, row, working_id, exit_orders)
+                    updated = self.storage.get_testnet_auto_order_by_key(row["idempotency_key"])
+                    if updated and updated.get("accounting_status") == "EXACT":
+                        counts["accounting_resolved"] += 1
+                except Exception:
+                    # CLOSED stays closed; unresolved P&L stays excluded.
+                    continue
         except Exception:
             for row in rows:
                 self.storage.update_testnet_auto_order(row["list_client_order_id"], {
@@ -619,6 +724,7 @@ class TestnetAutoTrader:
         with self._lock:
             self.storage.set_setting("testnet_auto_trading_enabled", False)
             canceled: list[str] = []
+            completed: list[str] = []
             protected: list[str] = []
             unresolved: list[str] = []
             # Refresh all order-list and child-order states before deciding what can be
@@ -648,6 +754,13 @@ class TestnetAutoTrader:
                                 working = exchange.fetch_order(working_id, row["symbol"])
                                 working_status = str(working.get("status") or "unknown").lower()
                                 if working_status == "closed":
+                                    if not self._is_fully_filled_order(working):
+                                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                            "status": "UNPROTECTED",
+                                            "error_code": "CLOSED_ENTRY_FILL_QUANTITY_MISMATCH",
+                                        })
+                                        unresolved.append(row["list_client_order_id"])
+                                        continue
                                     exit_ids = [
                                         item.get("orderId") for item in child_orders
                                         if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
@@ -660,13 +773,14 @@ class TestnetAutoTrader:
                                         str(exit_order.get("status") or "unknown").lower()
                                         for exit_order in exit_orders
                                     ]
+                                    positive_exit_fills = [
+                                        exit_order for exit_order in exit_orders
+                                        if (self._number(exit_order.get("filled")) or 0.0) > 0
+                                    ]
                                     completed_exit = (
                                         str(remote_list.get("listOrderStatus") or "").upper() == "ALL_DONE"
-                                        and any(
-                                            str(exit_order.get("status") or "").lower() == "closed"
-                                            and (self._number(exit_order.get("filled")) or 0.0) > 0
-                                            for exit_order in exit_orders
-                                        )
+                                        and len(positive_exit_fills) == 1
+                                        and self._is_fully_filled_order(positive_exit_fills[0])
                                     )
                                     if completed_exit:
                                         self._record_closed_fill_ledger(
@@ -676,7 +790,7 @@ class TestnetAutoTrader:
                                             "status": "CLOSED", "error_code": None,
                                             "closed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                                         })
-                                        canceled.append(row["list_client_order_id"])
+                                        completed.append(row["list_client_order_id"])
                                     elif any(state in {"open", "pending"} for state in exit_states):
                                         # Entry is filled and at least one native TP/SL exit remains active.
                                         protected.append(row["list_client_order_id"])
@@ -690,10 +804,26 @@ class TestnetAutoTrader:
                                         unresolved.append(row["list_client_order_id"])
                                     continue
                                 if working_status in {"canceled", "cancelled", "expired", "rejected"}:
+                                    terminal_filled = self._number(working.get("filled")) or 0.0
+                                    if terminal_filled > 0:
+                                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                            "status": "UNPROTECTED",
+                                            "error_code": "PARTIALLY_FILLED_ENTRY_WITHOUT_PROTECTED_EXIT",
+                                        })
+                                        unresolved.append(row["list_client_order_id"])
+                                    else:
+                                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                            "status": "NOT_FILLED", "error_code": None,
+                                        })
+                                        canceled.append(row["list_client_order_id"])
+                                    continue
+
+                                if working_status in {"open", "pending"} and (self._number(working.get("filled")) or 0.0) > 0:
                                     self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                                        "status": "NOT_FILLED", "error_code": None,
+                                        "status": "UNPROTECTED",
+                                        "error_code": "PARTIALLY_FILLED_WORKING_ORDER_HAS_NO_ACTIVE_OPOCO_EXITS",
                                     })
-                                    canceled.append(row["list_client_order_id"])
+                                    unresolved.append(row["list_client_order_id"])
                                     continue
                                 if working_status not in {"open", "pending"}:
                                     unresolved.append(row["list_client_order_id"])
@@ -721,6 +851,7 @@ class TestnetAutoTrader:
                 "canceled_unfilled_order_lists": canceled,
                 # Retain the old response keys consumed by existing API clients/tests.
                 "canceled_order_lists": canceled,
+                "completed_order_lists": completed,
                 "protection_preserved_for_filled_entries": protected,
                 "unresolved_order_lists": unresolved,
                 "live_trading_enabled": False,

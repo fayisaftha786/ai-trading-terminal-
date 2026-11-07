@@ -617,6 +617,10 @@ class FakeOPOCOExchange:
     def fetch_order(self, order_id, symbol):
         return dict(self.orders[str(order_id)])
 
+    def fetch_order_trades(self, order_id, symbol):
+        self.calls.append(("fetch_order_trades", str(order_id), symbol))
+        return list(getattr(self, "order_trades", {}).get(str(order_id), []))
+
     def close(self):
         self.calls.append(("close",))
 
@@ -745,6 +749,80 @@ def test_testnet_auto_schema_migrates_existing_table_and_exact_fee_ledger(monkey
     assert row["exit_fee_quote"] == 0.0102
     assert round(row["realized_pnl_quote"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
 
+
+
+def test_testnet_auto_requires_a_fully_filled_exit_before_closing_position(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["502"].update({"status": "closed", "filled": 0.04, "amount": 0.099})
+    exchange.orders["503"].update({"status": "canceled", "filled": 0.0})
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["unresolved"] == 1
+    assert row["status"] == "UNPROTECTED"
+    assert row["error_code"] == "FILLED_ENTRY_WITHOUT_CONFIRMED_EXIT"
+    assert db.count_open_testnet_auto_orders() == 1
+
+
+def test_testnet_auto_reads_trade_level_commissions_when_order_snapshot_omits_fees(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99, "fee": None})
+    exchange.orders["502"].update({"status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197, "fee": None})
+    exchange.orders["503"].update({"status": "canceled", "filled": 0.0})
+    exchange.order_trades = {
+        "501": [{"order": "501", "amount": 0.0999, "price": 100.0,
+                 "fee": {"currency": "USDT", "cost": 0.01}}],
+        "502": [{"order": "502", "amount": 0.099, "price": 103.0,
+                 "fee": {"currency": "USDT", "cost": 0.0102}}],
+    }
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["completed"] == 1
+    assert row["accounting_status"] == "EXACT"
+    assert row["entry_fee_quote"] == 0.01
+    assert row["exit_fee_quote"] == 0.0102
+    assert round(row["realized_pnl_quote"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
+    assert ("fetch_order_trades", "501", "BTC/USDT") in exchange.calls
+    assert ("fetch_order_trades", "502", "BTC/USDT") in exchange.calls
+
+
+def test_testnet_auto_retries_closed_fee_unresolved_ledger(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99, "fee": None})
+    exchange.orders["502"].update({"status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197, "fee": None})
+    exchange.orders["503"].update({"status": "canceled", "filled": 0.0})
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert row["status"] == "CLOSED"
+    assert row["accounting_status"] == "FEES_UNRESOLVED"
+
+    exchange.order_trades = {
+        "501": [{"order": "501", "amount": 0.0999, "price": 100.0,
+                 "fee": {"currency": "USDT", "cost": 0.01}}],
+        "502": [{"order": "502", "amount": 0.099, "price": 103.0,
+                 "fee": {"currency": "USDT", "cost": 0.0102}}],
+    }
+    retry = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert retry["accounting_retried"] == 1
+    assert retry["accounting_resolved"] == 1
+    assert row["accounting_status"] == "EXACT"
+    assert row["realized_pnl_quote"] is not None
+
+
+def test_testnet_auto_emergency_stop_does_not_clear_terminal_entry_with_positive_fill(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    exchange.orders["501"].update({"status": "canceled", "filled": 0.0005})
+    result = trader.emergency_stop()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["halted"] is True
+    assert row["status"] == "UNPROTECTED"
+    assert row["error_code"] == "PARTIALLY_FILLED_ENTRY_WITHOUT_PROTECTED_EXIT"
+    assert row["list_client_order_id"] in result["unresolved_order_lists"]
+    assert db.count_open_testnet_auto_orders() == 1
 
 
 def test_testnet_auto_daily_loss_limit_persistently_blocks_new_entries(monkeypatch):

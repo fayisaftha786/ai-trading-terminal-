@@ -20,7 +20,8 @@ A private, cloud-hosted crypto market research and paper-trading dashboard with 
 - On-demand 12-worker read-only market analysis with bounded concurrency, worker health, isolated failures, and a visible unavailable state for unconfigured news sentiment.
 - Manual paper positions and automatic paper-trading controls.
 - Risk limits, drawdown checks, event ledger, stop/target monitoring, and emergency stop.
-- Separate Binance Spot Testnet LIMIT order flow, disabled by default.
+- Separate Binance Spot Testnet manual LIMIT order flow and strategy-driven OPOCO auto-entry with native TP/SL exits; both are disabled by default and isolated from production.
+- Testnet auto-trading uses fresh closed-candle 1h/4h alignment, order-book depth/spread and liquidity gates, bounded sizing, daily entry/loss stops, persistent order reconciliation, fee-aware realized P&L and emergency stop.
 - Live-money order execution is hard-disabled. Solana swap signing/execution is not implemented.
 
 ## Deployment
@@ -40,8 +41,9 @@ GitHub Actions builds a debug APK. Follow [`docs/GET_ANDROID_APK.md`](docs/GET_A
 - Run one service instance and one Uvicorn worker while the SQLite persistent disk is used.
 - Explicit paper-trading opt-in and kill-switch state persist across ordinary restarts; the kill switch and drawdown breaker keep new entries OFF.
 - The 12-worker analysis is on-demand and read-only; it does not authorize or submit orders. See [docs/MULTI_AGENT_WORKERS.md](docs/MULTI_AGENT_WORKERS.md).
-- Keep Testnet disabled until you have separately verified the exchange sandbox credentials, order filters, ledger reconciliation, and emergency stop.
-- No real-money trading, profit guarantee, trained ML model, or unattended wallet signing is included.
+- The strategy-driven Testnet implementation is currently in draft PR #15 and is not part of `main` until reviewed and merged. Keep all Testnet gates OFF until real Spot Testnet OPOCO lifecycle, partial-fill, commission-ledger, restart and emergency-stop checks are manually verified.
+- The Testnet daily loss guard covers this bot's exact-fee, completed trades in UTC; it is not an account-wide equity stop.
+- No real-money trading, profit guarantee, trained ML model, free 24/7 cloud runtime, or unattended wallet signing is included.
 
 ## Local development
 

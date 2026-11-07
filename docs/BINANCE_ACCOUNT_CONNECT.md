@@ -25,7 +25,7 @@ The check reads the Spot account balance and returns non-zero asset names and US
 
 ## Isolated Binance Spot Testnet automatic strategy mode
 
-The separate Testnet automation work is available only in the feature branch / draft PR until all dedicated tests and CI checks pass. It is disabled by default and must never be confused with the production read-only connector above.
+Strategy-driven Binance Spot Testnet automation is implemented on feature branch `feat/testnet-auto-oto-co-execution` in draft PR #15. Current backend and ARM64 CI have passed, but this remains unmerged and has not yet been authenticated against a real Spot Testnet account. It is disabled by default and must never be confused with the production read-only connector above.
 
 For an isolated Testnet run, configure only **Binance Spot Testnet** credentials in the private backend environment:
 
@@ -40,16 +40,16 @@ BINANCE_TESTNET_MAX_OPEN_ORDERS=3
 
 Do not use production/live credentials in these Testnet variables. Keep the automatic-entry toggle OFF until the Testnet account connection is explicitly checked. The UI's “Enable Testnet auto” control then submits only fresh, allowlisted USDT BUY signals that pass the existing 1h/4h paper-strategy filters, liquidity checks, risk sizing, symbol cooldown and order caps. There is no automatic Solana DEX execution in this path.
 
-Each proposed entry uses a limit FOK BUY inside a Binance Spot OPOCO list. OPOCO is preferable here because Binance derives the pending TP/SL OCO quantity from the actual net base asset received by the fully-filled BUY, accounting for applicable commission; the app no longer guesses a fixed 1% quantity reserve. Binance requires the symbol to advertise OTO, OPO, and OCO permissions. The working order is FOK, so an unfilled order expires instead of leaving a partially filled position waiting for exits. The app reconciles the working order and each exit leg. Unknown or unprotected states block further auto entries. The emergency stop disables new entries, cancels unfilled app-owned order lists where safe, and preserves confirmed exchange-side TP/SL orders for filled entries. Stop-market exits can still slip in fast markets.
+Each proposed entry uses a limit FOK BUY inside a Binance Spot OPOCO list. OPOCO is preferable here because Binance derives the pending TP/SL OCO quantity from the actual net base asset received by the fully-filled BUY, accounting for applicable commission; the app no longer guesses a fixed 1% quantity reserve. Binance requires the symbol to advertise OTO, OPO, and OCO permissions. The working order is FOK, so an unfilled order expires instead of leaving a partially filled position waiting for exits. The app reconciles the working order and each exit leg. It only marks a position closed after the entry and exactly one OCO exit are confirmed fully filled; unknown, partial-fill, or unprotected states block further auto entries. The fee ledger uses order-level fees when present and otherwise fetches per-order trade fills; unsupported third-asset fee conversion remains unresolved rather than being guessed. The emergency stop disables new entries, cancels unfilled app-owned order lists where safe, and preserves confirmed exchange-side TP/SL orders for filled entries. Stop-market exits can still slip in fast markets.
 
-This is **Testnet execution plumbing, not proof of profitability**. The feature is not production live trading, does not guarantee profits, and must not be merged until dedicated OPOCO lifecycle/safety tests pass, latest backend and ARM64 CI pass, and actual Testnet behavior is manually verified. No API key or secret should be pasted into ChatGPT or committed to GitHub.
+This is **Testnet execution plumbing, not proof of profitability**. The feature is not production live trading, does not guarantee profits, and must remain a draft until its dedicated OPOCO lifecycle/safety tests pass, latest backend and ARM64 CI pass, and actual Testnet behavior is manually verified. No API key or secret should be pasted into ChatGPT or committed to GitHub.
 
 ## What this does not do
 
 - No production order placement, cancellation, transfer, withdrawal, margin, or futures methods exist in the read-only connector.
 - `/api/live/execute` remains hard-locked.
-- This connection check is not automatic trading. The existing strategy automation remains paper-only.
-- Binance Spot Testnet is a separate virtual-money environment with its own credentials and explicit manual order gate.
+- This production read-only connection check is not automatic trading. Separate strategy-driven automatic entries are limited to Binance Spot Testnet and require its own virtual-money credentials, order gate, and dashboard opt-in.
+- Strategy-driven Testnet execution is not yet proven until you run the actual OPOCO lifecycle, fee reconciliation, restart recovery and emergency-stop checks on Spot Testnet.
 - Do not enable live trading based on a short demo run. A production execution stage needs independent security review, exchange-side protection, reconciliation, risk caps, a kill switch, forward testing, and your explicit approval.
 
 See [Binance's official Spot API security documentation](https://developers.binance.com/en/docs/products/spot/rest-api) and [API key setup guidance](https://www.binance.com/en/support/faq/detail/360002502072).

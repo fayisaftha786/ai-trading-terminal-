@@ -132,7 +132,11 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
             "cex_markets": len(cex.get("markets", [])), "solana_tokens": len(sol.get("tokens", [])),
             "paper_trigger_closes": auto_result.get("paper_exits", 0),
             "auto_paper_entries": len(auto_result.get("paper_entries", [])),
-            "auto_paper_enabled": bool(app.state.auto_paper_enabled)})
+            "auto_paper_enabled": bool(app.state.auto_paper_enabled),
+            "auto_testnet_status": testnet_auto_result.get("status"),
+            "auto_testnet_entries": len(testnet_auto_result.get("submitted", [])),
+            "auto_testnet_rejected": len(testnet_auto_result.get("rejected", [])),
+            "auto_testnet_enabled": bool(app.state.auto_testnet_enabled)})
         return {"cex": cex, "solana": sol, "scanned": True,
                 "research": research, "auto_paper": auto_result,
                 "auto_testnet": testnet_auto_result,

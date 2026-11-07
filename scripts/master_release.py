@@ -59,6 +59,8 @@ def main() -> int:
     automation_source = (ROOT / "app/services/automation.py").read_text(encoding="utf-8")
     storage_source = (ROOT / "app/storage.py").read_text(encoding="utf-8")
     testnet_source = (ROOT / "app/services/testnet.py").read_text(encoding="utf-8")
+    testnet_auto_source = (ROOT / "app/services/testnet_auto.py").read_text(encoding="utf-8")
+    testnet_auto_tests_source = (ROOT / "tests/test_testnet.py").read_text(encoding="utf-8")
     schema_source = (ROOT / "app/schemas.py").read_text(encoding="utf-8")
     android_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/MainActivity.java").read_text(encoding="utf-8")
     android_manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
@@ -130,6 +132,15 @@ def main() -> int:
         "testnet_submit_and_emergency_stop_serialized": "threading.RLock()" in (ROOT / "app/services/testnet.py").read_text() and "with self._order_lock:" in (ROOT / "app/services/testnet.py").read_text(),
         "testnet_orders_ui_present": 'id="testnetOrderForm"' in (ROOT / "static/index.html").read_text() and "loadtestnet" in frontend_source and 'id="testnetStopBtn"' in (ROOT / "static/index.html").read_text(),
         "testnet_does_not_enable_live_orders": "live_trading_enabled: bool = False" in (ROOT / "app/settings.py").read_text(),
+        "testnet_strategy_auto_engine_present": "class TestnetAutoTrader" in testnet_auto_source,
+        "testnet_strategy_auto_is_off_by_default": 'app.state.auto_testnet_enabled = bool(db.get_setting("testnet_auto_trading_enabled", False))' in main_source and 'binance_testnet_enabled: bool = os.getenv("BINANCE_TESTNET_ENABLED", "false").lower() == "true"' in (ROOT / "app/settings.py").read_text(),
+        "testnet_strategy_auto_uses_native_opoco_fok": '"orderList/opoco"' in testnet_auto_source and '"workingTimeInForce": "FOK"' in testnet_auto_source and '"pendingAboveType": "TAKE_PROFIT"' in testnet_auto_source and '"pendingBelowType": "STOP_LOSS"' in testnet_auto_source,
+        "testnet_strategy_auto_requires_complete_entry_and_exit_fills": "_is_fully_filled_order" in testnet_auto_source and "PARTIALLY_FILLED_ENTRY_WITHOUT_PROTECTED_EXIT" in testnet_auto_source and "FILLED_ENTRY_WITHOUT_CONFIRMED_EXIT" in testnet_auto_source,
+        "testnet_strategy_auto_fee_ledger_uses_trade_level_fills": "fetch_order_trades" in testnet_auto_source and "fetch_my_trades" in testnet_auto_source and "commission" in testnet_auto_tests_source.lower(),
+        "testnet_strategy_auto_retries_unresolved_fee_ledger": "list_unaccounted_testnet_auto_orders" in storage_source and "accounting_retried" in testnet_auto_source,
+        "testnet_strategy_auto_loss_guard_and_recovery_present": "_daily_loss_guard" in testnet_auto_source and "testnet_auto_loss_halt_day" in testnet_auto_source and "emergency_stop" in testnet_auto_source,
+        "testnet_strategy_auto_safety_regressions_present": all(name in testnet_auto_tests_source for name in ("test_testnet_auto_requires_a_fully_filled_exit_before_closing_position", "test_testnet_auto_emergency_stop_does_not_clear_terminal_entry_with_positive_fill", "test_testnet_auto_reads_trade_level_commissions_when_order_snapshot_omits_fees")),
+        "testnet_auto_performance_dashboard_present": "/api/testnet/auto-performance" in main_source and 'id="testnetAutoPnl"' in (ROOT / "static/index.html").read_text(),
         "indicator_analyzer_uses_wilder_adx_and_direction": all(token in strategy_source for token in ("Wilder RSI", "_wilder_atr_adx", "plus_di14", "ema20_slope_pct")),
         "raw_candle_integrity_detects_duplicates_and_alignment": all(token in strategy_source for token in ("candle_integrity_report", "duplicate_timestamps", "off_grid_timestamps", "missing_intervals")),
         "market_data_gaps_force_hold": "if not primary_clean or not higher_clean" in market_data_source and 'analysis["regime"] = "DATA_GAP"' in market_data_source,
@@ -163,9 +174,11 @@ def main() -> int:
         "version": VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if passed else "FAIL",
-        "mode": "paper_automation_plus_gated_manual_testnet",
-        "automatic_strategy_mode": "paper_only",
+        "mode": "paper_automation_plus_gated_testnet_auto",
+        "automatic_strategy_mode": "paper_plus_binance_spot_testnet_sandbox",
         "testnet_manual_orders_enabled_by_default": False,
+        "testnet_auto_strategy_enabled_by_default": False,
+        "testnet_auto_environment": "binance_spot_testnet_only",
         "live_trading_enabled": False,
         "android_apk_built": False,
         "android_gradle_source_included": True,
@@ -180,8 +193,8 @@ def main() -> int:
             "Strategy research requires contiguous closed OHLCV. Candle replay cannot reconstruct historical spread, depth, ticker freshness, queue priority, partial fills, latency or market impact.",
             "Walk-forward is limited by fetched history; it is not an untouched final holdout or a statistically powered profitability claim.",
             "No real-money order execution or Solana swap signing.",
-            "Binance Spot Testnet limit-order path is implemented behind a separate local opt-in gate; authenticated end-to-end exchange execution is not verified without user Testnet credentials.",
-            "Strategy-driven automatic exchange execution remains disabled; Testnet order UI is explicit/manual and limit-only.",
+            "Binance Spot Testnet manual LIMIT and strategy-driven OPOCO paths are gated; authenticated end-to-end exchange lifecycle, fills, commissions and emergency recovery remain unverified until tested against a real Spot Testnet account.",
+            "Strategy-driven exchange entries are implemented only for Binance Spot Testnet behind separate environment, order, and dashboard opt-in gates; production LIVE execution remains hard-disabled.",
             "Paper allocation serialization is process-local and assumes the documented single-worker local backend; multi-worker production deployment is not supported.",
             "Cloud deployment requires a paid always-on service with persistent storage; the Render Blueprint is the lowest configured production-style option and is not free.",
             "Cloud authentication is a single-user password login with short-lived HMAC bearer tokens and process-local login throttling; it is not yet multi-user or an enterprise identity system.",
