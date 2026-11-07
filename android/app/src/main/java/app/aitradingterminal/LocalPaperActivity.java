@@ -244,7 +244,7 @@ public final class LocalPaperActivity extends Activity {
         LocalDb(Context c){super(c,"local_paper.db",null,2);}
         @Override public void onCreate(SQLiteDatabase d) {
             d.execSQL("CREATE TABLE candles(id INTEGER PRIMARY KEY,open_time INTEGER NOT NULL UNIQUE,close_time INTEGER NOT NULL,open REAL,high REAL,low REAL,close REAL,volume REAL)");
-            d.execSQL("CREATE TABLE paper(id INTEGER PRIMARY KEY,entry REAL NOT NULL,qty REAL NOT NULL,exit REAL,status TEXT NOT NULL,entry_fee REAL NOT NULL DEFAULT 0,exit_fee REAL NOT NULL DEFAULT 0,stop_loss REAL,take_profit REAL,opened_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT)");
+            d.execSQL("CREATE TABLE paper(id INTEGER PRIMARY KEY,entry REAL NOT NULL,qty REAL NOT NULL,exit REAL,status TEXT NOT NULL,entry_fee REAL NOT NULL DEFAULT 0,exit_fee REAL NOT NULL DEFAULT 0,stop_loss REAL,take_profit REAL,opened_at INTEGER NOT NULL,closed_at INTEGER,close_reason TEXT,pnl_usd REAL)");
             d.execSQL("CREATE TABLE flags(key TEXT PRIMARY KEY,value TEXT NOT NULL)");
         }
         @Override public void onUpgrade(SQLiteDatabase d,int oldVersion,int newVersion) {
@@ -259,6 +259,7 @@ public final class LocalPaperActivity extends Activity {
                 d.execSQL("ALTER TABLE paper ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0");
                 d.execSQL("ALTER TABLE paper ADD COLUMN closed_at INTEGER");
                 d.execSQL("ALTER TABLE paper ADD COLUMN close_reason TEXT");
+                d.execSQL("ALTER TABLE paper ADD COLUMN pnl_usd REAL");
                 d.execSQL("UPDATE paper SET stop_loss=entry*? WHERE stop_loss IS NULL",new Object[]{1.0-PaperMath.STOP_LOSS_RATE});
                 d.execSQL("UPDATE paper SET take_profit=entry*? WHERE take_profit IS NULL",new Object[]{1.0+PaperMath.TAKE_PROFIT_RATE});
                 d.execSQL("UPDATE paper SET opened_at=? WHERE status='OPEN'",new Object[]{System.currentTimeMillis()});
@@ -347,12 +348,7 @@ public final class LocalPaperActivity extends Activity {
             double pnl=PaperMath.netPnl(entry,qty,exit,entryFee,exitFee);
             ContentValues v=new ContentValues();v.put("exit",exit);v.put("exit_fee",exitFee);v.put("status","CLOSED");
             v.put("closed_at",System.currentTimeMillis());v.put("close_reason",reason);v.put("pnl_usd",pnl);
-            // pnl_usd is added lazily for databases upgraded from v1.
-            try {d.update("paper",v,"id=? AND status='OPEN'",new String[]{String.valueOf(id)});}
-            catch(IllegalArgumentException missingColumn) {
-                d.execSQL("ALTER TABLE paper ADD COLUMN pnl_usd REAL");
-                d.update("paper",v,"id=? AND status='OPEN'",new String[]{String.valueOf(id)});
-            }
+            d.update("paper",v,"id=? AND status='OPEN'",new String[]{String.valueOf(id)});
         }
 
         synchronized int openCount(){return openCountInternal(getReadableDatabase());}
@@ -404,7 +400,8 @@ public final class LocalPaperActivity extends Activity {
                     count++;
                     String state=c.getString(3);double pnl=0;
                     if("CLOSED".equals(state))pnl=PaperMath.netPnl(c.getDouble(0),c.getDouble(1),c.getDouble(2),c.getDouble(4),c.getDouble(5));
-                    out.append(String.format(Locale.US,"%s · entry $%.2f · %s",state,c.getDouble(0),"CLOSED".equals(state)?String.format(Locale.US,"net P&L $%+.2f · %s",pnl,c.getString(6)):("qty %.7f BTC · SL/TP active").formatted(c.getDouble(1))));
+                    String details="CLOSED".equals(state)?String.format(Locale.US,"net P&L $%+.2f · %s",pnl,c.getString(6)):String.format(Locale.US,"qty %.7f BTC · SL/TP active",c.getDouble(1));
+                    out.append(String.format(Locale.US,"%s · entry $%.2f · %s",state,c.getDouble(0),details));
                     out.append('\n');
                 }
             }
