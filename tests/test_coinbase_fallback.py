@@ -1,3 +1,4 @@
+import asyncio
 import time
 from dataclasses import replace
 
@@ -46,8 +47,7 @@ class FakeCoinbaseAdapter:
         return rows
 
 
-@pytest.mark.asyncio
-async def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monkeypatch):
+def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monkeypatch):
     import builtins
     import app.services.market_data as market_data_module
 
@@ -63,7 +63,7 @@ async def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monke
     config = replace(settings, cex_symbols=("BTC/USDT", "ETH/USDT", "SOL/USDT"))
     service = MarketDataService(config)
 
-    result = await service.cex_tickers()
+    result = asyncio.run(service.cex_tickers())
 
     assert result["status"] == "live"
     assert result["exchange"] == "coinbase_public_fallback"
@@ -72,17 +72,16 @@ async def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monke
     assert all(row["orderbook_timestamp_source"] == "retrieval_fallback" for row in result["markets"])
 
 
-@pytest.mark.asyncio
-async def test_coinbase_ohlcv_fallback_uses_exact_six_hour_confirmation(monkeypatch):
+def test_coinbase_ohlcv_fallback_uses_exact_six_hour_confirmation(monkeypatch):
     import app.services.market_data as market_data_module
 
     monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
     config = replace(settings, cex_symbols=("BTC/USDT",))
     service = MarketDataService(config)
 
-    result = await service._coinbase_strategy_data(
+    result = asyncio.run(service._coinbase_strategy_data(
         "BTC/USDT", "1h", 300, "simulated Binance HTTP 451"
-    )
+    ))
 
     assert result["status"] == "live"
     assert result["provider"] == "coinbase_public_fallback"
@@ -94,17 +93,16 @@ async def test_coinbase_ohlcv_fallback_uses_exact_six_hour_confirmation(monkeypa
     assert len(result["higher_timeframe"]["candles"]) == 160
 
 
-@pytest.mark.asyncio
-async def test_coinbase_fallback_does_not_fabricate_unsupported_primary_timeframe(monkeypatch):
+def test_coinbase_fallback_does_not_fabricate_unsupported_primary_timeframe(monkeypatch):
     import app.services.market_data as market_data_module
 
     monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
     config = replace(settings, cex_symbols=("BTC/USDT",))
     service = MarketDataService(config)
 
-    result = await service._coinbase_strategy_data(
+    result = asyncio.run(service._coinbase_strategy_data(
         "BTC/USDT", "4h", 300, "simulated Binance HTTP 451"
-    )
+    ))
 
     assert result["status"] == "unavailable"
     assert "exact 5m, 15m and 1h" in result["error"]
