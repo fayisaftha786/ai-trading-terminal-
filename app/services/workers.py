@@ -189,7 +189,8 @@ def _risk_guard(context: dict[str, Any]) -> dict[str, Any]:
     except (RiskRejected, TypeError, ValueError) as exc:
         risk_message = str(exc)[:180]
     passed = sum(1 for value in checks.values() if value)
-    return {"status": "complete" if checks["valid_risk_profile"] else "blocked",
+    all_checks_passed = all(checks.values())
+    return {"status": "complete" if all_checks_passed else "blocked",
             "summary": f"Read-only preflight: {passed}/{len(checks)} checks passed; this is not an execution approval.",
             "findings": [f"{name.replace('_', ' ')}: {'PASS' if ok else 'NOT PASSED'}" for name, ok in checks.items()]
                         + [risk_message],
