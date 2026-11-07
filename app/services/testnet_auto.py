@@ -36,6 +36,39 @@ class TestnetAutoTrader:
             hour=0, minute=0, second=0, microsecond=0
         ).isoformat()
 
+    def _daily_loss_limit(self) -> float:
+        value = self._number(getattr(self.adapter.config, "binance_testnet_daily_max_loss_usdt", 2.0))
+        return value if value is not None and value > 0 else 2.0
+
+    def _daily_loss_guard(self, now: datetime) -> dict[str, Any]:
+        day_start = self._utc_day_start(now)
+        accounting = self.storage.testnet_auto_daily_accounting(day_start)
+        halted_day = self.storage.get_setting("testnet_auto_loss_halt_day")
+        limit = self._daily_loss_limit()
+        triggered = accounting["realized_pnl_usdt"] <= -limit
+        if triggered and halted_day != day_start:
+            # Persist the daily halt before returning; it survives process restarts.
+            self.storage.set_setting("testnet_auto_loss_halt_day", day_start)
+            self.storage.set_setting("testnet_auto_trading_enabled", False)
+            self.storage.log_event(
+                "testnet_auto_daily_loss_stop",
+                "Testnet automatic entries halted by daily realized-loss limit",
+                {"day_start_utc": day_start, "realized_pnl_usdt": accounting["realized_pnl_usdt"],
+                 "limit_usdt": limit, "scope": "bot_only_exact_fee_accounted_trades"},
+            )
+            halted_day = day_start
+        active_halt = halted_day == day_start
+        unresolved = accounting["unresolved_closed_trades"] > 0
+        return {
+            **accounting,
+            "limit_usdt": limit,
+            "day_start_utc": day_start,
+            "halted": active_halt or unresolved,
+            "reason": "daily_loss_limit_reached" if active_halt else (
+                "closed_trade_fee_accounting_unresolved" if unresolved else None
+            ),
+        }
+
     def status(self, entry_enabled: bool) -> dict[str, Any]:
         halted = bool(self.storage.get_setting("testnet_order_halted", False))
         adapter_status = self.adapter.status(halted=halted)
@@ -48,6 +81,9 @@ class TestnetAutoTrader:
             "emergency_halted": halted,
             "active_order_lists": len(active),
             "max_entries_per_day": self.MAX_ENTRIES_PER_DAY,
+            "daily_max_loss_usdt": self._daily_loss_limit(),
+            "daily_loss_scope": "bot-only completed Testnet auto-trades with exact fees; UTC day",
+            "daily_loss_halt_day": self.storage.get_setting("testnet_auto_loss_halt_day"),
             "protection": "Binance native OPOCO (net received BUY quantity + take-profit/stop-loss OCO)",
             "live_trading_enabled": False,
         }
@@ -288,6 +324,12 @@ class TestnetAutoTrader:
             }
             if not entry_enabled:
                 result["status"] = "disabled"
+                return result
+            daily_guard = self._daily_loss_guard(datetime.now(timezone.utc))
+            result["daily_risk"] = daily_guard
+            if daily_guard["halted"]:
+                result["status"] = "blocked_daily_loss_or_unresolved_accounting"
+                result["rejected"].append({"reason": daily_guard["reason"]})
                 return result
             state = self.adapter.status(halted=halted)
             if not state["order_execution_enabled"]:
