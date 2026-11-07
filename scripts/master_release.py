@@ -63,7 +63,7 @@ def main() -> int:
     android_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/MainActivity.java").read_text(encoding="utf-8")
     android_manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
     android_gradle = (ROOT / "android/app/build.gradle.kts").read_text(encoding="utf-8")
-    android_workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    android_workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text(encoding="utf-8")
     frontend_source = "\n".join(
         path.read_text(encoding="utf-8").lower()
         for path in (ROOT / "static").glob("*")
@@ -72,7 +72,7 @@ def main() -> int:
     safety_checks = {
         "release_version_is_consistent": 'version="0.5.0-cloud"' in main_source and "CLOUD EDITION" in (ROOT / "static/index.html").read_text() and "VERSION = \"0.5.0\"" in (ROOT / "scripts/master_release.py").read_text(),
         "live_endpoint_explicitly_locked": "HTTPException(status_code=423" in main_source,
-        "auto_paper_mode_defaults_off": "app.state.auto_paper_enabled = False" in main_source,
+        "paper_auto_entry_defaults_off_and_persists_opt_in": 'app.state.auto_paper_enabled = bool(db.get_setting("auto_paper_enabled", False))' in main_source and 'db.set_setting("auto_paper_enabled", False)' in main_source,
         "kill_switch_route_present": '@app.post("/api/automation/kill-switch")' in main_source,
         "sqlite_unique_open_market_guard_present": "idx_trades_one_open_per_market" in storage_source,
         "no_exchange_or_wallet_secrets_in_frontend": not any(
@@ -90,7 +90,7 @@ def main() -> int:
         "android_cleartext_disabled_for_all_hosts": "android:usesCleartextTraffic=\"false\"" in android_manifest and "cleartextTrafficPermitted=\"false\"" in (ROOT / "android/app/src/main/res/xml/network_security_config.xml").read_text(),
         "android_https_cloud_backend_allowlist_present": 'return "https".equals(scheme)' in android_activity and 'your-service.onrender.com' in android_activity and 'http".equals(scheme)' not in android_activity,
         "android_no_webview_file_access": "setAllowFileAccess(false)" in android_activity and "setAllowContentAccess(false)" in android_activity,
-        "android_ci_apk_job_present": "android-debug-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
+        "android_ci_apk_job_present": "AITradingTerminal-Android-v0.5.0-debug-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
         "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in ("AITradingTerminal-Android-v0.5.0-debug.apk", "AITradingTerminal-Android-v0.5.0-debug.apk.sha256", "AITradingTerminal-Android-v0.5.0-build-info.txt")),
         "android_local_build_verifies_sdk_and_signature": all(marker in (ROOT / "build-android-debug.sh").read_text() for marker in ("platforms/android-35/android.jar", "apksigner", "sha256sum")),
         "android_build_script_restricts_gradle_to_compatible_8x": "EXPECTED_GRADLE_MAX_MAJOR=\"8\"" in (ROOT / "build-android-debug.sh").read_text() and "parts[0] != 8" in (ROOT / "build-android-debug.sh").read_text(),
@@ -144,7 +144,7 @@ def main() -> int:
         "testnet_refresh_cancel_share_order_lock": all("with self._order_lock:" in testnet_source for _ in (0,)) and "def _refresh_order_locked" in testnet_source and "def _cancel_order_locked" in testnet_source,
         "testnet_emergency_stop_scans_all_active_orders": "list_active_testnet_orders" in testnet_source and "def list_active_testnet_orders" in storage_source,
         "scan_toggle_preserves_open_position_exit_monitor": "exit_monitoring_required" in main_source and "required_for_positions" in main_source,
-        "paper_disable_preserves_position_exit_monitor": "if not payload.enabled and cex_positions_open" in main_source,
+        "paper_disable_preserves_position_exit_monitor": "if payload.enabled or cex_positions_open" in main_source and "exit_monitoring_required" in main_source,
         "signal_backtest_checks_entry_bar_protective_exits": "entry_hit_stop" in backtest_source and "including the entry candle" in backtest_source,
     }
     checks.append({"name": "safety_static_checks", "status": "PASS" if all(safety_checks.values()) else "FAIL", "checks": safety_checks})
