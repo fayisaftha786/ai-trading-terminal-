@@ -532,3 +532,146 @@ def test_testnet_emergency_stop_finds_old_active_order_beyond_recent_ui_history(
     assert active_client_id in result["canceled_client_order_ids"]
     assert result["unresolved_client_order_ids"] == []
     assert db.count_open_testnet_orders() == 0
+
+
+def _make_auto_signal():
+    import time
+
+    now = time.time() * 1000
+    return {
+        "ticker": {
+            "symbol": "BTC/USDT", "status": "live", "last": 100.0,
+            "bid": 99.99, "ask": 100.0, "quote_volume": 5_000_000,
+            "timestamp": now, "bid_depth_quote": 250_000, "ask_depth_quote": 250_000,
+            "orderbook_retrieved_at_ms": now, "orderbook_timestamp_ms": now,
+            "orderbook_timestamp_source": "exchange",
+        },
+        "analysis": {
+            "signal": "BUY_CANDIDATE", "score": 82, "regime": "UPTREND",
+            "atr_pct": 1.2, "rsi14": 56.0, "adx14": 25.0,
+            "plus_di14": 30.0, "minus_di14": 20.0,
+        },
+        "higher_timeframe": {"regime": "UPTREND"},
+        "timeframe_confluence": "ALIGNED",
+        "last_closed_candle_timestamp_ms": now - 3_605_000,
+        "higher_timeframe_last_closed_candle_timestamp_ms": now - 4 * 3_600_000 - 5_000,
+    }
+
+
+class FakeOPOCOExchange:
+    def __init__(self, *, permissions=True, working_status="open"):
+        self.permissions = permissions
+        self.working_status = working_status
+        self.calls = []
+        self.orders = {
+            "501": {"id": "501", "status": working_status, "filled": 0.0999, "remaining": 0.0,
+                    "amount": 0.0999, "average": 100.0, "cost": 9.99, "fee": None},
+            "502": {"id": "502", "status": "open", "filled": 0.0, "remaining": 0.099,
+                    "amount": 0.099, "average": None, "cost": 0.0, "fee": None},
+            "503": {"id": "503", "status": "open", "filled": 0.0, "remaining": 0.099,
+                    "amount": 0.099, "average": None, "cost": 0.0, "fee": None},
+        }
+
+    def set_sandbox_mode(self, enabled):
+        self.calls.append(("sandbox", enabled))
+
+    def load_markets(self):
+        self.calls.append(("load_markets",))
+
+    def market(self, symbol):
+        return {
+            "symbol": symbol, "id": symbol.replace("/", ""), "active": True, "spot": True,
+            "info": {"otoAllowed": self.permissions, "opoAllowed": self.permissions,
+                     "ocoAllowed": self.permissions},
+            "limits": {"amount": {"min": 0.000001}, "cost": {"min": 5.0}},
+        }
+
+    def price_to_precision(self, symbol, value):
+        return f"{float(value):.2f}"
+
+    def amount_to_precision(self, symbol, value):
+        return f"{float(value):.6f}"
+
+    def fetch_balance(self):
+        return {"free": {"USDT": 1000.0}}
+
+    def request(self, path, api, method, params):
+        self.calls.append((path, api, method, params))
+        if method == "POST":
+            return {
+                "orderListId": 456, "listOrderStatus": "EXECUTING",
+                "orders": [{"orderId": 501}, {"orderId": 502}, {"orderId": 503}],
+                "orderReports": [{"orderId": 501}],
+            }
+        if method == "GET":
+            return {
+                "orderListId": 456, "listOrderStatus": "EXECUTING",
+                "orders": [{"orderId": 501}, {"orderId": 502}, {"orderId": 503}],
+            }
+        if method == "DELETE":
+            return {"orderListId": 456, "listOrderStatus": "ALL_DONE"}
+        raise AssertionError("Unexpected OPOCO request")
+
+    def fetch_order(self, order_id, symbol):
+        return dict(self.orders[str(order_id)])
+
+    def close(self):
+        self.calls.append(("close",))
+
+
+def _make_auto_trader(monkeypatch, *, permissions=True, working_status="open"):
+    from app.services.automation import AutoPaperEngine
+    from app.services.paper import PaperBroker
+    from app.services.testnet_auto import TestnetAutoTrader
+
+    config = make_config(
+        binance_testnet_enabled=True,
+        binance_testnet_api_key="TEST_KEY",
+        binance_testnet_api_secret="TEST_SECRET",
+        binance_testnet_order_enabled=True,
+        binance_testnet_max_order_usdt=10.0,
+        binance_testnet_max_open_orders=3,
+    )
+    exchange = FakeOPOCOExchange(permissions=permissions, working_status=working_status)
+    db = make_storage()
+    adapter = BinanceSpotTestnet(config, exchange_factory=lambda args: exchange)
+    engine = AutoPaperEngine(db, PaperBroker(db))
+    return db, exchange, TestnetAutoTrader(adapter, db, engine)
+
+
+def test_testnet_auto_uses_opoco_net_received_quantity_and_fok_entry(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    result = trader.run([_make_auto_signal()], True)
+    assert result["status"] == "submitted"
+    assert result["submitted"][0]["environment"] == "testnet_only"
+    post = next(call for call in exchange.calls if len(call) == 4 and call[2] == "POST")
+    assert post[0] == "orderList/opoco"
+    assert post[3]["workingTimeInForce"] == "FOK"
+    assert post[3]["pendingAboveType"] == "TAKE_PROFIT"
+    assert post[3]["pendingBelowType"] == "STOP_LOSS"
+    assert "pendingQuantity" not in post[3]
+    assert db.count_open_testnet_auto_orders() == 1
+    assert db.get_setting("testnet_order_halted", False) is False
+
+
+def test_testnet_auto_refuses_symbols_without_explicit_opoco_permissions(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, permissions=False)
+    result = trader.run([_make_auto_signal()], True)
+    assert result["submitted"] == []
+    assert any(
+        item["reason"] == "testnet_symbol_does_not_confirm_OPOCO_permissions"
+        for item in result["rejected"]
+    )
+    assert not any(len(call) == 4 and call[2] == "POST" for call in exchange.calls)
+    assert db.count_open_testnet_auto_orders() == 0
+
+
+def test_testnet_auto_kill_switch_preserves_exchange_native_exits_for_filled_entry(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed")
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.emergency_stop()
+    assert result["halted"] is True
+    assert result["protection_preserved_for_filled_entries"]
+    assert not result["canceled_unfilled_order_lists"]
+    assert not any(len(call) == 4 and call[2] == "DELETE" for call in exchange.calls)
+    assert db.get_setting("testnet_auto_trading_enabled") is False
