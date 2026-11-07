@@ -10,8 +10,8 @@ android {
         applicationId = "app.aitradingterminal"
         minSdk = 26
         targetSdk = 35
-        versionCode = 45
-        versionName = "0.5.0"
+        versionCode = 46
+        versionName = "0.6.0"
     }
 
     compileOptions {
@@ -29,4 +29,9 @@ android {
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
+}
+
+
+dependencies {
+    testImplementation("junit:junit:4.13.2")
 }
