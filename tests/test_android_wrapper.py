@@ -58,7 +58,7 @@ def test_ci_contains_native_debug_apk_build_and_artifact_upload():
     assert '"android/**"' in workflow
     assert "build-android-debug.sh" in workflow
     assert "upload-artifact@v7" in workflow
-    assert "dist/AITradingTerminal-Android-v0.5.0-debug.apk.sha256" in workflow
+    assert "dist/AITradingTerminal-Android-v0.6.0-debug.apk.sha256" in workflow
     assert "retention-days: 30" in workflow
     assert "android-actions/setup-android@v4" in workflow
     assert "gradle/actions/setup-gradle@v6" in workflow
@@ -83,7 +83,7 @@ def test_android_build_script_checks_sdk_signs_and_hashes_apk():
     assert "build-tools/$BUILD_TOOLS_VERSION/apksigner" in script
     assert 'verify --verbose "$APK"' in script
     assert "sha256sum" in script
-    assert "AITradingTerminal-Android-v0.5.0-debug.apk" in script
+    assert "AITradingTerminal-Android-v0.6.0-debug.apk" in script
 
 
 def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_metadata():
@@ -99,9 +99,9 @@ def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_me
 def test_android_gradle_version_code_matches_post_build_apk_verifier():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     script = (ROOT / "build-android-debug.sh").read_text()
-    assert "versionCode = 45" in gradle
+    assert "versionCode = 46" in gradle
     assert "versionName = \"0.5.0\"" in gradle
-    assert "versionCode='45' versionName='0.5.0-debug'" in script
+    assert "versionCode='46' versionName='0.6.0-debug'" in script
 
 
 def test_android_target_35_applies_system_bar_and_cutout_insets():
