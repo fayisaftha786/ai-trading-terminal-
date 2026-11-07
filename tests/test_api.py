@@ -550,3 +550,43 @@ def test_testnet_enable_cannot_race_global_kill_switch_and_reset_stays_off(tmp_p
         asyncio.run(exercise_race())
     finally:
         allow_stop_to_finish.set()
+
+
+def test_global_kill_switch_waits_for_in_flight_scan_before_returning(tmp_path):
+    import asyncio
+    from dataclasses import replace
+
+    from app.main import create_app
+    from app.settings import settings
+
+    database_path = tmp_path / "global-kill-scan-lock.db"
+    config = replace(settings, database_path=database_path, initial_capital_usd=100.0)
+    application = create_app(config=config, db_path=database_path)
+    kill_switch = next(
+        route.endpoint for route in application.routes
+        if getattr(route, "path", None) == "/api/automation/kill-switch"
+        and "POST" in (getattr(route, "methods", None) or set())
+    )
+
+    async def exercise():
+        await application.state.scan_lock.acquire()
+        task = asyncio.create_task(kill_switch())
+        try:
+            for _ in range(100):
+                if not application.state.auto_paper_enabled:
+                    break
+                await asyncio.sleep(0.01)
+            assert application.state.auto_paper_enabled is False
+            assert application.state.auto_testnet_enabled is False
+            assert not task.done(), "kill switch returned before the in-flight scan lock was released"
+        finally:
+            application.state.scan_lock.release()
+
+        stopped = await task
+        assert stopped["stopped"] is True
+        assert stopped["automatic_paper_trading_enabled"] is False
+        assert stopped["automatic_testnet_trading_enabled"] is False
+        assert application.state.db.get_setting("auto_paper_enabled") is False
+        assert application.state.db.get_setting("testnet_auto_trading_enabled") is False
+
+    asyncio.run(exercise())
