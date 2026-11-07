@@ -394,6 +394,15 @@ def test_auto_paper_opt_in_persists_across_process_restart_and_kill_switch_clear
     restarted = create_app(config=config, db_path=database_path)
     assert restarted.state.auto_paper_enabled is True
     assert restarted.state.auto_scan_enabled is True
+
+    async def no_markets():
+        return {"status": "live", "markets": []}
+
+    async def no_tokens():
+        return {"status": "live", "tokens": []}
+
+    restarted.state.market_data.cex_tickers = no_markets
+    restarted.state.market_data.solana_recent_tokens = no_tokens
     with TestClient(restarted) as restarted_client:
         assert restarted_client.get("/api/automation/paper-trading").json()["enabled"] is True
         stopped = restarted_client.post("/api/automation/kill-switch")
