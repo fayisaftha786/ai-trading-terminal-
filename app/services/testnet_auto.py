@@ -72,8 +72,10 @@ class TestnetAutoTrader:
         halted = bool(self.storage.get_setting("testnet_order_halted", False))
         adapter_status = self.adapter.status(halted=halted)
         active = self.storage.list_active_testnet_auto_orders()
+        daily_risk = self._daily_loss_guard(datetime.now(timezone.utc))
         return {
             "enabled": bool(entry_enabled),
+            "daily_risk": daily_risk,
             "mode": "testnet_only",
             "provider": "Binance Spot Testnet",
             "order_execution_enabled": bool(adapter_status["order_execution_enabled"]),
