@@ -805,6 +805,32 @@ def test_testnet_auto_reads_trade_level_commissions_when_order_snapshot_omits_fe
     assert ("fetch_order_trades", "502", "BTC/USDT") in exchange.calls
 
 
+def test_testnet_auto_falls_back_to_trade_fills_when_order_fee_summary_is_incomplete(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["501"].update({
+        "status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99,
+        "fee": {"currency": None, "cost": None},
+    })
+    exchange.orders["502"].update({
+        "status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197,
+        "fee": {"currency": None, "cost": None},
+    })
+    exchange.orders["503"].update({"status": "canceled", "filled": 0.0})
+    exchange.order_trades = {
+        "501": [{"order": "501", "amount": 0.0999, "price": 100.0,
+                 "fee": {"currency": "USDT", "cost": 0.01}}],
+        "502": [{"order": "502", "amount": 0.099, "price": 103.0,
+                 "fee": {"currency": "USDT", "cost": 0.0102}}],
+    }
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert row["accounting_status"] == "EXACT"
+    assert row["entry_fee_quote"] == 0.01
+    assert row["exit_fee_quote"] == 0.0102
+    assert row["realized_pnl_quote"] is not None
+
+
 def test_testnet_auto_retries_closed_fee_unresolved_ledger(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
     exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99, "fee": None})
