@@ -1,56 +1,65 @@
-# AI Trading Terminal 0.5.0 — No-Termux Cloud Edition
+# AI Trading Terminal v0.7.1 — No-Termux PAPER Edition
 
-A private, cloud-hosted crypto market research and paper-trading dashboard with an Android WebView client. No Python runtime or Termux is needed on the Android phone after the cloud backend is deployed.
+AI Trading Terminal is an Android-friendly crypto market research and paper-trading project. The current published Android package is a **debug/test APK**. The delivered Cloudflare Worker is a **PAPER-only backend** and has not yet been deployed into the owner's Cloudflare account.
 
-## What changed from 0.4.4
+## Current release
 
-- Added production-only API authentication with a private sign-in form and HMAC-signed short-lived bearer sessions.
-- Added a basic per-IP login failure throttle and secure response headers.
-- Android native wrapper now accepts HTTPS cloud origins only; HTTP and loopback URLs are rejected.
-- Replaced the local-only network security exceptions with an all-host cleartext deny policy.
-- Added a Render Blueprint with a persistent 1 GB database disk, HTTPS health check, secret generation, and Testnet OFF defaults.
-- Docker uses one Uvicorn worker because the scan scheduler and SQLite ledger are single-process components.
-- Removed Termux launcher and Termux-only requirements from this release.
-- Bumped Android version to 0.5.0 / versionCode 45.
+- Android version: **0.7.1** (versionCode 48)
+- Package: `app.aitradingterminal.debug`
+- Minimum Android SDK: 26; target SDK: 35
+- Release: [v0.7.1-debug on GitHub Releases](https://github.com/fayisaftha786/ai-trading-terminal-/releases/tag/v0.7.1-debug)
+- Direct APK: [AITradingTerminal-Android-v0.7.1-debug.apk](https://github.com/fayisaftha786/ai-trading-terminal-/releases/download/v0.7.1-debug/AITradingTerminal-Android-v0.7.1-debug.apk)
 
-## Features
+This package is signed with an Android debug key for testing, not a production release key. It has passed the GitHub build and APK verification workflow, but it has **not** been physically installed and tested on the owner's phone in this release process.
 
-- Read-only CEX market data and Solana token discovery.
-- Deterministic market analysis, historical backtesting, walk-forward research, and performance reports.
-- On-demand 12-worker read-only market analysis with bounded concurrency, worker health, isolated failures, and a visible unavailable state for unconfigured news sentiment.
-- Manual paper positions and automatic paper-trading controls.
-- Risk limits, drawdown checks, event ledger, stop/target monitoring, and emergency stop.
-- Separate Binance Spot Testnet LIMIT order flow, disabled by default.
-- Live-money order execution is hard-disabled. Solana swap signing/execution is not implemented.
+## Operating modes
 
-## Deployment
+### Android Local PAPER mode
 
-Follow [`docs/CLOUD_DEPLOYMENT_NO_TERMUX_MALAYALAM.md`](docs/CLOUD_DEPLOYMENT_NO_TERMUX_MALAYALAM.md). The Render Blueprint requires a paid Starter service and persistent disk for an always-on single-instance backend. The current published baseline is about USD $7.25/month before bandwidth/tax/other usage; recheck pricing before deploy.
+- Uses public market data; no exchange API key is required for read-only market data.
+- Virtual positions are local simulations, not exchange orders.
+- Manual PAPER entry and close require fresh, valid quotes. Entry uses ask; close uses bid. Stale or missing quote data fails closed instead of using an old cached price.
+- Local PAPER history is stored on the device. Uninstalling the app can erase that local history.
 
-## APK
+### Optional Cloudflare Free PAPER mode
 
-GitHub Actions builds a debug APK. Follow [`docs/GET_ANDROID_APK.md`](docs/GET_ANDROID_APK.md). The package has not been built or installed from this working environment because it does not include Android SDK/build-tools.
+- Cloudflare Worker + SQLite-backed Durable Object ledger.
+- Public Coinbase market data for BTC/USD, ETH/USD and SOL/USD, with 1-hour and 6-hour candle analysis.
+- Scheduled market scan and simulated stop/target monitoring at approximately 15-minute intervals after the Durable Object is first initialized.
+- Virtual starting equity is USD 100. Risk limits and estimated execution costs are simulation assumptions, not a promise of returns.
+- Automatic PAPER entries start **OFF**. The owner must sign in and explicitly enable them after validating live deployment, market freshness, book timestamps, candle integrity, persistence and alarm cadence.
+- Real-money exchange orders and Binance Testnet execution are hard-disabled in this Worker. It does not sign wallets or submit Solana swaps.
 
-## Security model and limitations
+**Deployment status:** Worker source, tests and local workerd smoke checks are in the repository. It is not yet deployed to the owner's Cloudflare account. Cloud mode in the APK therefore needs a deployed HTTPS Worker URL before it can show the cloud dashboard. See [Cloudflare Free Paper Automation](docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
 
-- Production API requests require `Authorization: Bearer` using an HMAC token issued after password login.
-- `APP_PASSWORD` must be at least 16 characters; `APP_AUTH_SECRET` must be at least 32 bytes. Use the hosting provider's secret manager.
-- Tokens are stored in browser `sessionStorage` for the active tab and expire after the configured period (default eight hours).
-- The built-in login throttle is per-process and best-effort. This is single-user private deployment, not a multi-user identity system.
-- Run one service instance and one Uvicorn worker while the SQLite persistent disk is used.
-- Explicit paper-trading opt-in and kill-switch state persist across ordinary restarts; the kill switch and drawdown breaker keep new entries OFF.
-- The 12-worker analysis is on-demand and read-only; it does not authorize or submit orders. See [docs/MULTI_AGENT_WORKERS.md](docs/MULTI_AGENT_WORKERS.md).
-- Keep Testnet disabled until you have separately verified the exchange sandbox credentials, order filters, ledger reconciliation, and emergency stop.
-- No real-money trading, profit guarantee, trained ML model, or unattended wallet signing is included.
+## Market scan evidence
 
-## Local development
+GitHub Actions also runs a separate read-only market scanner using public Binance data. Its report does not create paper positions and does not send orders. The 2026-11-07 scan returned live data for BTC/USDT, ETH/USDT and SOL/USDT; all three signals were HOLD. See the [market scanner workflow](.github/workflows/free-cloud-market-scanner.yml).
 
-Install `requirements.txt`, copy `.env.example` to `.env`, keep `APP_ENV=development`, and run `uvicorn app.main:app --host 127.0.0.1 --port 8000`. Development mode is intentionally unauthenticated and must never be exposed publicly.
+A HOLD result is intentional when the configured strategy filters do not align. The strategy score is deterministic and uncalibrated; it is not a probability or a forecast.
 
-## Release checks
+## Security and limitations
 
-```bash
-python scripts/master_release.py
-```
+- No profit or positive return is guaranteed. A working bot can still lose money in simulation and live markets.
+- The Cloudflare Worker is PAPER-only. The dashboard must remain in PAPER mode.
+- The Worker uses public endpoints and does not need exchange credentials. Never place passwords, session secrets, exchange API keys, wallet seeds, recovery codes or Cloudflare tokens in source control or chat.
+- Cloudflare account creation, acceptance of Cloudflare legal terms, secrets configuration and live deployment remain owner-controlled.
+- Cloudflare Free has documented request, CPU, storage and SQL quotas. It is not an unlimited 24/7 compute guarantee. Stop automation if quota or data-quality gates fail; do not upgrade to a paid plan under a ₹0 budget.
+- A 15-minute simulated exit monitor is not an exchange-native stop-loss. Fast price gaps, service outages or missed alarms can produce a much worse simulated exit than the trigger level.
+- Paper fills approximate spread, fee and slippage assumptions. They do not reproduce queue position, partial fills, latency, market impact or actual account fee tiers.
+- A good backtest, passed CI run, paper result or Testnet fill does not prove future profitability.
+- The Android APK is a debug/testing build, not production-signed. If an update is rejected because the signing key differs from a previously installed debug build, export any local PAPER records before uninstalling; uninstalling may erase local history.
 
-The release gate runs Python compilation, pytest, JavaScript syntax, shell syntax, and static security checks, then creates a source archive only when every gate passes.
+## No-Termux deployment
+
+For the recommended phone-only Cloudflare setup, follow [docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md](docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md). The guide uses Cloudflare Dashboard Git integration and owner-configured runtime secrets; it does not require Termux or local Node.js on Android.
+
+The older FastAPI/Render deployment documents describe a separate backend path and may require paid hosting. They are not the Cloudflare Free PAPER deployment described above.
+
+## Development and verification
+
+- JavaScript Worker: `npm run check`, `npm test`, Wrangler dry-run and local workerd smoke test.
+- Python backend: `pytest` and the repository release gate.
+- Android: Gradle build plus APK signature and metadata checks in GitHub Actions.
+
+These checks validate code and local simulations. They do not prove a live Cloudflare deployment, the owner's Cloudflare quota, regional Coinbase reachability, real scheduled alarm cadence or installation on a physical Android device.
