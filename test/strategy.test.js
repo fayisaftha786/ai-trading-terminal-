@@ -24,7 +24,7 @@ test("Wilder RSI handles rising, falling and flat series", () => {
 
 test("candle audit excludes the active candle and rejects gaps", () => {
   const interval = 3600000;
-  const now = 151 * interval;
+  const now = (150 * interval) + 1;
   const input = makeCandles(151, interval);
   const audit = auditCandles(input, interval, now, 150);
   assert.equal(audit.rows.length, 150);
