@@ -11,7 +11,7 @@ from app.services.testnet import BinanceSpotTestnet, TestnetUnavailable
 
 
 class TestnetAutoTrader:
-    """Signal-driven Binance Spot Testnet execution with exchange-native OTOCO protection."""
+    """Signal-driven Binance Spot Testnet execution with exchange-native OPOCO protection."""
 
     MAX_ENTRIES_PER_DAY = 3
     SYMBOL_COOLDOWN_SECONDS = 4 * 60 * 60
@@ -73,7 +73,7 @@ class TestnetAutoTrader:
                     if not working_id and orders:
                         working_id = orders[0].get("orderId")
                     if not working_id:
-                        raise ValueError("OTOCO working order ID is unavailable")
+                        raise ValueError("OPOCO working order ID is unavailable")
                     working = exchange.fetch_order(working_id, row["symbol"])
                     working_status = str(working.get("status") or "unknown").lower()
 
