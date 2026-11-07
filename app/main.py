@@ -544,6 +544,14 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
         return result
 
+    @app.get("/api/testnet/auto-performance")
+    async def testnet_auto_performance() -> dict[str, Any]:
+        return {
+            **db.testnet_auto_performance(),
+            "environment": "testnet_only",
+            "live_trading_enabled": False,
+        }
+
     @app.get("/api/testnet/auto-orders")
     async def testnet_auto_orders(limit: int = 50) -> dict[str, Any]:
         return {
