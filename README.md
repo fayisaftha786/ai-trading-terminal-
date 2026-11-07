@@ -21,6 +21,7 @@ A private, cloud-hosted crypto market research and paper-trading dashboard with 
 - Manual paper positions and automatic paper-trading controls.
 - Risk limits, drawdown checks, event ledger, stop/target monitoring, and emergency stop.
 - Separate Binance Spot Testnet LIMIT order flow, disabled by default.
+- Optional production Binance Spot account connection for read-only balance visibility only; disabled by default and has no order/withdrawal execution path.
 - Live-money order execution is hard-disabled. Solana swap signing/execution is not implemented.
 
 ## Deployment
