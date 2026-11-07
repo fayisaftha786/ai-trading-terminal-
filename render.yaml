@@ -40,3 +40,9 @@ services:
         value: ""
       - key: BINANCE_TESTNET_API_SECRET
         value: ""
+      - key: BINANCE_READONLY_ENABLED
+        value: "false"
+      - key: BINANCE_READONLY_API_KEY
+        sync: false
+      - key: BINANCE_READONLY_API_SECRET
+        sync: false
