@@ -131,6 +131,29 @@ class Storage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_testnet_orders_status ON testnet_orders(status);
                 CREATE INDEX IF NOT EXISTS idx_testnet_orders_created_at ON testnet_orders(created_at);
+                CREATE TABLE IF NOT EXISTS testnet_auto_orders (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    idempotency_key TEXT NOT NULL UNIQUE,
+                    list_client_order_id TEXT NOT NULL UNIQUE,
+                    exchange_list_id TEXT,
+                    working_order_id TEXT,
+                    symbol TEXT NOT NULL,
+                    quantity REAL NOT NULL,
+                    exit_quantity REAL NOT NULL,
+                    entry_price REAL NOT NULL,
+                    stop_price REAL NOT NULL,
+                    target_price REAL NOT NULL,
+                    notional_usdt REAL NOT NULL,
+                    signal_score REAL NOT NULL DEFAULT 0,
+                    status TEXT NOT NULL,
+                    error_code TEXT,
+                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_testnet_auto_orders_status
+                    ON testnet_auto_orders(status);
+                CREATE INDEX IF NOT EXISTS idx_testnet_auto_orders_created_at
+                    ON testnet_auto_orders(created_at);
                 """
             )
             conn.execute(
@@ -379,10 +402,90 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def create_testnet_auto_order(self, values: dict[str, Any], max_open_orders: int = 3) -> None:
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            halted_row = conn.execute(
+                "SELECT value_json FROM app_settings WHERE key='testnet_order_halted'"
+            ).fetchone()
+            if halted_row is not None and json.loads(halted_row["value_json"]):
+                raise ValueError("Testnet emergency order lock is active; no new orders are allowed.")
+            active = conn.execute(
+                "SELECT COUNT(*) AS n FROM testnet_auto_orders "
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')"
+            ).fetchone()
+            if int(active["n"] or 0) >= max(1, min(int(max_open_orders), 3)):
+                raise ValueError("Maximum number of active Testnet automatic order lists reached.")
+            conn.execute(
+                "INSERT INTO testnet_auto_orders(idempotency_key,list_client_order_id,symbol,quantity,"
+                "exit_quantity,entry_price,stop_price,target_price,notional_usdt,signal_score,status) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+                (values["idempotency_key"], values["list_client_order_id"], values["symbol"],
+                 float(values["quantity"]), float(values["exit_quantity"]), float(values["entry_price"]),
+                 float(values["stop_price"]), float(values["target_price"]), float(values["notional_usdt"]),
+                 float(values.get("signal_score", 0)), values["status"]),
+            )
+
+    def get_testnet_auto_order_by_key(self, idempotency_key: str) -> dict[str, Any] | None:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT * FROM testnet_auto_orders WHERE idempotency_key=?", (idempotency_key,)
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def update_testnet_auto_order(self, list_client_order_id: str, values: dict[str, Any]) -> None:
+        allowed = {"exchange_list_id", "working_order_id", "status", "error_code"}
+        updates = {key: value for key, value in values.items() if key in allowed}
+        if not updates:
+            return
+        updates["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        assignments = ", ".join(f"{key}=?" for key in updates)
+        with self.connection() as conn:
+            conn.execute(
+                f"UPDATE testnet_auto_orders SET {assignments} WHERE list_client_order_id=?",
+                (*updates.values(), list_client_order_id),
+            )
+
+    def list_active_testnet_auto_orders(self) -> list[dict[str, Any]]:
+        with self.connection() as conn:
+            rows = conn.execute(
+                "SELECT * FROM testnet_auto_orders "
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN') ORDER BY id ASC"
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def count_testnet_auto_entries_since(self, timestamp: str) -> int:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM testnet_auto_orders WHERE created_at >= ?",
+                (timestamp,),
+            ).fetchone()
+        return int(row["n"] or 0)
+
+    def last_testnet_auto_entry(self, symbol: str) -> str | None:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT created_at FROM testnet_auto_orders WHERE symbol=? "
+                "ORDER BY id DESC LIMIT 1", (symbol,)
+            ).fetchone()
+        return str(row["created_at"]) if row and row["created_at"] else None
+
+    def count_open_testnet_auto_orders(self) -> int:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM testnet_auto_orders "
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')"
+            ).fetchone()
+        return int(row["n"] or 0)
+
     def count_open_testnet_orders(self) -> int:
         with self.connection() as conn:
             row = conn.execute(
-                "SELECT COUNT(*) AS n FROM testnet_orders WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN')"
+                "SELECT "
+                "(SELECT COUNT(*) FROM testnet_orders "
+                " WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN')) + "
+                "(SELECT COUNT(*) FROM testnet_auto_orders "
+                " WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')) AS n"
             ).fetchone()
         return int(row["n"] or 0)
 
