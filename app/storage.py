@@ -526,6 +526,21 @@ class Storage:
             "pnl_scope": "closed Testnet auto-trades with exact quote-denominated fees only",
         }
 
+    def testnet_auto_daily_accounting(self, day_start: str) -> dict[str, Any]:
+        """Daily bot-only USDT realized P&L; unresolved closed trades fail closed."""
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(CASE WHEN accounting_status='EXACT' "
+                "THEN realized_pnl_quote ELSE 0 END),0) AS pnl, "
+                "COUNT(CASE WHEN accounting_status!='EXACT' THEN 1 END) AS unresolved "
+                "FROM testnet_auto_orders WHERE status='CLOSED' AND closed_at >= ?",
+                (day_start,),
+            ).fetchone()
+        return {
+            "realized_pnl_usdt": float(row["pnl"] or 0.0),
+            "unresolved_closed_trades": int(row["unresolved"] or 0),
+        }
+
     def testnet_auto_realized_pnl_since(self, timestamp: str) -> float:
         """Return only fully fee-accounted, completed Testnet auto-trades."""
         with self.connection() as conn:
