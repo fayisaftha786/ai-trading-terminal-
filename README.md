@@ -27,7 +27,7 @@ This package is signed with an Android debug key for testing, not a production r
 - Public Coinbase market data for BTC/USD, ETH/USD and SOL/USD, with 1-hour and 6-hour candle analysis.
 - Scheduled market scan and simulated stop/target monitoring at approximately 15-minute intervals after the Durable Object is first initialized.
 - Virtual starting equity is USD 100. Risk limits and estimated execution costs are simulation assumptions, not a promise of returns.
-- Automatic PAPER entries start **OFF**. The owner must sign in and explicitly enable them after validating live deployment, market freshness, book timestamps, candle integrity, persistence and alarm cadence.
+- Automatic PAPER entries start **OFF**. The owner must sign in and explicitly enable them after validating live deployment, market freshness, local order-book retrieval age, candle integrity, persistence and alarm cadence.
 - Real-money exchange orders and Binance Testnet execution are hard-disabled in this Worker. It does not sign wallets or submit Solana swaps.
 
 **Deployment status:** Worker source, tests and local workerd smoke checks are in the repository. It is not yet deployed to the owner's Cloudflare account. Cloud mode in the APK therefore needs a deployed HTTPS Worker URL before it can show the cloud dashboard. See [Cloudflare Free Paper Automation](docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
