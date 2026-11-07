@@ -700,6 +700,23 @@ def test_testnet_auto_marks_bracket_completed_only_after_filled_exit_and_all_don
     assert row["status"] == "CLOSED"
 
 
+
+
+def test_testnet_auto_emergency_stop_handles_all_done_filled_exit(monkeypatch):
+    db, exchange, trader = _make_auto_trader(
+        monkeypatch, working_status="closed", list_status="ALL_DONE"
+    )
+    exchange.orders["502"]["status"] = "closed"
+    exchange.orders["502"]["filled"] = 0.099
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.emergency_stop()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["halted"] is True
+    assert row["status"] == "CLOSED"
+    assert result["unresolved_order_lists"] == []
+
+
 def test_testnet_auto_kill_switch_preserves_exchange_native_exits_for_filled_entry(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed")
     assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
