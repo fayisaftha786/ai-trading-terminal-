@@ -243,6 +243,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     app.state.market_data = market_data
     app.state.paper_broker = broker
     app.state.testnet = testnet
+    app.state.testnet_auto = testnet_auto
     app.state.binance_readonly = binance_readonly
     app.state.worker_manager = worker_manager
     app.state.worker_analysis_lock = worker_analysis_lock
