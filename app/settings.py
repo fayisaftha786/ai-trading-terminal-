@@ -35,6 +35,8 @@ class Settings:
     binance_testnet_order_enabled: bool = os.getenv("BINANCE_TESTNET_ORDER_ENABLED", "false").lower() == "true"
     binance_testnet_max_order_usdt: float = float(os.getenv("BINANCE_TESTNET_MAX_ORDER_USDT", "10"))
     binance_testnet_max_open_orders: int = int(os.getenv("BINANCE_TESTNET_MAX_OPEN_ORDERS", "3"))
+    # Bot-only realized-loss stop in USDT per UTC day. This is not account-wide equity risk.
+    binance_testnet_daily_max_loss_usdt: float = float(os.getenv("BINANCE_TESTNET_DAILY_MAX_LOSS_USDT", "2.0"))
     # Production Binance account connection is read-only; it cannot submit orders.
     binance_readonly_enabled: bool = os.getenv("BINANCE_READONLY_ENABLED", "false").lower() == "true"
     binance_readonly_api_key: str | None = os.getenv("BINANCE_READONLY_API_KEY") or None
