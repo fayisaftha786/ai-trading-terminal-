@@ -1,0 +1,41 @@
+name: Cloudflare free paper engine validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "public/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - ".github/workflows/cloudflare-paper-validation.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "public/**"
+      - "wrangler.jsonc"
+      - "package.json"
+      - ".github/workflows/cloudflare-paper-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Syntax checks
+        run: npm run check
+      - name: Unit tests
+        run: npm test
+      - name: Cloudflare Worker dry-run build
+        run: npm run build
