@@ -23,7 +23,7 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - Three instruments × five public requests are used per scan. Requests are paced at least 350 ms apart (about 2.9 requests/second) to remain below Coinbase public REST limits; each full scan is roughly 5.3 seconds of request pacing plus network latency. A 15-minute cycle is 96 cycles/day when all alarms execute, plus dashboard requests.
 - Alarms are at-least-once; the code stores the next alarm timestamp and a bounded 200-cycle idempotency ledger so a retried alarm does not create a second scan/trade cycle. A unique open-position index and per-symbol cooldown provide additional duplicate guards. Alarm scheduling is not an exchange-grade real-time guarantee.
 - The user must verify Coinbase public endpoint availability from the deployed Cloudflare region before trusting signals. The code fails closed when endpoints fail, timestamps are stale, candle history is incomplete, spread is wide or depth is low.
-- The Coinbase order-book timestamp is not included in the app's market snapshot; local retrieval time is recorded as weaker provenance. A paper candidate still needs adequate top-10 depth.
+- The Coinbase order-book response timestamp is persisted and must be no more than 15 seconds old for an automatic paper entry. Missing or stale book timestamps fail closed. The timestamp check is in addition to the top-10 depth threshold.
 - Coinbase 24-hour quote volume is estimated as reported base volume × latest price, not an exchange-supplied quote-volume field.
 - Strategy signal is a deterministic, uncalibrated rule score, not an ML model or probability.
 - Paper fills approximate an ask-plus-slippage entry and bid-minus-slippage exit. They do not model queue position, partial fills, exchange fees actually charged to your account, outages, market impact or latency.
@@ -73,7 +73,7 @@ These are initial conservative assumptions for a simulation; review them after m
 
 ## Verification scope
 
-GitHub Actions runs JavaScript syntax checks, strategy-unit tests and a Wrangler dry-run build. These do not prove that Cloudflare deployment, Coinbase network access, Durable Object alarms, account-level Free quotas or Android WebView connectivity work in the user's Cloudflare account. Those require a live post-deployment check.
+GitHub Actions runs JavaScript syntax checks, strategy-unit tests, a Wrangler dry-run build and a local workerd smoke test of the Durable Object, session gate, paper opt-in, stop/reset and static dashboard. These do not prove that Cloudflare deployment, Coinbase network access from the user's Cloudflare region, actual scheduled alarm cadence, account-level Free quotas or Android WebView connectivity work in the user's Cloudflare account. Those still require a live post-deployment check.
 
 
 The local smoke test runs Wrangler in local workerd mode and checks SQLite Durable Object initialization, unauthenticated API rejection, owner login, dashboard reads, explicit PAPER enable, emergency stop, reset and static asset serving. It uses disposable local test credentials and makes no cloud deployment.
