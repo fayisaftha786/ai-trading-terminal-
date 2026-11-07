@@ -16,8 +16,8 @@ def test_android_manifest_and_gradle_configuration_are_valid():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     assert "compileSdk = 35" in gradle
     assert "minSdk = 26" in gradle
-    assert 'versionName = "0.5.0"' in gradle
-    assert "versionCode = 45" in gradle
+    assert 'versionName = "0.6.0"' in gradle
+    assert "versionCode = 46" in gradle
 
 
 def test_android_wrapper_allows_only_https_cloud_origins_and_disables_file_access():
@@ -52,9 +52,9 @@ def test_android_wrapper_does_not_embed_secrets_or_local_python_runtime():
 
 def test_ci_contains_native_debug_apk_build_and_artifact_upload():
     workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text()
-    assert "AITradingTerminal-Android-v0.5.0-debug-apk" in workflow
+    assert "AITradingTerminal-Android-v0.6.0-debug-apk" in workflow
     assert 'test -s android/app/build.gradle.kts' in workflow
-    assert "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip" not in workflow
+    assert "AITradingTerminal-v0.6.0-No-Termux-Cloud-Source.zip" not in workflow
     assert '"android/**"' in workflow
     assert "build-android-debug.sh" in workflow
     assert "upload-artifact@v7" in workflow
@@ -91,7 +91,7 @@ def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_me
     assert 'EXPECTED_GRADLE_MAX_MAJOR="8"' in script
     assert "parts[0] != 8" in script
     assert "aapt dump badging" in script
-    assert "versionCode='45' versionName='0.5.0-debug'" in script
+    assert "versionCode='46' versionName='0.6.0-debug'" in script
     assert "sdkVersion:'26'" in script
     assert "targetSdkVersion:'35'" in script
 
