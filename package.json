@@ -1,6 +1,7 @@
 {
   "name": "ai-trading-terminal-cloudflare",
   "private": true,
+  "engines": { "node": ">=22" },
   "type": "module",
   "scripts": {
     "test": "node --test",
