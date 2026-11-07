@@ -132,7 +132,7 @@ public final class MainActivity extends Activity {
         localMode.setOnClickListener(v -> startActivity(new Intent(MainActivity.this, LocalPaperActivity.class)));
 
         TextView hint = new TextView(this);
-        hint.setText("Local mode: public market data + paper trades saved on this phone.\nCloud mode: HTTPS only · Never enter exchange API keys here.");
+        hint.setText("Local mode: public market data + paper trades saved on this phone.\nCloud mode: HTTPS cloud connections only · Never enter exchange API keys here.");
         hint.setTextColor(Color.rgb(162, 176, 202));
         hint.setTextSize(12);
         hint.setPadding(0, dp(18), 0, 0);
