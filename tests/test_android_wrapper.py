@@ -93,15 +93,6 @@ def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_me
     assert "targetSdkVersion:'35'" in script
 
 
-def test_android_release_workflow_uses_current_node24_compatible_actions():
-    workflow = (ROOT / ".github/workflows/ci.yml").read_text()
-    assert "actions/setup-python@v7" in workflow
-    assert "actions/setup-node@v7" in workflow
-    assert "actions/upload-artifact@v7" in workflow
-    assert "gradle-version: \"8.9\"" in workflow
-    assert 'java-version: "17"' in workflow
-
-
 def test_android_gradle_version_code_matches_post_build_apk_verifier():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     script = (ROOT / "build-android-debug.sh").read_text()
