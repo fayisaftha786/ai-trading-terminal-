@@ -7,6 +7,22 @@ public final class PaperAutoLimits {
 
     private PaperAutoLimits() {}
 
+    /**
+     * A manual paper fill must use a current two-sided quote. The book time is
+     * the local retrieval time for the REST order-book request, not an exchange
+     * event timestamp. Missing, future, or stale timestamps fail closed.
+     */
+    public static boolean isFreshExecutionQuote(double bid, double ask,
+            long tickerTimestampMs, long bookRetrievedAtMs, long nowMs) {
+        if (!Double.isFinite(bid) || !Double.isFinite(ask) ||
+                bid <= 0 || ask <= 0 || ask < bid ||
+                tickerTimestampMs <= 0 || bookRetrievedAtMs <= 0) return false;
+        long tickerAge = nowMs - tickerTimestampMs;
+        long bookAge = nowMs - bookRetrievedAtMs;
+        return tickerAge >= -5_000L && tickerAge <= PaperSignal.MAX_TICKER_AGE_MS &&
+                bookAge >= -1_000L && bookAge <= PaperSignal.MAX_BOOK_AGE_MS;
+    }
+
     public static String rejectionReason(boolean autoEnabled, boolean emergencyStop,
             int openPositions, int entriesToday, long lastTradeAtMs, long nowMs,
             long lastAutoSignalCandleMs, long candidateSignalCandleMs) {
