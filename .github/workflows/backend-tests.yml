@@ -7,6 +7,8 @@ on:
       - "app/**"
       - "tests/**"
       - "requirements.txt"
+      - "static/**"
+      - "scripts/master_release.py"
       - ".github/workflows/backend-tests.yml"
   push:
     branches: [main]
@@ -36,3 +38,9 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Run backend test suite
         run: python -m pytest -q
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+      - name: Check dashboard JavaScript syntax
+        run: node --check static/app.js
