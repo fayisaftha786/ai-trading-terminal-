@@ -1,4 +1,4 @@
-import json
+import asyncio
 
 import httpx
 import pytest
@@ -14,8 +14,7 @@ def test_product_mapping_keeps_usd_and_maps_stablecoin_quote_to_usd():
     assert product_for_symbol("BTCUSDT") is None
 
 
-@pytest.mark.asyncio
-async def test_fetch_market_normalizes_public_ticker_volume_and_depth():
+def test_fetch_market_normalizes_public_ticker_volume_and_depth():
     seen = []
 
     def handler(request):
@@ -43,8 +42,7 @@ async def test_fetch_market_normalizes_public_ticker_volume_and_depth():
     )
     adapter = CoinbasePublicAdapter(client=client, min_request_gap_seconds=0)
     try:
-        async with adapter:
-            result = await adapter.fetch_market("BTC/USDT")
+        result = asyncio.run(adapter.fetch_market("BTC/USDT"))
     finally:
         await client.aclose()
 
@@ -66,8 +64,7 @@ async def test_fetch_market_normalizes_public_ticker_volume_and_depth():
     ]
 
 
-@pytest.mark.asyncio
-async def test_fetch_candles_converts_coinbase_ohlcv_to_standard_order():
+def test_fetch_candles_converts_coinbase_ohlcv_to_standard_order():
     def handler(request):
         assert request.url.path == "/products/ETH-USD/candles"
         assert request.url.params["granularity"] == "3600"
@@ -81,7 +78,7 @@ async def test_fetch_candles_converts_coinbase_ohlcv_to_standard_order():
     )
     adapter = CoinbasePublicAdapter(client=client, min_request_gap_seconds=0)
     try:
-        rows = await adapter.fetch_candles("ETH/USDT", 3600)
+        rows = asyncio.run(adapter.fetch_candles("ETH/USDT", 3600))
     finally:
         await client.aclose()
 
@@ -97,13 +94,12 @@ async def test_fetch_candles_rejects_unsupported_timeframe():
     adapter = CoinbasePublicAdapter(client=client, min_request_gap_seconds=0)
     try:
         with pytest.raises(ValueError, match="do not support"):
-            await adapter.fetch_candles("BTC/USDT", 14_400)
+            asyncio.run(adapter.fetch_candles("BTC/USDT", 14_400))
     finally:
         await client.aclose()
 
 
-@pytest.mark.asyncio
-async def test_public_http_errors_are_not_silently_treated_as_market_data():
+def test_public_http_errors_are_not_silently_treated_as_market_data():
     client = httpx.AsyncClient(
         base_url="https://api.exchange.coinbase.com",
         transport=httpx.MockTransport(lambda request: httpx.Response(451, json={"message": "Unavailable"})),
@@ -111,6 +107,6 @@ async def test_public_http_errors_are_not_silently_treated_as_market_data():
     adapter = CoinbasePublicAdapter(client=client, min_request_gap_seconds=0)
     try:
         with pytest.raises(httpx.HTTPStatusError):
-            await adapter.fetch_market("BTC/USDT")
+            asyncio.run(adapter.fetch_market("BTC/USDT"))
     finally:
         await client.aclose()
