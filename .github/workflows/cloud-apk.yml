@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: att-v050-cloud-apk-${{ github.ref }}
@@ -36,9 +36,22 @@ jobs:
           mkdir -p "${RUNNER_TEMP}/att-source"
           unzip -q "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip" -d "${RUNNER_TEMP}/att-source"
           test -d "${RUNNER_TEMP}/att-source/ai-trading-terminal"
+          if [ -f README.md ]; then cp README.md DELIVERY-README.md; fi
           cp -a "${RUNNER_TEMP}/att-source/ai-trading-terminal/." "${GITHUB_WORKSPACE}/"
           test -f requirements.txt
           test -f build-android-debug.sh
+
+      - name: Publish verified project source to main for hosting
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish verified AI Trading Terminal v0.5.0 source"
+            git push origin HEAD:main
+          fi
 
       - uses: actions/setup-python@v7
         with:
