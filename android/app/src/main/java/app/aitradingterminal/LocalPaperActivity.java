@@ -445,6 +445,53 @@ public final class LocalPaperActivity extends Activity {
             } finally {d.endTransaction();}
         }
 
+        synchronized String openAuto(double referencePrice,long signalCandleOpenTime) {
+            if(!finitePositive(referencePrice)||signalCandleOpenTime<=0)return "invalid_entry_price_or_signal_time";
+            SQLiteDatabase d=getWritableDatabase();d.beginTransaction();
+            try {
+                if(!"1".equals(flagValueInternal(d,"auto_demo")))return "auto_demo_disabled";
+                if("1".equals(flagValueInternal(d,"halted")))return "emergency_stop_active";
+                if(openCountInternal(d)>0)return "position_already_open";
+
+                long now=System.currentTimeMillis();
+                long dayStartUtc=utcDayStart(now);
+                try(Cursor count=d.rawQuery("SELECT COUNT(*) FROM paper WHERE opened_at>=?",new String[]{String.valueOf(dayStartUtc)})) {
+                    if(count.moveToFirst()&&count.getInt(0)>=MAX_AUTO_ENTRIES_PER_UTC_DAY)return "daily_entry_limit";
+                }
+                long lastTradeAt=(long)scalar(d,"SELECT COALESCE(MAX(CASE WHEN closed_at IS NULL THEN opened_at ELSE closed_at END),0) FROM paper");
+                if(lastTradeAt>0&&now-lastTradeAt<FOUR_HOURS_MS)return "four_hour_cooldown";
+                String previousSignal=flagValueInternal(d,"auto_last_signal_candle");
+                if(!previousSignal.isEmpty()) {
+                    try {if(signalCandleOpenTime<=Long.parseLong(previousSignal))return "signal_candle_already_processed";}
+                    catch(NumberFormatException ignored) {return "invalid_auto_signal_state";}
+                }
+
+                double entry=PaperMath.entryFill(referencePrice);
+                double quantity=PaperMath.POSITION_NOTIONAL_USD/entry;
+                double entryFee=PaperMath.fee(entry,quantity);
+                double cash=availableCashInternal(d);
+                if(cash+1e-8<PaperMath.POSITION_NOTIONAL_USD+entryFee)return "insufficient_virtual_cash";
+                ContentValues v=new ContentValues();
+                v.put("entry",entry);v.put("qty",quantity);v.put("status","OPEN");
+                v.put("entry_fee",entryFee);v.put("exit_fee",0);
+                v.put("stop_loss",entry*(1.0-PaperMath.STOP_LOSS_RATE));
+                v.put("take_profit",entry*(1.0+PaperMath.TAKE_PROFIT_RATE));
+                v.put("opened_at",now);
+                if(d.insert("paper",null,v)<0)return "paper_ledger_write_failed";
+                setFlagInternal(d,"auto_last_signal_candle",String.valueOf(signalCandleOpenTime));
+                d.setTransactionSuccessful();
+                return "OPENED";
+            } finally {d.endTransaction();}
+        }
+
+        private long utcDayStart(long now) {
+            Calendar calendar=Calendar.getInstance(TimeZone.getTimeZone("UTC"));
+            calendar.setTimeInMillis(now);
+            calendar.set(Calendar.HOUR_OF_DAY,0);calendar.set(Calendar.MINUTE,0);
+            calendar.set(Calendar.SECOND,0);calendar.set(Calendar.MILLISECOND,0);
+            return calendar.getTimeInMillis();
+        }
+
         synchronized void closeOpen(double referencePrice,String reason) {
             if(!Double.isFinite(referencePrice)||referencePrice<=0)throw new IllegalArgumentException("Exit reference price is invalid");
             SQLiteDatabase d=getWritableDatabase();d.beginTransaction();
@@ -501,6 +548,22 @@ public final class LocalPaperActivity extends Activity {
             ContentValues v=new ContentValues();v.put("key","halted");v.put("value",halted?"1":"0");
             getWritableDatabase().insertWithOnConflict("flags",null,v,SQLiteDatabase.CONFLICT_REPLACE);
         }
+        synchronized boolean isAutoEnabled() {
+            return "1".equals(flagValueInternal(getReadableDatabase(),"auto_demo"));
+        }
+        synchronized void setAutoEnabled(boolean enabled) {
+            setFlagInternal(getWritableDatabase(),"auto_demo",enabled?"1":"0");
+        }
+        private String flagValueInternal(SQLiteDatabase d,String key) {
+            try(Cursor c=d.rawQuery("SELECT value FROM flags WHERE key=?",new String[]{key})){
+                return c.moveToFirst()?c.getString(0):"";
+            }
+        }
+        private void setFlagInternal(SQLiteDatabase d,String key,String value) {
+            ContentValues v=new ContentValues();v.put("key",key);v.put("value",value);
+            d.insertWithOnConflict("flags",null,v,SQLiteDatabase.CONFLICT_REPLACE);
+        }
+
         private double scalar(SQLiteDatabase d,String sql) {
             try(Cursor c=d.rawQuery(sql,null)){return c.moveToFirst()?c.getDouble(0):0.0;}
         }
