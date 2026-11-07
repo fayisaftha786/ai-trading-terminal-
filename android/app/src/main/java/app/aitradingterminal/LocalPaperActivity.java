@@ -156,7 +156,7 @@ public final class LocalPaperActivity extends Activity {
                 String automaticEntry=null;
                 if(db.isAutoEnabled()) {
                     if(stopped) automaticEntry="BLOCKED · emergency stop active";
-                    else if(decision.eligible) automaticEntry=db.openAuto(lastPrice,latest.openTime);
+                    else if(decision.eligible) automaticEntry=db.openAuto(snapshot.quote.ask,latest.openTime);
                     else automaticEntry="BLOCKED · "+decision.reason;
                 }
                 List<String> results=analyze(loaded,primary,higher,decision,snapshot.quote);
@@ -259,7 +259,7 @@ public final class LocalPaperActivity extends Activity {
         long tickerStamp=ticker.getLong("closeTime");
         return new PaperSignal.Quote(ticker.getDouble("lastPrice"),
                 book.getDouble("bidPrice"),book.getDouble("askPrice"),
-                bidDepth,askDepth,ticker.getDouble("quoteVolume"),tickerStamp,depthRetrievedAt);
+                bidDepth,askDepth,ticker.getDouble("quoteVolume"),tickerStamp,Math.min(bookRetrievedAt,depthRetrievedAt));
     }
 
     private double depthUsd(JSONArray rows) throws Exception {
