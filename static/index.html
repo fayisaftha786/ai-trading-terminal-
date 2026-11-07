@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#080c15" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/static/icons/icon-192.png" sizes="192x192" />
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png" />
+  <title>AI Trading Terminal Cloud Edition</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-mark">◈</div><div><strong>AI TERMINAL</strong><small>DUAL ENGINE / CLOUD</small></div></div>
+      <div class="mode-pill"><span class="pulse"></span> LIVE LOCKED</div>
+      <nav>
+        <a class="active" href="#overview">▦ <span>Overview</span></a>
+        <a href="#engines">⌁ <span>Engines</span></a>
+        <a href="#paper">◉ <span>Paper execution</span></a>
+        <a href="#testnet">⌁ <span>Testnet orders</span></a>
+        <a href="#risk">⛨ <span>Risk controls</span></a>
+        <a href="#ledger">▤ <span>Trade ledger</span></a>
+      </nav>
+      <div class="sidebar-note"><span class="status-dot"></span><span>Production orders disabled<br/><b>Sandbox credentials stay local</b></span></div>
+      <div class="sidebar-foot">PRIVATE CLOUD RESEARCH BUILD<br/>NOT FINANCIAL ADVICE</div>
+    </aside>
+
+    <main class="main" id="overview">
+      <header class="topbar">
+        <div><div class="eyebrow">CONTROL CENTER / MARKETS</div><h1>Trading overview</h1><p class="sub">Market intelligence · paper automation · isolated Testnet orders only</p></div>
+        <div class="top-actions"><div class="connection"><span id="apiDot" class="status-dot"></span><span id="apiStatus">Checking cloud API…</span></div><button id="installBtn" class="btn ghost" hidden>＋ Install app</button><button id="autoScanBtn" class="btn secondary">○ Auto scan OFF</button><button id="autoTradeBtn" class="btn secondary">○ Auto paper OFF</button><button id="killSwitchBtn" class="btn danger">■ STOP</button><button id="scanBtn" class="btn primary">↻ Scan markets</button></div>
+      </header>
+
+      <section class="stats-grid">
+        <article class="stat-card"><div class="stat-label">PAPER EQUITY <span>USD</span></div><div class="stat-value" id="equity">$100.00</div><div class="stat-foot">Includes estimated open-position P&amp;L and costs</div></article>
+        <article class="stat-card"><div class="stat-label">REALIZED P&amp;L <span>NET</span></div><div class="stat-value" id="pnl">$0.00</div><div class="stat-foot">Includes simulated fees and slippage</div></article>
+        <article class="stat-card"><div class="stat-label">OPEN POSITIONS <span>COUNT</span></div><div class="stat-value" id="openCount">0</div><div class="stat-foot" id="exposure">$0.00 current exposure</div></article>
+        <article class="stat-card warning-card"><div class="stat-label">PRODUCTION EXECUTION <span>STATUS</span></div><div class="stat-value locked">LOCKED</div><div class="stat-foot">Testnet is separate · no real-money orders</div></article>
+      </section>
+
+      <section class="panel" id="performance" style="margin:18px 0;padding:18px">
+        <div class="section-head compact"><div><div class="eyebrow">FORWARD TEST / VERIFIED PAPER LEDGER</div><h2>Trading performance</h2></div><div class="performance-actions"><select id="performanceDays" aria-label="Performance period"><option value="7">7 days</option><option value="30" selected>30 days</option><option value="90">90 days</option><option value="365">365 days</option></select><button id="refreshPerformance" class="btn ghost">Refresh</button><a id="exportPerformance" class="btn ghost" href="#export-performance">Export CSV</a></div></div>
+        <div class="performance-grid">
+          <div><span>Closed trades</span><b id="perfTrades">—</b></div>
+          <div><span>Win rate</span><b id="perfWinRate">—</b></div>
+          <div><span>Profit factor</span><b id="perfProfitFactor">—</b></div>
+          <div><span>Expectancy / trade</span><b id="perfExpectancy">—</b></div>
+          <div><span>Net realized P&amp;L</span><b id="perfNetPnl">—</b></div>
+          <div><span>Equity snapshots</span><b id="perfSnapshots">—</b></div>
+        </div>
+        <div id="performanceNote" class="ledger-note">Performance uses closed paper trades only. Waiting for report…</div>
+      </section>
+
+      <section class="panel" style="margin-bottom:18px;padding:14px 18px;border-color:rgba(95,132,255,.22)">
+        <b>Automatic paper trading</b> <span class="muted">· CEX spot only · long-only · max 1 entry per scan · max 3 entries/day · 4-hour symbol cooldown · fresh quotes, order-book depth and spread filters. Signals are deterministic rules, not a trained AI model. No real orders. Toggle resets OFF after app restart.</span>
+      </section>
+
+      <section class="section-head" id="engines"><div><div class="eyebrow">01 / MARKET INTELLIGENCE</div><h2>Two independent engines</h2></div><div id="scanTime" class="muted small">No scan yet</div></section>
+      <section class="engine-grid">
+        <article class="panel engine-panel">
+          <div class="panel-head"><div class="engine-icon purple">S</div><div class="engine-title"><h3>Solana Discovery</h3><p>Recent token discovery · Jupiter Tokens API V2 · no swap execution</p></div><span id="solStatus" class="tag neutral">NOT SCANNED</span></div>
+          <div class="engine-metrics"><div><b id="solCount">—</b><span>Tokens received</span></div><div><b id="solEligible">—</b><span>Paper-screen eligible</span></div><div><b>0</b><span>Live orders</span></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Token</th><th>Liquidity</th><th>Score</th><th>Screen</th><th></th></tr></thead><tbody id="solRows"><tr><td colspan="5" class="empty">Run a scan to load recent token data.</td></tr></tbody></table></div>
+          <div class="panel-foot">Screening is heuristic, not an audit. Missing security data is never assumed safe.</div>
+        </article>
+
+        <article class="panel engine-panel">
+          <div class="panel-head"><div class="engine-icon blue">₿</div><div class="engine-title"><h3>Multi-Crypto</h3><p>BTC · ETH · SOL · CCXT public market data</p></div><span id="cexStatus" class="tag neutral">NOT SCANNED</span></div>
+          <div class="engine-metrics"><div><b id="cexCount">—</b><span>Markets returned</span></div><div><b id="cexExchange">—</b><span>Exchange adapter</span></div><div><b>SPOT</b><span>Long only baseline</span></div></div>
+          <div class="table-wrap"><table><thead><tr><th>Market</th><th>Last price</th><th>24h %</th><th>Provider</th><th></th></tr></thead><tbody id="cexRows"><tr><td colspan="5" class="empty">Run a scan to load public market data.</td></tr></tbody></table></div>
+          <div id="analysisResults" class="analysis-box">Analyze shows Wilder RSI/ATR/ADX, directional strength, the signal-aligned primary + 4h trend backtest, walk-forward cost stress, and a clearly separate EMA20/50 baseline; that EMA-only baseline is not the automatic-entry strategy. Historical tests cannot reproduce live spread, depth or real fills.</div>
+          <div class="panel-foot">Exchange access varies by country. Verify eligibility before connecting an account.</div>
+        </article>
+      </section>
+
+      <section class="panel testnet-panel" id="testnet">
+        <div class="section-head compact"><div><div class="eyebrow">02 / EXCHANGE SANDBOX</div><h2>Binance Spot Testnet</h2></div><span id="testnetBadge" class="tag neutral">LOCKED</span></div>
+        <div class="testnet-banner">Sandbox only. The order form sends bounded GTC LIMIT orders to Binance Spot Testnet when locally enabled. It never routes to production. API keys are read only from your local environment; they are never shown in this page.</div>
+        <div class="testnet-status-grid"><div><span>Connection</span><b id="testnetConnection">Not checked</b></div><div><span>Order gate</span><b id="testnetOrderGate">OFF</b></div><div><span>Max order</span><b id="testnetMaxOrder">—</b></div><div><span>Open / unresolved cap</span><b id="testnetMaxOpen">—</b></div></div>
+        <div class="testnet-actions"><button id="testnetConnectBtn" class="btn secondary" type="button">Check Testnet connection</button><button id="testnetRefreshBtn" class="btn ghost" type="button">Refresh order ledger</button><button id="testnetStopBtn" class="btn danger" type="button">Emergency lock + cancel app orders</button><button id="testnetResetBtn" class="btn ghost" type="button" disabled>Reset Testnet lock</button></div>
+        <form id="testnetOrderForm" class="testnet-order-form">
+          <div class="form-row"><label>Allowlisted market<select id="testnetSymbol"><option>BTC/USDT</option><option>ETH/USDT</option><option>SOL/USDT</option></select></label><label>Side<select id="testnetSide"><option value="buy">BUY</option><option value="sell">SELL</option></select></label></div>
+          <div class="form-row"><label>Base amount<input id="testnetAmount" type="number" min="0.00000001" step="any" value="0.0001" required /></label><label>Limit price (USDT)<input id="testnetPrice" type="number" min="0.00000001" step="any" placeholder="Set an explicit price" required /></label></div>
+          <div class="risk-preview">Only LIMIT / GTC orders. The server enforces the symbol allowlist, exchange precision and minimums, free balance, per-order notional cap, max unresolved orders, and one-time client order ID. No market orders or strategy-driven live orders.</div>
+          <button id="testnetSubmitBtn" class="btn primary wide" type="submit" disabled>Submit Testnet LIMIT order</button>
+          <div id="testnetOrderMessage" class="form-message" aria-live="polite">Order execution is disabled until explicitly enabled in your local .env.</div>
+        </form>
+        <div class="table-wrap testnet-orders-wrap"><table><thead><tr><th>Market</th><th>Side</th><th>Amount</th><th>Limit</th><th>State</th><th>Filled</th><th>Exchange ID</th><th>Actions</th></tr></thead><tbody id="testnetOrderRows"><tr><td colspan="8" class="empty">No Testnet orders submitted.</td></tr></tbody></table></div>
+        <div class="panel-foot">Important: a network timeout can leave an order in UNKNOWN state. That request is blocked from resubmission until reconciled. Emergency lock persists across restart and cancels only app-ledger orders whose exchange ID is known. Always inspect the exchange Testnet order history. This is not an audited live-trading system.</div>
+      </section>
+
+      <section class="lower-grid" id="paper">
+        <article class="panel trade-panel">
+          <div class="section-head compact"><div><div class="eyebrow">02 / SIMULATED EXECUTION</div><h2>Open paper position</h2></div><span class="tag safe">NO FUNDS MOVED</span></div>
+          <form id="paperForm">
+            <label>Engine<select id="engine"><option value="multi_crypto">Multi-Crypto</option><option value="solana">Solana</option></select></label>
+            <label>Market / Token<select id="symbol" required><option value="">Scan markets first</option></select></label>
+            <div class="form-row"><label>Reference price (USD)<input id="price" type="number" step="any" min="0.00000001" required placeholder="Use scanned price" /></label><label>Requested notional (USD)<input id="notional" type="number" min="1" step="0.01" placeholder="Risk engine sizes it" /></label></div>
+            <div class="risk-preview" id="riskPreview">Risk sizing is applied on the server using the latest saved limits.</div>
+            <button class="btn primary wide" type="submit">＋ Open simulated BUY</button>
+            <div id="orderMessage" class="form-message"></div>
+          </form>
+        </article>
+        <article class="panel risk-panel" id="risk">
+          <div class="section-head compact"><div><div class="eyebrow">03 / CAPITAL PROTECTION</div><h2>Risk controls</h2></div><span class="tag safe">SERVER ENFORCED</span></div>
+          <form id="riskForm" class="risk-form">
+            <div class="form-row"><label>Risk / trade %<input name="risk_per_trade_pct" type="number" min="0.05" max="1" step="0.05" /></label><label>Max daily net-equity loss %<input name="max_daily_loss_pct" type="number" min="0.25" max="5" step="0.25" /></label></div>
+            <div class="form-row"><label>Max weekly net-equity loss %<input name="max_weekly_loss_pct" type="number" min="0.5" max="10" step="0.5" /></label><label>Max exposure %<input name="max_total_exposure_pct" type="number" min="1" max="50" step="1" /></label></div>
+            <div class="form-row"><label>Max open positions<input name="max_open_positions" type="number" min="1" max="5" step="1" /></label><label>Stop loss %<input name="stop_loss_pct" type="number" min="0.25" max="10" step="0.25" /></label></div>
+            <div class="form-row"><label>Take profit %<input name="take_profit_pct" type="number" min="0.5" max="30" step="0.5" /></label><label>Fee / side (bps)<input name="fee_bps_per_side" type="number" min="0" max="100" step="1" /></label></div>
+            <div class="form-row"><label>Slippage (bps)<input name="slippage_bps" type="number" min="0" max="200" step="1" /></label><label>Max total drawdown %<input name="max_total_drawdown_pct" type="number" min="1" max="20" step="0.5" /></label></div>
+            <button class="btn secondary wide" type="submit">Save paper risk limits</button><div id="riskMessage" class="form-message"></div>
+          </form>
+        </article>
+      </section>
+
+      <section class="panel ledger-panel" id="ledger">
+        <div class="section-head compact"><div><div class="eyebrow">04 / AUDIT TRAIL</div><h2>Paper trade ledger</h2></div><button id="refreshLedger" class="btn ghost">Refresh</button></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>Engine</th><th>Market</th><th>Entry</th><th>Qty</th><th>Stop</th><th>Target</th><th>Status</th><th>Net P&amp;L</th><th></th></tr></thead><tbody id="tradeRows"><tr><td colspan="10" class="empty">No paper trades yet.</td></tr></tbody></table></div>
+        <div class="ledger-note">Paper fills are simulations. Live order books, block landing, MEV and real execution quality are not reproduced.</div>
+      </section>
+
+      <footer><span>AI TRADING TERMINAL / CLOUD EDITION</span><span>Paper-first · Testnet orders gated · Production trading disabled</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: ai-trading-terminal
+    runtime: docker
+    plan: starter
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeploy: false
+    disk:
+      name: trading-ledger
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_USERNAME
+        value: admin
+      - key: APP_PASSWORD
+        sync: false
+      - key: APP_AUTH_SECRET
+        generateValue: true
+      - key: APP_TOKEN_TTL_MINUTES
+        value: "480"
+      - key: DATABASE_PATH
+        value: /var/data/trading.db
+      - key: PAPER_INITIAL_CAPITAL_USD
+        value: "100"
+      - key: SCAN_INTERVAL_SECONDS
+        value: "60"
+      - key: CEX_EXCHANGE
+        value: binance
+      - key: CEX_SYMBOLS
+        value: BTC/USDT,ETH/USDT,SOL/USDT
+      - key: BINANCE_TESTNET_ENABLED
+        value: "false"
+      - key: BINANCE_TESTNET_ORDER_ENABLED
+        value: "false"
+      - key: BINANCE_TESTNET_API_KEY
+        value: ""
+      - key: BINANCE_TESTNET_API_SECRET
+        value: ""

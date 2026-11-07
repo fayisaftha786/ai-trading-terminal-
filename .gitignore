@@ -1,0 +1,17 @@
+.env
+.venv/
+venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+data/
+*.sqlite
+*.db
+*.log
+.DS_Store
+
+dist/
+android/.gradle/
+android/build/
+android/app/build/
