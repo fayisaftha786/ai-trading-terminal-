@@ -75,7 +75,7 @@ public final class PaperSignalTest {
     @Test public void overextendedRsiFailsClosed() {
         PaperSignal.Analysis extended=new PaperSignal.Analysis("BUY_CANDIDATE","UPTREND","test",82,100,
                 68,1.2,25,30,20,1.3,NOW-90*60_000L,60*60_000L);
-        assertEquals("no_primary_buy_candidate",PaperSignal.assess(extended,higher(),quote(),NOW).reason);
+        assertEquals("volatility_or_momentum_guard",PaperSignal.assess(extended,higher(),quote(),NOW).reason);
     }
 
     @Test public void analysisNeedsAtLeast150ClosedBars() {
