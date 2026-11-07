@@ -562,6 +562,12 @@ def test_global_kill_switch_waits_for_in_flight_scan_before_returning(tmp_path):
     database_path = tmp_path / "global-kill-scan-lock.db"
     config = replace(settings, database_path=database_path, initial_capital_usd=100.0)
     application = create_app(config=config, db_path=database_path)
+    # Seed both switches ON so the test proves the kill endpoint actually ran
+    # before checking that it is blocked behind the held scan lock.
+    application.state.auto_paper_enabled = True
+    application.state.db.set_setting("auto_paper_enabled", True)
+    application.state.auto_testnet_enabled = True
+    application.state.db.set_setting("testnet_auto_trading_enabled", True)
     kill_switch = next(
         route.endpoint for route in application.routes
         if getattr(route, "path", None) == "/api/automation/kill-switch"
@@ -573,7 +579,8 @@ def test_global_kill_switch_waits_for_in_flight_scan_before_returning(tmp_path):
         task = asyncio.create_task(kill_switch())
         try:
             for _ in range(100):
-                if not application.state.auto_paper_enabled:
+                if (not application.state.auto_paper_enabled
+                        and not application.state.auto_testnet_enabled):
                     break
                 await asyncio.sleep(0.01)
             assert application.state.auto_paper_enabled is False
