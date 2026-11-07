@@ -56,7 +56,7 @@ test("analysis returns HOLD when candle integrity is not clean", () => {
 test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   const now = Date.now();
   const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
-    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000 };
+    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_timestamp_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
   const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
@@ -64,6 +64,8 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs }).eligible, true);
   assert.equal(assessCandidate({ market: { ...market, ask: 99 }, primary, higher, nowMs: now, costs }).reason, "invalid_or_crossed_quote");
   assert.equal(assessCandidate({ market: { ...market, bid_depth_quote: 10 }, primary, higher, nowMs: now, costs }).reason, "top10_orderbook_depth_unavailable_or_low");
+  assert.equal(assessCandidate({ market: { ...market, book_timestamp_ms: now - 20000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_timestamp_stale_or_missing");
+  assert.equal(assessCandidate({ market: { ...market, book_timestamp_ms: undefined }, primary, higher, nowMs: now, costs }).reason, "orderbook_timestamp_stale_or_missing");
   assert.equal(assessCandidate({ market: { ...market, ticker_time: new Date(now - 180000).toISOString() }, primary, higher, nowMs: now, costs }).reason, "ticker_stale_or_timestamp_invalid");
   assert.equal(assessCandidate({ market: { ...market, ask: 101 }, primary, higher, nowMs: now, costs }).reason, "spread_too_wide");
 });
@@ -71,7 +73,7 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
 test("candidate gate blocks signals without higher-timeframe agreement", () => {
   const now = Date.now();
   const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
-    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000 };
+    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_timestamp_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
   const higher = { regime: "RANGE_OR_TRANSITION", last_closed_candle_ms: now - 21600000 };
