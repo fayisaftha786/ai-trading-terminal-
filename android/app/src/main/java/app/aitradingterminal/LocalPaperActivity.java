@@ -260,6 +260,9 @@ public final class LocalPaperActivity extends Activity {
                 d.execSQL("ALTER TABLE paper ADD COLUMN closed_at INTEGER");
                 d.execSQL("ALTER TABLE paper ADD COLUMN close_reason TEXT");
                 d.execSQL("ALTER TABLE paper ADD COLUMN pnl_usd REAL");
+                // Reconcile v1 prototype trades into the same modeled-cost ledger.
+                d.execSQL("UPDATE paper SET entry_fee=entry*qty*? WHERE entry_fee=0",new Object[]{PaperMath.FEE_RATE});
+                d.execSQL("UPDATE paper SET exit_fee=exit*qty*? WHERE status='CLOSED' AND exit IS NOT NULL AND exit_fee=0",new Object[]{PaperMath.FEE_RATE});
                 d.execSQL("UPDATE paper SET stop_loss=entry*? WHERE stop_loss IS NULL",new Object[]{1.0-PaperMath.STOP_LOSS_RATE});
                 d.execSQL("UPDATE paper SET take_profit=entry*? WHERE take_profit IS NULL",new Object[]{1.0+PaperMath.TAKE_PROFIT_RATE});
                 d.execSQL("UPDATE paper SET opened_at=? WHERE status='OPEN'",new Object[]{System.currentTimeMillis()});
