@@ -16,8 +16,8 @@ def test_android_manifest_and_gradle_configuration_are_valid():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     assert "compileSdk = 35" in gradle
     assert "minSdk = 26" in gradle
-    assert 'versionName = "0.7.0"' in gradle
-    assert "versionCode = 47" in gradle
+    assert 'versionName = "0.7.1"' in gradle
+    assert "versionCode = 48" in gradle
 
 
 def test_android_wrapper_allows_only_https_cloud_origins_and_disables_file_access():
@@ -52,13 +52,13 @@ def test_android_wrapper_does_not_embed_secrets_or_local_python_runtime():
 
 def test_ci_contains_native_debug_apk_build_and_artifact_upload():
     workflow = (ROOT / ".github/workflows/cloud-apk.yml").read_text()
-    assert "AITradingTerminal-Android-v0.7.0-debug-apk" in workflow
+    assert "AITradingTerminal-Android-v0.7.1-debug-apk" in workflow
     assert 'test -s android/app/build.gradle.kts' in workflow
-    assert "AITradingTerminal-v0.7.0-No-Termux-Cloud-Source.zip" not in workflow
+    assert "AITradingTerminal-v0.7.1-No-Termux-Cloud-Source.zip" not in workflow
     assert '"android/**"' in workflow
     assert "build-android-debug.sh" in workflow
     assert "upload-artifact@v7" in workflow
-    assert "dist/AITradingTerminal-Android-v0.7.0-debug.apk.sha256" in workflow
+    assert "dist/AITradingTerminal-Android-v0.7.1-debug.apk.sha256" in workflow
     assert "retention-days: 30" in workflow
     assert "android-actions/setup-android@v4" in workflow
     assert "gradle/actions/setup-gradle@v6" in workflow
@@ -83,7 +83,7 @@ def test_android_build_script_checks_sdk_signs_and_hashes_apk():
     assert "build-tools/$BUILD_TOOLS_VERSION/apksigner" in script
     assert 'verify --verbose "$APK"' in script
     assert "sha256sum" in script
-    assert "AITradingTerminal-Android-v0.7.0-debug.apk" in script
+    assert "AITradingTerminal-Android-v0.7.1-debug.apk" in script
 
 
 def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_metadata():
@@ -91,7 +91,7 @@ def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_me
     assert 'EXPECTED_GRADLE_MAX_MAJOR="8"' in script
     assert "parts[0] != 8" in script
     assert "aapt dump badging" in script
-    assert "versionCode='47' versionName='0.7.0-debug'" in script
+    assert "versionCode='48' versionName='0.7.1-debug'" in script
     assert "sdkVersion:'26'" in script
     assert "targetSdkVersion:'35'" in script
 
@@ -99,9 +99,9 @@ def test_android_build_script_rejects_unsupported_gradle_major_and_checks_apk_me
 def test_android_gradle_version_code_matches_post_build_apk_verifier():
     gradle = (ANDROID / "app/build.gradle.kts").read_text()
     script = (ROOT / "build-android-debug.sh").read_text()
-    assert "versionCode = 47" in gradle
+    assert "versionCode = 48" in gradle
     assert "versionName = \"0.7.0\"" in gradle
-    assert "versionCode='47' versionName='0.7.0-debug'" in script
+    assert "versionCode='48' versionName='0.7.1-debug'" in script
 
 
 def test_android_target_35_applies_system_bar_and_cutout_insets():
