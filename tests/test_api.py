@@ -373,3 +373,32 @@ def test_scan_toggle_cannot_disable_exit_monitoring_with_open_cex_paper_position
     assert paper_off.json()["enabled"] is False
     assert paper_off.json()["automatic_scan_enabled"] is True
     assert paper_off.json()["exit_monitoring_required"] is True
+
+
+def test_auto_paper_opt_in_persists_across_process_restart_and_kill_switch_clears_it(tmp_path):
+    from dataclasses import replace
+    from app.settings import settings
+    from app.main import create_app
+    from fastapi.testclient import TestClient
+
+    database_path = tmp_path / "persistent-auto-paper.db"
+    config = replace(settings, database_path=database_path, initial_capital_usd=100.0)
+    first = create_app(config=config, db_path=database_path)
+    with TestClient(first) as first_client:
+        assert first_client.get("/api/automation/paper-trading").json()["enabled"] is False
+        enabled = first_client.put("/api/automation/paper-trading", json={"enabled": True})
+        assert enabled.status_code == 200
+        assert enabled.json()["enabled"] is True
+        assert first_client.get("/api/automation/scan").json()["enabled"] is True
+
+    restarted = create_app(config=config, db_path=database_path)
+    assert restarted.state.auto_paper_enabled is True
+    assert restarted.state.auto_scan_enabled is True
+    with TestClient(restarted) as restarted_client:
+        assert restarted_client.get("/api/automation/paper-trading").json()["enabled"] is True
+        stopped = restarted_client.post("/api/automation/kill-switch")
+        assert stopped.status_code == 200
+        assert stopped.json()["automatic_paper_trading_enabled"] is False
+
+    after_kill = create_app(config=config, db_path=database_path)
+    assert after_kill.state.auto_paper_enabled is False
