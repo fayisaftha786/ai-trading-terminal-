@@ -729,6 +729,22 @@ def test_testnet_auto_schema_migrates_existing_table_and_exact_fee_ledger(monkey
     assert round(row["realized_pnl_quote"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
 
 
+def test_testnet_auto_performance_excludes_fee_unresolved_from_net_pnl(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
+    exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99,
+                                   "fee": {"currency": "USDT", "cost": 0.01}})
+    exchange.orders["502"].update({"status": "closed", "filled": 0.099, "average": 103.0, "cost": 10.197,
+                                   "fee": {"currency": "USDT", "cost": 0.0102}})
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    trader.reconcile()
+    summary = db.testnet_auto_performance()
+    assert summary["closed_order_lists"] == 1
+    assert summary["exactly_accounted_trades"] == 1
+    assert summary["fee_unresolved_trades"] == 0
+    assert round(summary["realized_pnl_usdt"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
+
+
 def test_testnet_auto_does_not_invent_pnl_when_fee_data_missing(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
     exchange.orders["501"].update({"status": "closed", "filled": 0.0999, "average": 100.0, "cost": 9.99})
