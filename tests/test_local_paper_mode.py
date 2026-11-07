@@ -11,7 +11,7 @@ def test_local_demo_persists_timestamped_closed_candles_and_rejects_stale_market
     assert "open_time INTEGER NOT NULL UNIQUE" in source
     assert "close_time INTEGER NOT NULL" in source
     assert "MAX_CANDLE_AGE_MS" in source
-    assert "Candle history has a gap or duplicate" in source
+    assert "candle history has a gap or duplicate" in source
     assert "ignore the currently forming candle" in source
     assert "legacy cache has no trustworthy candle timestamps" in source
     assert "SELECT open_time,close_time" in source
