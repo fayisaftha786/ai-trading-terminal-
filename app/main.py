@@ -24,6 +24,7 @@ from app.services.market_data import MarketDataService
 from app.services.paper import PaperBroker
 from app.services.performance import build_performance_report
 from app.services.risk import safe_cost_assumptions, validate_risk_profile
+from app.services.binance_account import BinanceAccountUnavailable, BinanceReadOnlyAccount
 from app.services.testnet import (BinanceSpotTestnet, TestnetOrderRejected,
                                    TestnetOrderUncertain, TestnetUnavailable)
 from app.services.strategy import analyze_candles, score_solana_token
@@ -54,6 +55,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     broker = PaperBroker(db)
     auto_paper = AutoPaperEngine(db, broker)
     testnet = BinanceSpotTestnet(cfg)
+    binance_account = BinanceReadOnlyAccount(cfg)
     worker_manager = WorkerManager(concurrency=4, timeout_seconds=4.0, retries=1)
     worker_analysis_lock = asyncio.Lock()
 
@@ -272,6 +274,23 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         token = create_access_token(cfg.auth_username, cfg.auth_secret, cfg.auth_token_ttl_minutes)
         db.log_event("auth_login", "Dashboard sign-in succeeded", {"source": client_host})
         return {"access_token": token, "token_type": "Bearer", "expires_in": cfg.auth_token_ttl_minutes * 60}
+
+    @app.get("/api/binance/account/status")
+    async def binance_account_status() -> dict[str, Any]:
+        return binance_account.status()
+
+    @app.post("/api/binance/account/connection-check")
+    async def binance_account_connection_check() -> dict[str, Any]:
+        try:
+            result = await asyncio.to_thread(binance_account.check_account)
+            db.log_event("binance_readonly_connection", "Binance read-only account connection check succeeded", {
+                "environment": "production_read_only",
+                "asset_count": len(result.get("available_assets", [])),
+                "order_execution_available": False,
+            })
+            return result
+        except BinanceAccountUnavailable as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
 
     @app.get("/api/testnet/status")
     async def testnet_status() -> dict[str, Any]:
