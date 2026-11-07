@@ -184,7 +184,8 @@ class TestnetAutoTrader:
                 result["status"] = "blocked_testnet_order_gate"
                 result["rejected"].append({"reason": "testnet_order_gate_disabled_or_halted"})
                 return result
-            if any(row["status"] == "UNKNOWN" for row in self.storage.list_active_testnet_auto_orders()):
+            if any(row["status"] in {"UNKNOWN", "UNPROTECTED"}
+                   for row in self.storage.list_active_testnet_auto_orders()):
                 result["status"] = "blocked_unresolved_order_list"
                 result["rejected"].append({"reason": "reconcile_unknown_order_lists_before_new_entries"})
                 return result
