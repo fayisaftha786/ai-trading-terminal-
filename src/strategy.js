@@ -1,4 +1,44 @@
 // Cloudflare deployment strategy: deterministic research-only PAPER signals.
+
+/**
+ * Use only valid, current two-sided ticker quotes when valuing paper positions.
+ * This same gate is used by scheduled scans and dashboard reads so stale cached
+ * marks cannot alter persisted equity peaks or daily/weekly risk baselines.
+ */
+export function buildFreshBidMarks(markets, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+  const rows = Array.isArray(markets) ? markets : [];
+  return new Map(rows.filter((market) => {
+    if (market?.status !== "live") return false;
+    const quoteTime = Date.parse(market.ticker_time || "");
+    const age = nowMs - quoteTime;
+    return Number.isFinite(quoteTime) &&
+      age >= -5000 && age <= maxQuoteAgeMs &&
+      Number.isFinite(market.bid) && market.bid > 0 &&
+      Number.isFinite(market.ask) && market.ask >= market.bid;
+  }).map((market) => [market.symbol, market.bid]));
+}
+
+/**
+ * Do not establish a risk-period baseline using incomplete marks for an
+ * existing open position. A new baseline is created on the first fully marked
+ * observation in that UTC period.
+ */
+export function resolveRiskBaseline({
+  periodKey, storedPeriodKey, storedBaseline, equity, closedPnl, unmarkedPositions
+}) {
+  if (storedPeriodKey === periodKey && Number.isFinite(storedBaseline)) {
+    return { baseline: storedBaseline, initialized: true, shouldPersist: false };
+  }
+  if (unmarkedPositions > 0) {
+    return { baseline: null, initialized: false, shouldPersist: false };
+  }
+  const baseline = equity - closedPnl;
+  if (!Number.isFinite(baseline)) {
+    return { baseline: null, initialized: false, shouldPersist: false };
+  }
+  return { baseline, initialized: true, shouldPersist: true };
+}
+
 export function ema(values, period) {
   if (!Array.isArray(values) || values.length < period || period < 1) return [];
   const alpha = 2 / (period + 1);
@@ -214,9 +254,9 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
       Math.min(market.bid_depth_quote, market.ask_depth_quote) < 5000) {
     return reject("top10_orderbook_depth_unavailable_or_low");
   }
-  if (!Number.isFinite(market.book_timestamp_ms) || market.book_timestamp_ms > nowMs + 1000 ||
-      nowMs - market.book_timestamp_ms > 15000) {
-    return reject("orderbook_timestamp_stale_or_missing");
+  if (!Number.isFinite(market.book_retrieved_at_ms) || market.book_retrieved_at_ms > nowMs + 1000 ||
+      nowMs - market.book_retrieved_at_ms < -1000 || nowMs - market.book_retrieved_at_ms > 15000) {
+    return reject("orderbook_snapshot_retrieval_stale_or_missing");
   }
   if (quoteVolume < 1000000) return reject("quote_volume_below_1m");
   const oneHourAge = nowMs - (primary.last_closed_candle_ms + 3600000);

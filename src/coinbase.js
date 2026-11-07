@@ -62,6 +62,9 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   const ticker = await getJson("/products/" + encoded + "/ticker");
   const stats = await getJson("/products/" + encoded + "/stats");
   const book = await getJson("/products/" + encoded + "/book?level=2");
+  // Coinbase Exchange L2 REST snapshots expose sequence/bids/asks, not a reliable
+  // exchange event timestamp. Record when this response was received locally.
+  const bookRetrievedAtMs = Date.now();
   const oneHourRaw = await getJson("/products/" + encoded + "/candles?granularity=3600");
   const sixHourRaw = await getJson("/products/" + encoded + "/candles?granularity=21600");
   const bid = Number(ticker.bid);
@@ -76,7 +79,6 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   const bidDepth = parseBookSide(book.bids);
   const askDepth = parseBookSide(book.asks);
   const tickerMs = Date.parse(ticker.time || "");
-  const bookMs = Date.parse(book.time || "");
   const bookObservedAtMs = Date.now();
   return {
     symbol,
@@ -84,8 +86,9 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
     status: "live",
     fetched_at_ms: nowMs,
     ticker_time: Number.isFinite(tickerMs) ? new Date(tickerMs).toISOString() : null,
-    book_timestamp_ms: Number.isFinite(bookMs) ? bookMs : null,
-    book_age_ms: Number.isFinite(bookMs) ? bookObservedAtMs - bookMs : null,
+    book_retrieved_at_ms: bookRetrievedAtMs,
+    book_age_ms: Math.max(0, bookObservedAtMs - bookRetrievedAtMs),
+    book_sequence: book.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence),
     bid,
     ask,
     last,
@@ -99,7 +102,8 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
     data_quality: {
       one_hour: { ok: oneHourAudit.ok, issues: oneHourAudit.issues, bars: oneHourAudit.valid_closed_bars },
       six_hour: { ok: sixHourAudit.ok, issues: sixHourAudit.issues, bars: sixHourAudit.valid_closed_bars },
-      book_timestamp_source: "local_retrieval_time"
+      book_freshness_source: "local_retrieval_time",
+      book_sequence_available: book.sequence != null && Number.isSafeInteger(Number(book.sequence))
     }
   };
 }

@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
-import { analyzeTimeframe, assessCandidate } from "./strategy.js";
+import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_AGE_MS = 120000;
@@ -212,8 +212,9 @@ export class TradingEngine extends DurableObject {
           quote_volume_usd: snapshot.quote_volume_usd,
           bid_depth_quote: snapshot.bid_depth_quote,
           ask_depth_quote: snapshot.ask_depth_quote,
-          book_timestamp_ms: snapshot.book_timestamp_ms,
+          book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
           book_age_ms: snapshot.book_age_ms,
+          book_sequence: snapshot.book_sequence,
           data_quality: snapshot.data_quality,
           one_hour_audit_summary: {
             ok: snapshot.one_hour_audit.ok,
@@ -245,10 +246,7 @@ export class TradingEngine extends DurableObject {
 
     const state = this.getState("settings");
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
-    const markBySymbol = new Map(markets
-      .filter((market) => market.status === "live" && Number.isFinite(market.bid) && market.bid > 0 &&
-        Number.isFinite(Date.parse(market.ticker_time || "")) && Date.now() - Date.parse(market.ticker_time) >= -5000 && Date.now() - Date.parse(market.ticker_time) <= MAX_QUOTE_AGE_MS)
-      .map((market) => [market.symbol, market.bid]));
+    const markBySymbol = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
     const portfolio = this.portfolio(markBySymbol, risk, Date.now());
@@ -405,12 +403,15 @@ export class TradingEngine extends DurableObject {
     }
     const equity = initial + realized + unrealized;
     const settings = this.getState("settings");
-    const peak = Math.max(initial, Number(settings.peak_equity_usd || initial), equity);
-    if (peak > Number(settings.peak_equity_usd || initial)) {
+    const storedPeak = Math.max(initial, Number(settings.peak_equity_usd || initial));
+    // An unmarked open position makes current equity incomplete. Do not let a
+    // stale/incomplete valuation move the persisted high-water mark.
+    const peak = unmarked > 0 ? storedPeak : Math.max(storedPeak, equity);
+    if (unmarked === 0 && peak > storedPeak) {
       settings.peak_equity_usd = peak;
       this.setState("settings", settings);
     }
-    const drawdown = peak > 0 ? Math.max(0, ((peak - equity) / peak) * 100) : 0;
+    const drawdown = unmarked > 0 ? null : (peak > 0 ? Math.max(0, ((peak - equity) / peak) * 100) : 0);
     const dayKey = new Date(nowMs).toISOString().slice(0, 10);
     const closedToday = Number(this.sql.exec(
       "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED' AND date(closed_at_ms/1000,'unixepoch')=?",
@@ -424,24 +425,31 @@ export class TradingEngine extends DurableObject {
       "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED' AND closed_at_ms>=?",
       weekStartMs
     ).toArray()[0]?.pnl || 0);
-    let dayBaseline = this.getState("risk_day_baseline");
-    if (this.getState("risk_day_key") !== dayKey || !Number.isFinite(Number(dayBaseline))) {
-      dayBaseline = equity - closedToday;
+    const dayBaseline = resolveRiskBaseline({
+      periodKey: dayKey, storedPeriodKey: this.getState("risk_day_key"),
+      storedBaseline: this.getState("risk_day_baseline"), equity, closedPnl: closedToday,
+      unmarkedPositions: unmarked
+    });
+    if (dayBaseline.shouldPersist) {
       this.setState("risk_day_key", dayKey);
-      this.setState("risk_day_baseline", dayBaseline);
+      this.setState("risk_day_baseline", dayBaseline.baseline);
     }
     const weekKey = new Date(weekStartMs).toISOString().slice(0, 10);
-    let weekBaseline = this.getState("risk_week_baseline");
-    if (this.getState("risk_week_key") !== weekKey || !Number.isFinite(Number(weekBaseline))) {
-      weekBaseline = equity - closedThisWeek;
+    const weekBaseline = resolveRiskBaseline({
+      periodKey: weekKey, storedPeriodKey: this.getState("risk_week_key"),
+      storedBaseline: this.getState("risk_week_baseline"), equity, closedPnl: closedThisWeek,
+      unmarkedPositions: unmarked
+    });
+    if (weekBaseline.shouldPersist) {
       this.setState("risk_week_key", weekKey);
-      this.setState("risk_week_baseline", weekBaseline);
+      this.setState("risk_week_baseline", weekBaseline.baseline);
     }
     return {
       mode: "paper_only", initial_capital_usd: initial, realized_pnl_usd: realized, unrealized_pnl_usd: unrealized,
       equity_usd: equity, exposure_usd: exposure, open_positions: openTrades.length, unmarked_positions: unmarked,
       peak_equity_usd: peak, drawdown_pct_from_peak: drawdown,
-      daily_equity_pnl_usd: equity - Number(dayBaseline), weekly_equity_pnl_usd: equity - Number(weekBaseline),
+      daily_equity_pnl_usd: dayBaseline.initialized ? equity - dayBaseline.baseline : null,
+      weekly_equity_pnl_usd: weekBaseline.initialized ? equity - weekBaseline.baseline : null,
       risk_period_timezone: "UTC", last_updated_at_ms: nowMs
     };
   }
@@ -456,8 +464,12 @@ export class TradingEngine extends DurableObject {
       state.auto_paper_enabled = false; state.halted = true; this.setState("settings", state);
       this.logEvent("drawdown_circuit_breaker", "Paper automation halted by total drawdown limit");
     }
-    if (portfolio.daily_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_daily_loss_pct / 100)) reasons.push("daily_loss_limit");
-    if (portfolio.weekly_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_weekly_loss_pct / 100)) reasons.push("weekly_loss_limit");
+    if (!Number.isFinite(portfolio.daily_equity_pnl_usd) || !Number.isFinite(portfolio.weekly_equity_pnl_usd)) {
+      reasons.push("risk_period_baseline_unavailable");
+    } else {
+      if (portfolio.daily_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_daily_loss_pct / 100)) reasons.push("daily_loss_limit");
+      if (portfolio.weekly_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_weekly_loss_pct / 100)) reasons.push("weekly_loss_limit");
+    }
     const dayStart = new Date(nowMs); dayStart.setUTCHours(0, 0, 0, 0);
     const entriesToday = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()).toArray()[0]?.count || 0);
     if (entriesToday >= 3) reasons.push("daily_entry_cap");
@@ -533,7 +545,7 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
-    const marks = new Map(markets.filter((market) => market.status === "live" && Number.isFinite(market.bid)).map((market) => [market.symbol, market.bid]));
+    const marks = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
     const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now());
     return {
       mode: "paper_only", live_trading_enabled: false, binance_testnet_enabled: false,

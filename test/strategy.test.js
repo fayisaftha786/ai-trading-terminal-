@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate } from "../src/strategy.js";
+import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
   return Array.from({ length: count }, (_, index) => {
@@ -56,7 +56,7 @@ test("analysis returns HOLD when candle integrity is not clean", () => {
 test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   const now = Date.now();
   const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
-    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_timestamp_ms: now - 1000 };
+    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
   const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
@@ -64,8 +64,9 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs }).eligible, true);
   assert.equal(assessCandidate({ market: { ...market, ask: 99 }, primary, higher, nowMs: now, costs }).reason, "invalid_or_crossed_quote");
   assert.equal(assessCandidate({ market: { ...market, bid_depth_quote: 10 }, primary, higher, nowMs: now, costs }).reason, "top10_orderbook_depth_unavailable_or_low");
-  assert.equal(assessCandidate({ market: { ...market, book_timestamp_ms: now - 20000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_timestamp_stale_or_missing");
-  assert.equal(assessCandidate({ market: { ...market, book_timestamp_ms: undefined }, primary, higher, nowMs: now, costs }).reason, "orderbook_timestamp_stale_or_missing");
+  assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: now - 20000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
+  assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: undefined }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
+  assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: now + 2000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
   assert.equal(assessCandidate({ market: { ...market, ticker_time: new Date(now - 180000).toISOString() }, primary, higher, nowMs: now, costs }).reason, "ticker_stale_or_timestamp_invalid");
   assert.equal(assessCandidate({ market: { ...market, ask: 101 }, primary, higher, nowMs: now, costs }).reason, "spread_too_wide");
 });
@@ -73,11 +74,53 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
 test("candidate gate blocks signals without higher-timeframe agreement", () => {
   const now = Date.now();
   const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
-    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_timestamp_ms: now - 1000 };
+    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
   const higher = { regime: "RANGE_OR_TRANSITION", last_closed_candle_ms: now - 21600000 };
   const result = assessCandidate({ market, primary, higher, nowMs: now, costs: { feeBpsPerSide: 15, slippageBps: 10 } });
   assert.equal(result.eligible, false);
   assert.equal(result.reason, "timeframes_not_both_uptrend");
+});
+
+
+test("fresh bid marks reject stale, future, crossed and invalid ticker snapshots", () => {
+  const now = Date.now();
+  const markets = [
+    { symbol: "BTC/USD", status: "live", ticker_time: new Date(now - 1000).toISOString(), bid: 100, ask: 100.1 },
+    { symbol: "ETH/USD", status: "live", ticker_time: new Date(now - 121000).toISOString(), bid: 50, ask: 50.1 },
+    { symbol: "SOL/USD", status: "live", ticker_time: new Date(now + 6000).toISOString(), bid: 20, ask: 20.1 },
+    { symbol: "BAD/USD", status: "live", ticker_time: new Date(now).toISOString(), bid: 10.1, ask: 10 },
+    { symbol: "OFF/USD", status: "error", ticker_time: new Date(now).toISOString(), bid: 5, ask: 5.1 }
+  ];
+  const marks = buildFreshBidMarks(markets, now);
+  assert.deepEqual([...marks.entries()], [["BTC/USD", 100]]);
+});
+
+test("risk baseline waits for a fully marked portfolio", () => {
+  const waiting = resolveRiskBaseline({
+    periodKey: "2026-11-07", storedPeriodKey: "2026-11-06", storedBaseline: 100,
+    equity: 98, closedPnl: -1, unmarkedPositions: 1
+  });
+  assert.equal(waiting.initialized, false);
+  assert.equal(waiting.shouldPersist, false);
+  assert.equal(waiting.baseline, null);
+
+  const initialized = resolveRiskBaseline({
+    periodKey: "2026-11-07", storedPeriodKey: "2026-11-06", storedBaseline: 100,
+    equity: 98, closedPnl: -1, unmarkedPositions: 0
+  });
+  assert.equal(initialized.initialized, true);
+  assert.equal(initialized.shouldPersist, true);
+  assert.equal(initialized.baseline, 99);
+});
+
+test("risk baseline remains stable once initialized for a period", () => {
+  const existing = resolveRiskBaseline({
+    periodKey: "2026-11-07", storedPeriodKey: "2026-11-07", storedBaseline: 97.5,
+    equity: 120, closedPnl: 0, unmarkedPositions: 0
+  });
+  assert.equal(existing.initialized, true);
+  assert.equal(existing.shouldPersist, false);
+  assert.equal(existing.baseline, 97.5);
 });
