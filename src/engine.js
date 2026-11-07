@@ -30,6 +30,7 @@ export class TradingEngine extends DurableObject {
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN';" +
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms);" +
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}');" +
+      "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL);" +
       "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL);"
     );
     this.sql.exec(
@@ -67,7 +68,13 @@ export class TradingEngine extends DurableObject {
 
   async ensureAlarm() {
     const alarm = await this.ctx.storage.getAlarm();
-    if (alarm === null) await this.ctx.storage.setAlarm(Date.now() + 30000);
+    if (alarm === null) {
+      const dueAt = Date.now() + 30000;
+      const runtime = this.getState("runtime") || {};
+      runtime.next_alarm_at_ms = dueAt;
+      this.setState("runtime", runtime);
+      await this.ctx.storage.setAlarm(dueAt);
+    }
   }
 
   async fetch(request) {
@@ -144,8 +151,10 @@ export class TradingEngine extends DurableObject {
   }
 
   async alarm() {
+    const priorRuntime = this.getState("runtime") || {};
+    const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(Date.now() / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
-      await this.runCycle("scheduled");
+      await this.runCycle("scheduled", cycleKey);
     } catch (error) {
       const runtime = this.getState("runtime") || {};
       runtime.last_scan_status = "error";
@@ -154,17 +163,32 @@ export class TradingEngine extends DurableObject {
       this.setState("runtime", runtime);
       this.logEvent("scheduled_scan_error", "Scheduled market scan failed", { error: runtime.last_scan_error });
     } finally {
-      await this.ctx.storage.setAlarm(Date.now() + SCAN_INTERVAL_MS);
+      const nextAt = Date.now() + SCAN_INTERVAL_MS;
+      const runtime = this.getState("runtime") || {};
+      runtime.next_alarm_at_ms = nextAt;
+      this.setState("runtime", runtime);
+      await this.ctx.storage.setAlarm(nextAt);
     }
   }
 
-  async runCycle(source) {
+  async runCycle(source, cycleKey = null) {
     if (this.scanPromise) return this.scanPromise;
-    this.scanPromise = this.performCycle(source).finally(() => { this.scanPromise = null; });
+    this.scanPromise = this.performCycle(source, cycleKey).finally(() => { this.scanPromise = null; });
     return this.scanPromise;
   }
 
-  async performCycle(source) {
+  async performCycle(source, cycleKey = null) {
+    if (source === "scheduled" && cycleKey !== null) {
+      const inserted = this.sql.exec(
+        "INSERT OR IGNORE INTO scan_cycles(cycle_key,started_at_ms) VALUES(?,?) RETURNING cycle_key",
+        cycleKey, Date.now()
+      ).toArray();
+      if (inserted.length !== 1) {
+        this.logEvent("scheduled_scan_duplicate", "Duplicate scheduled alarm cycle skipped", { cycle_key: cycleKey });
+        return { source, skipped: true, reason: "duplicate_alarm_cycle" };
+      }
+      this.sql.exec("DELETE FROM scan_cycles WHERE cycle_key NOT IN (SELECT cycle_key FROM scan_cycles ORDER BY started_at_ms DESC LIMIT 200)");
+    }
     const nowMs = Date.now();
     const markets = [];
     for (const product of PRODUCTS) {
@@ -239,7 +263,7 @@ export class TradingEngine extends DurableObject {
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
-      source, successful_markets: markets.filter((market) => market.status === "live").length,
+      source, cycle_key: cycleKey, successful_markets: markets.filter((market) => market.status === "live").length,
       total_markets: markets.length, paper_exits: exits.length, auto_paper_enabled: !!state.auto_paper_enabled,
       entry_status: entryStatus, entries: entryResults
     });
