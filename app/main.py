@@ -582,15 +582,26 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     async def kill_switch() -> dict[str, Any]:
         app.state.auto_paper_enabled = False
         db.set_setting("auto_paper_enabled", False)
-        # Keep read-only scanning alive when positions remain open so stop/target
-        # exits continue to be monitored; no new automatic entries can be opened.
+        app.state.auto_testnet_enabled = False
+        db.set_setting("testnet_auto_trading_enabled", False)
+        # Stop all new automatic entries, but preserve exchange-native exits for any
+        # filled Testnet position and keep scanning active for all outstanding exposure.
+        testnet_auto_stop = await asyncio.to_thread(testnet_auto.emergency_stop)
+        testnet_order_stop = await asyncio.to_thread(testnet.emergency_stop, db)
         cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
-        app.state.auto_scan_enabled = bool(cex_positions_open)
-        db.log_event("kill_switch", "Emergency new-entry stop activated", {
-            "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled)})
+        testnet_orders_open = db.count_open_testnet_auto_orders() > 0
+        app.state.auto_scan_enabled = bool(cex_positions_open or testnet_orders_open)
+        db.log_event("kill_switch", "Global emergency new-entry stop activated", {
+            "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
+            "testnet_protected_order_lists": len(testnet_auto_stop["protection_preserved_for_filled_entries"]),
+            "testnet_unresolved_order_lists": len(testnet_auto_stop["unresolved_order_lists"]),
+            "live_trading_enabled": False})
         return {"stopped": True, "automatic_paper_trading_enabled": False,
+                "automatic_testnet_trading_enabled": False,
                 "automatic_scan_enabled": bool(app.state.auto_scan_enabled),
                 "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
+                "testnet_automatic_orders": testnet_auto_stop,
+                "testnet_manual_orders": testnet_order_stop,
                 "live_trading_enabled": False}
 
     @app.post("/api/paper/orders")
