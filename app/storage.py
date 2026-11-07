@@ -376,6 +376,13 @@ class Storage:
             ).fetchone()
             if halted_row is not None and json.loads(halted_row["value_json"]):
                 raise ValueError("Testnet emergency order lock is active; no new orders are allowed.")
+            conflicting_auto = conn.execute(
+                "SELECT 1 FROM testnet_auto_orders WHERE symbol=? "
+                "AND status IN ('SUBMITTING','EXECUTING','UNKNOWN','UNPROTECTED') LIMIT 1",
+                (values["symbol"],),
+            ).fetchone()
+            if conflicting_auto:
+                raise ValueError("An active automatic Testnet order already exists for this symbol.")
             active = conn.execute(
                 "SELECT "
                 "(SELECT COUNT(*) FROM testnet_orders "
@@ -445,6 +452,13 @@ class Storage:
             ).fetchone()
             if halted_row is not None and json.loads(halted_row["value_json"]):
                 raise ValueError("Testnet emergency order lock is active; no new orders are allowed.")
+            conflicting_manual = conn.execute(
+                "SELECT 1 FROM testnet_orders WHERE symbol=? "
+                "AND status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN') LIMIT 1",
+                (values["symbol"],),
+            ).fetchone()
+            if conflicting_manual:
+                raise ValueError("An active manual Testnet order already exists for this symbol.")
             active = conn.execute(
                 "SELECT "
                 "(SELECT COUNT(*) FROM testnet_orders "
