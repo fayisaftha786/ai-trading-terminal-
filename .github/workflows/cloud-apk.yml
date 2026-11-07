@@ -4,7 +4,6 @@ on:
   push:
     paths:
       - "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip"
-      - ".github/workflows/cloud-apk.yml"
   workflow_dispatch:
 
 permissions:
