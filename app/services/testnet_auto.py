@@ -306,7 +306,8 @@ class TestnetAutoTrader:
             # Reconstruct the USDT equity slice already committed to this bot so the
             # exposure cap applies to the whole open book, not separately to every entry.
             current_auto_exposure = sum(
-                max(0.0, self._number(row.get("notional_usdt")) or 0.0) for row in active
+                max(0.0, self._number(row.get("notional_usdt")) or 0.0)
+                for row in self.storage.list_active_testnet_auto_orders()
             )
             reconstructed_usdt_equity = free_usdt + current_auto_exposure
             exposure_cap = max(
