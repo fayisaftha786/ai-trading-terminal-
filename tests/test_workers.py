@@ -1,4 +1,9 @@
+import asyncio
+import threading
+import time
+
 from app.storage import DEFAULT_RISK
+from app.services import workers as worker_service
 from app.services.workers import WorkerManager
 
 
@@ -55,7 +60,7 @@ def test_worker_registry_has_twelve_specialists_and_is_honest_about_news():
 
 
 def test_worker_manager_runs_isolated_diagnostics_without_execution_permission():
-    result = __import__("asyncio").run(WorkerManager().analyze(_context()))
+    result = asyncio.run(WorkerManager().analyze(_context()))
     assert result["worker_count"] == 12
     assert result["status"] == "partial"  # News/sentiment is not configured.
     assert result["counts"]["complete"] >= 10
@@ -71,7 +76,7 @@ def test_worker_manager_runs_isolated_diagnostics_without_execution_permission()
 def test_market_integrity_worker_blocks_when_closed_candles_are_not_contiguous():
     context = _context()
     context["market"]["data_quality"]["contiguous_closed_candles"] = False
-    result = __import__("asyncio").run(WorkerManager().analyze(context))
+    result = asyncio.run(WorkerManager().analyze(context))
     feed = next(worker for worker in result["workers"] if worker["id"] == "market_feed")
     assert feed["status"] == "blocked"
     risk = next(worker for worker in result["workers"] if worker["id"] == "risk_guard")
@@ -122,3 +127,70 @@ def test_worker_analysis_rejects_invalid_timeframe_and_candle_limit(client):
     assert timeframe.status_code == 422
     limit = client.get("/api/workers/analyze/BTC%2FUSDT?limit=5001")
     assert limit.status_code == 422
+
+
+
+def test_worker_registry_remembers_last_health_after_analysis():
+    manager = WorkerManager()
+    asyncio.run(manager.analyze(_context()))
+    registry = manager.registry()
+    momentum = next(worker for worker in registry["workers"] if worker["id"] == "momentum")
+    news = next(worker for worker in registry["workers"] if worker["id"] == "news_sentiment")
+    assert registry["last_run_status"] == "partial"
+    assert momentum["last_status"] == "complete"
+    assert momentum["health_status"] == "complete"
+    assert news["health_status"] == "unavailable"
+
+
+def test_worker_manager_isolates_errors_and_retries_only_the_failed_worker(monkeypatch):
+    calls = {"faulty": 0}
+
+    def faulty(context):
+        calls["faulty"] += 1
+        raise RuntimeError("simulated specialist failure")
+
+    def healthy(context):
+        return {"status": "complete", "summary": "Healthy worker completed."}
+
+    monkeypatch.setattr(worker_service, "_WORKERS", (
+        ("faulty", "Faulty", "Test-only failure", faulty),
+        ("healthy", "Healthy", "Test-only worker", healthy),
+    ))
+    result = asyncio.run(WorkerManager(concurrency=2, retries=1).analyze({}))
+    workers = {worker["id"]: worker for worker in result["workers"]}
+    assert result["status"] == "partial"
+    assert workers["faulty"]["status"] == "error"
+    assert workers["faulty"]["attempts"] == 2
+    assert workers["healthy"]["status"] == "complete"
+    assert calls["faulty"] == 2
+
+
+def test_worker_manager_enforces_global_bounded_concurrency(monkeypatch):
+    state = {"active": 0, "maximum": 0}
+    lock = threading.Lock()
+
+    def slow_worker(context):
+        with lock:
+            state["active"] += 1
+            state["maximum"] = max(state["maximum"], state["active"])
+        time.sleep(0.025)
+        with lock:
+            state["active"] -= 1
+        return {"status": "complete", "summary": "bounded"}
+
+    specs = tuple((f"worker_{index}", f"Worker {index}", "Concurrency test", slow_worker)
+                  for index in range(8))
+    monkeypatch.setattr(worker_service, "_WORKERS", specs)
+    result = asyncio.run(WorkerManager(concurrency=3, retries=0).analyze({}))
+    assert result["counts"]["complete"] == 8
+    assert state["maximum"] <= 3
+    assert state["maximum"] >= 2
+
+
+def test_worker_panel_is_present_and_discloses_deterministic_read_only_scope(client):
+    page = client.get("/")
+    assert page.status_code == 200
+    assert 'id="workers"' in page.text
+    assert "12-worker market intelligence" in page.text
+    assert "not 12 separately trained AI models" in page.text
+    assert 'id="runWorkersBtn"' in page.text
