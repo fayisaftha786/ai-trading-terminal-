@@ -286,6 +286,9 @@ class TestnetAutoTrader:
             market = exchange.market(symbol)
             if not market or not market.get("active", True) or market.get("spot") is False:
                 return {"accepted": False, "reason": "testnet_market_not_active_spot"}
+            market_info = market.get("info") or {}
+            if market_info.get("ocoAllowed") is False or market_info.get("otoAllowed") is False:
+                return {"accepted": False, "reason": "testnet_symbol_does_not_allow_OTOCO"}
             balance = exchange.fetch_balance()
             free_usdt = self._number((balance.get("free") or {}).get("USDT"))
             ask = self._number(ticker.get("ask"))
@@ -349,6 +352,11 @@ class TestnetAutoTrader:
                 symbol, entry_price * (1.0 + target_pct / 100.0)
             ))
             last_price = self._number(ticker.get("last"))
+            if (stop_price is not None and target_price is not None
+                    and exit_amount < min_amount
+                    or stop_price is not None and exit_amount * stop_price < min_cost
+                    or target_price is not None and exit_amount * target_price < min_cost):
+                return {"accepted": False, "reason": "protected_exit_quantity_below_exchange_minimum"}
             if (stop_price is None or target_price is None or last_price is None
                     or stop_price <= 0 or target_price <= last_price or stop_price >= last_price):
                 return {"accepted": False, "reason": "invalid_oco_stop_or_target_price"}
