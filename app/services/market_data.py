@@ -214,11 +214,11 @@ class MarketDataService:
                     markets.append({"symbol": symbol, "status": "error", "error": str(result)[:180]})
                 else:
                     markets.append(result)
-            if not any(row.get("status") == "live" for row in markets):
+            if not markets or not all(row.get("status") == "live" for row in markets):
                 detail = "; ".join(str(row.get("error") or row.get("status")) for row in markets[:3])
                 return await self._coinbase_tickers(
                     cache_key,
-                    f"{self.config.cex_exchange} returned no live markets: {detail}",
+                    f"{self.config.cex_exchange} did not return every configured market: {detail}",
                 )
             response = {
                 "status": "live",
