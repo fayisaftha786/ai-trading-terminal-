@@ -593,6 +593,9 @@ def _make_auto_signal():
         "timeframe_confluence": "ALIGNED",
         "last_closed_candle_timestamp_ms": now - 3_605_000,
         "higher_timeframe_last_closed_candle_timestamp_ms": now - 4 * 3_600_000 - 5_000,
+        "higher_timeframe_interval_ms": 4 * 3_600_000,
+        "ticker_market_data_provider": "binance",
+        "strategy_market_data_provider": "binance",
     }
 
 
@@ -1058,3 +1061,35 @@ def test_testnet_auto_kill_switch_preserves_exchange_native_exits_for_filled_ent
     assert not any(len(call) == 4 and call[2] == "DELETE" for call in exchange.calls)
     assert db.get_setting("testnet_auto_trading_enabled") is False
     assert db.get_setting("testnet_order_halted") is True
+
+def test_testnet_auto_rejects_coinbase_fallback_ticker_before_order_submission(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    candidate = _make_auto_signal()
+    candidate["ticker_market_data_provider"] = "coinbase_public_fallback"
+
+    result = trader.run([candidate], True)
+
+    assert result["status"] == "no_eligible_entry"
+    assert result["submitted"] == []
+    assert result["rejected"][0]["reason"] == "binance_testnet_requires_binance_ticker_and_strategy_data"
+    assert not any(
+        call[0] == "orderList/opoco" and call[2] == "POST"
+        for call in exchange.calls
+    )
+
+
+def test_testnet_auto_rejects_coinbase_fallback_strategy_candles_before_order_submission(monkeypatch):
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    candidate = _make_auto_signal()
+    candidate["strategy_market_data_provider"] = "coinbase_public_fallback"
+
+    result = trader.run([candidate], True)
+
+    assert result["status"] == "no_eligible_entry"
+    assert result["submitted"] == []
+    assert result["rejected"][0]["reason"] == "binance_testnet_requires_binance_ticker_and_strategy_data"
+    assert not any(
+        call[0] == "orderList/opoco" and call[2] == "POST"
+        for call in exchange.calls
+    )
+
