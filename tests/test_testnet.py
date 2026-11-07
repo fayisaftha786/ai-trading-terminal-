@@ -559,9 +559,10 @@ def _make_auto_signal():
 
 
 class FakeOPOCOExchange:
-    def __init__(self, *, permissions=True, working_status="open"):
+    def __init__(self, *, permissions=True, working_status="open", list_status="EXECUTING"):
         self.permissions = permissions
         self.working_status = working_status
+        self.list_status = list_status
         self.calls = []
         self.orders = {
             "501": {"id": "501", "status": working_status, "filled": 0.0999, "remaining": 0.0,
@@ -605,7 +606,7 @@ class FakeOPOCOExchange:
             }
         if method == "GET":
             return {
-                "orderListId": 456, "listOrderStatus": "EXECUTING",
+                "orderListId": 456, "listOrderStatus": self.list_status,
                 "orders": [{"orderId": 501}, {"orderId": 502}, {"orderId": 503}],
             }
         if method == "DELETE":
@@ -619,7 +620,7 @@ class FakeOPOCOExchange:
         self.calls.append(("close",))
 
 
-def _make_auto_trader(monkeypatch, *, permissions=True, working_status="open"):
+def _make_auto_trader(monkeypatch, *, permissions=True, working_status="open", list_status="EXECUTING"):
     from app.services.automation import AutoPaperEngine
     from app.services.paper import PaperBroker
     from app.services.testnet_auto import TestnetAutoTrader
@@ -632,7 +633,7 @@ def _make_auto_trader(monkeypatch, *, permissions=True, working_status="open"):
         binance_testnet_max_order_usdt=10.0,
         binance_testnet_max_open_orders=3,
     )
-    exchange = FakeOPOCOExchange(permissions=permissions, working_status=working_status)
+    exchange = FakeOPOCOExchange(permissions=permissions, working_status=working_status, list_status=list_status)
     db = make_storage()
     adapter = BinanceSpotTestnet(config, exchange_factory=lambda args: exchange)
     engine = AutoPaperEngine(db, PaperBroker(db))
@@ -664,6 +665,39 @@ def test_testnet_auto_refuses_symbols_without_explicit_opoco_permissions(monkeyp
     )
     assert not any(len(call) == 4 and call[2] == "POST" for call in exchange.calls)
     assert db.count_open_testnet_auto_orders() == 0
+
+
+
+
+def test_testnet_auto_does_not_mark_cancelled_exit_child_as_completed(monkeypatch):
+    db, exchange, trader = _make_auto_trader(
+        monkeypatch, working_status="closed", list_status="ALL_DONE"
+    )
+    # A terminal child with zero fill is not proof that TP or SL executed.
+    exchange.orders["502"]["status"] = "closed"
+    exchange.orders["502"]["filled"] = 0.0
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    # Reconcile the persisted order-list after changing the exchange-side state.
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["unresolved"] == 1
+    assert row["status"] == "UNPROTECTED"
+    assert row["error_code"] == "FILLED_ENTRY_WITHOUT_CONFIRMED_EXIT"
+
+
+def test_testnet_auto_marks_bracket_completed_only_after_filled_exit_and_all_done(monkeypatch):
+    db, exchange, trader = _make_auto_trader(
+        monkeypatch, working_status="closed", list_status="ALL_DONE"
+    )
+    exchange.orders["502"]["status"] = "closed"
+    exchange.orders["502"]["filled"] = 0.099
+    exchange.orders["503"]["status"] = "canceled"
+    assert trader.run([_make_auto_signal()], True)["status"] == "submitted"
+    result = trader.reconcile()
+    row = db.list_testnet_auto_orders(1)[0]
+    assert result["completed"] == 1
+    assert row["status"] == "CLOSED"
 
 
 def test_testnet_auto_kill_switch_preserves_exchange_native_exits_for_filled_entry(monkeypatch):
