@@ -412,7 +412,7 @@ class Storage:
                 raise ValueError("Testnet emergency order lock is active; no new orders are allowed.")
             active = conn.execute(
                 "SELECT COUNT(*) AS n FROM testnet_auto_orders "
-                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')"
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN','UNPROTECTED')"
             ).fetchone()
             if int(active["n"] or 0) >= max(1, min(int(max_open_orders), 3)):
                 raise ValueError("Maximum number of active Testnet automatic order lists reached.")
@@ -450,7 +450,7 @@ class Storage:
         with self.connection() as conn:
             rows = conn.execute(
                 "SELECT * FROM testnet_auto_orders "
-                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN') ORDER BY id ASC"
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN','UNPROTECTED') ORDER BY id ASC"
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -482,7 +482,7 @@ class Storage:
         with self.connection() as conn:
             row = conn.execute(
                 "SELECT COUNT(*) AS n FROM testnet_auto_orders "
-                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')"
+                "WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN','UNPROTECTED')"
             ).fetchone()
         return int(row["n"] or 0)
 
@@ -493,7 +493,7 @@ class Storage:
                 "(SELECT COUNT(*) FROM testnet_orders "
                 " WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN')) + "
                 "(SELECT COUNT(*) FROM testnet_auto_orders "
-                " WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN')) AS n"
+                " WHERE status IN ('SUBMITTING','EXECUTING','UNKNOWN','UNPROTECTED')) AS n"
             ).fetchone()
         return int(row["n"] or 0)
 
