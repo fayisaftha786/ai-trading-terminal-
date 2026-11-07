@@ -506,6 +506,26 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def testnet_auto_performance(self) -> dict[str, Any]:
+        with self.connection() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS total, "
+                "COUNT(CASE WHEN status='CLOSED' THEN 1 END) AS closed, "
+                "COUNT(CASE WHEN status='CLOSED' AND accounting_status='EXACT' THEN 1 END) AS exact_closed, "
+                "COUNT(CASE WHEN status='CLOSED' AND accounting_status!='EXACT' THEN 1 END) AS fee_unresolved, "
+                "COALESCE(SUM(CASE WHEN status='CLOSED' AND accounting_status='EXACT' "
+                "THEN realized_pnl_quote ELSE 0 END),0) AS realized_pnl_usdt "
+                "FROM testnet_auto_orders"
+            ).fetchone()
+        return {
+            "total_order_lists": int(row["total"] or 0),
+            "closed_order_lists": int(row["closed"] or 0),
+            "exactly_accounted_trades": int(row["exact_closed"] or 0),
+            "fee_unresolved_trades": int(row["fee_unresolved"] or 0),
+            "realized_pnl_usdt": float(row["realized_pnl_usdt"] or 0.0),
+            "pnl_scope": "closed Testnet auto-trades with exact quote-denominated fees only",
+        }
+
     def testnet_auto_realized_pnl_since(self, timestamp: str) -> float:
         """Return only fully fee-accounted, completed Testnet auto-trades."""
         with self.connection() as conn:
