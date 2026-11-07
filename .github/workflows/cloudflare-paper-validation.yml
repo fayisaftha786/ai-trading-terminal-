@@ -38,3 +38,5 @@ jobs:
         run: npm test
       - name: Cloudflare Worker dry-run build
         run: npm run build
+      - name: Local Durable Object, authentication and kill-switch smoke test
+        run: npm run smoke
