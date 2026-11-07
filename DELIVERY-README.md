@@ -1,55 +1,54 @@
-# AI Trading Terminal — v0.5.0 No-Termux Cloud Edition
+# AI Trading Terminal 0.5.0 — No-Termux Cloud Edition
 
-This repository contains the GitHub Actions delivery workflow for the Android debug APK. The exact source package is verified by SHA-256 before any build is attempted.
+A private, cloud-hosted crypto market research and paper-trading dashboard with an Android WebView client. No Python runtime or Termux is needed on the Android phone after the cloud backend is deployed.
 
-## Current source package
+## What changed from 0.4.4
 
-Upload this exact file to the repository root:
+- Added production-only API authentication with a private sign-in form and HMAC-signed short-lived bearer sessions.
+- Added a basic per-IP login failure throttle and secure response headers.
+- Android native wrapper now accepts HTTPS cloud origins only; HTTP and loopback URLs are rejected.
+- Replaced the local-only network security exceptions with an all-host cleartext deny policy.
+- Added a Render Blueprint with a persistent 1 GB database disk, HTTPS health check, secret generation, and Testnet OFF defaults.
+- Docker uses one Uvicorn worker because the scan scheduler and SQLite ledger are single-process components.
+- Removed Termux launcher and Termux-only requirements from this release.
+- Bumped Android version to 0.5.0 / versionCode 45.
 
-`AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip`
+## Features
 
-Expected SHA-256:
+- Read-only CEX market data and Solana token discovery.
+- Deterministic market analysis, historical backtesting, walk-forward research, and performance reports.
+- Manual paper positions and automatic paper-trading controls.
+- Risk limits, drawdown checks, event ledger, stop/target monitoring, and emergency stop.
+- Separate Binance Spot Testnet LIMIT order flow, disabled by default.
+- Live-money order execution is hard-disabled. Solana swap signing/execution is not implemented.
 
-`f3bd4b54bf835c28cdc8b7ed38f468e8dafb0304d65cf397d53f7e61b324b1ee`
+## Deployment
 
-The source package includes Supabase PostgreSQL cloud-storage support, two Supabase migrations (ledger tables and a restricted server-side backend role), the Render Free Blueprint, backend API, tests, dashboard, and Android Gradle project. SQLite remains available for local development and tests.
+Follow [`docs/CLOUD_DEPLOYMENT_NO_TERMUX_MALAYALAM.md`](docs/CLOUD_DEPLOYMENT_NO_TERMUX_MALAYALAM.md). The Render Blueprint requires a paid Starter service and persistent disk for an always-on single-instance backend. The current published baseline is about USD $7.25/month before bandwidth/tax/other usage; recheck pricing before deploy.
 
-## One-time upload
+## APK
 
-1. Download the exact source ZIP from the release package supplied in this conversation.
-2. Open the repository's **Code** tab: https://github.com/fayisaftha786/ai-trading-terminal-
-3. Choose **Add file → Upload files**.
-4. Upload the ZIP itself to the repository root. Do not extract it, rename it, or place it inside another folder.
-5. Commit the upload to the `main` branch.
+GitHub Actions builds a debug APK. Follow [`docs/GET_ANDROID_APK.md`](docs/GET_ANDROID_APK.md). The package has not been built or installed from this working environment because it does not include Android SDK/build-tools.
 
-The `cloud-apk.yml` workflow starts automatically when that exact source file is added. It checks SHA-256, extracts the source, runs `scripts/master_release.py`, builds the Android debug APK, verifies APK metadata/signature, and uploads the build outputs as an Actions artifact.
+## Security model and limitations
 
-## APK download
+- Production API requests require `Authorization: Bearer` using an HMAC token issued after password login.
+- `APP_PASSWORD` must be at least 16 characters; `APP_AUTH_SECRET` must be at least 32 bytes. Use the hosting provider's secret manager.
+- Tokens are stored in browser `sessionStorage` for the active tab and expire after the configured period (default eight hours).
+- The built-in login throttle is per-process and best-effort. This is single-user private deployment, not a multi-user identity system.
+- Run one service instance and one Uvicorn worker while the SQLite persistent disk is used.
+- Automatic paper-trading opt-in resets OFF after restart.
+- Keep Testnet disabled until you have separately verified the exchange sandbox credentials, order filters, ledger reconciliation, and emergency stop.
+- No real-money trading, profit guarantee, trained ML model, or unattended wallet signing is included.
 
-1. Open https://github.com/fayisaftha786/ai-trading-terminal-/actions
-2. Open the newest successful **AI Trading Terminal v0.5.0** run.
-3. Under **Artifacts**, download `AITradingTerminal-Android-v0.5.0-debug-apk`.
-4. Extract the artifact ZIP and install the APK on Android.
+## Local development
 
-The artifact is a debug build, not a Play Store or production-signed release. It is retained for 30 days.
+Install `requirements.txt`, copy `.env.example` to `.env`, keep `APP_ENV=development`, and run `uvicorn app.main:app --host 127.0.0.1 --port 8000`. Development mode is intentionally unauthenticated and must never be exposed publicly.
 
-## Cloud deployment
+## Release checks
 
-The included Render Blueprint uses the Free web-service plan and Supabase PostgreSQL for persistent ledger storage. Render Free can sleep after inactivity, so background market scanning is not continuous or guaranteed 24/7. Configure `DATABASE_URL`, `APP_PASSWORD` (at least 16 characters), and `APP_AUTH_SECRET` (at least 32 bytes) in Render's protected environment settings. Never place database or exchange credentials in the APK, frontend, Git, or chat. The app validates the Supabase ledger schema at startup and requires both migrations to be applied first. The `att_backend` database role is intentionally created with LOGIN disabled; enable it only after setting a strong password securely on the backend host, then use a server-side connection string.
+```bash
+python scripts/master_release.py
+```
 
-## Verification status
-
-- Source archive SHA-256: verified locally against this expected value.
-- Source static release gate: PASS.
-- Python test suite: 142 passed.
-- PostgreSQL storage adapter: implemented; schema migrations applied to the linked Supabase project.
-- Android APK: **not yet built**; a successful GitHub Actions run is required before an APK can be claimed as ready.
-- Render deployment and authenticated exchange Testnet execution: not yet end-to-end verified.
-
-## Trading safety
-
-- Live-money trading remains disabled.
-- Automatic strategy execution is paper-only.
-- Testnet is disabled by default and intended for separate verification.
-- No guaranteed profit is claimed.
-- Never commit `.env` files, exchange API keys, passwords, recovery codes, or production secrets.
+The release gate runs Python compilation, pytest, JavaScript syntax, shell syntax, and static security checks, then creates a source archive only when every gate passes.
