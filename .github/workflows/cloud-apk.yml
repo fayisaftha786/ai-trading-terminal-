@@ -6,6 +6,11 @@ on:
       - "android/**"
       - "build-android-debug.sh"
       - ".github/workflows/cloud-apk.yml"
+  pull_request:
+    paths:
+      - "android/**"
+      - "build-android-debug.sh"
+      - ".github/workflows/cloud-apk.yml"
   workflow_dispatch:
 
 permissions:
@@ -80,6 +85,7 @@ jobs:
           retention-days: 30
 
       - name: Publish direct APK download on GitHub Releases
+        if: github.event_name != 'pull_request'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
