@@ -53,7 +53,7 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
 2. Open **Workers & Pages** → **Create application** → choose **GitHub**. Authorize the Cloudflare GitHub app for this repository only if GitHub offers a repository-selection screen.
 3. Select repository `fayisaftha786/ai-trading-terminal-` and production branch `main`.
 4. Configure the Worker from the repository root:
-   - Root directory: `/` (repository root)
+   - Root directory: leave the field blank/default so Cloudflare uses the repository root
    - Build command: `npm run check && npm test`
    - Deploy command: `npx wrangler@4 deploy`
    - Worker name must remain `ai-trading-terminal-free-paper`, matching `wrangler.jsonc`
