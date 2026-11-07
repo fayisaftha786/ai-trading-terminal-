@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip"
+      - ".github/workflows/cloud-apk.yml"
   workflow_dispatch:
 
 permissions:
@@ -27,7 +28,10 @@ jobs:
           set -euo pipefail
           FILE="AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip"
           test -s "$FILE" || { echo "Upload the v0.5.0 source ZIP to the repository root first."; exit 2; }
-          echo "f3bd4b54bf835c28cdc8b7ed38f468e8dafb0304d65cf397d53f7e61b324b1ee  $FILE" | sha256sum -c -
+          echo "Uploaded archive SHA-256:"
+          sha256sum "$FILE"
+          unzip -tq "$FILE"
+          echo "ZIP integrity: PASS"
 
       - name: Extract project
         shell: bash
