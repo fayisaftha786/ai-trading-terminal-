@@ -88,7 +88,7 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
     ticker_time: Number.isFinite(tickerMs) ? new Date(tickerMs).toISOString() : null,
     book_retrieved_at_ms: bookRetrievedAtMs,
     book_age_ms: Math.max(0, bookObservedAtMs - bookRetrievedAtMs),
-    book_sequence: Number.isSafeInteger(Number(book.sequence)) ? Number(book.sequence) : null,
+    book_sequence: book.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence),
     bid,
     ask,
     last,
@@ -103,7 +103,7 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
       one_hour: { ok: oneHourAudit.ok, issues: oneHourAudit.issues, bars: oneHourAudit.valid_closed_bars },
       six_hour: { ok: sixHourAudit.ok, issues: sixHourAudit.issues, bars: sixHourAudit.valid_closed_bars },
       book_freshness_source: "local_retrieval_time",
-      book_sequence_available: Number.isSafeInteger(Number(book.sequence))
+      book_sequence_available: book.sequence != null && Number.isSafeInteger(Number(book.sequence))
     }
   };
 }
