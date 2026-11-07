@@ -61,7 +61,7 @@ def test_android_build_runs_jvm_tests_and_local_demo_has_no_live_executor():
     script = (ROOT / "build-android-debug.sh").read_text()
     tests = ANDROID / "app/src/test/java/app/aitradingterminal/PaperMathTest.java"
     assert "testimplementation(\"junit:junit:4.13.2\")" in gradle.lower()
-    assert "testdebugunittest" in script
+    assert "testdebugunittest" in script.lower()
     assert tests.is_file()
     assert "createorder" not in source
     assert "api_secret" not in source
