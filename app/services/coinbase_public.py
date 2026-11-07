@@ -114,10 +114,7 @@ class CoinbasePublicAdapter:
         if mapped is None:
             return {"symbol": symbol, "status": "unsupported", "error": "No Coinbase USD product mapping"}
         product_id, mapped_quote = mapped
-        encoded = httpx.QueryParams({"product_id": product_id})
-        del encoded  # product IDs are constrained to alphanumeric plus hyphen below
-        path = product_id
-        ticker, stats, book = await self._fetch_market_payloads(path)
+        ticker, stats, book = await self._fetch_market_payloads(product_id)
         bid = _finite(ticker.get("bid"))
         ask = _finite(ticker.get("ask"))
         last = _finite(ticker.get("price"))
