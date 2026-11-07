@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip"
+      - "AITradingTerminal-v0.5.0-No-Termux-Cloud-Source.zip.sha256"
       - ".github/workflows/cloud-apk.yml"
   workflow_dispatch:
 
@@ -30,6 +31,7 @@ jobs:
           test -s "$FILE" || { echo "Upload the v0.5.0 source ZIP to the repository root first."; exit 2; }
           echo "Uploaded archive SHA-256:"
           sha256sum "$FILE"
+          sha256sum -c "${FILE}.sha256"
           unzip -tq "$FILE"
           echo "ZIP integrity: PASS"
 
