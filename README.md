@@ -17,6 +17,7 @@ A private, cloud-hosted crypto market research and paper-trading dashboard with 
 
 - Read-only CEX market data and Solana token discovery.
 - Deterministic market analysis, historical backtesting, walk-forward research, and performance reports.
+- On-demand 12-worker read-only market analysis with bounded concurrency, worker health, isolated failures, and a visible unavailable state for unconfigured news sentiment.
 - Manual paper positions and automatic paper-trading controls.
 - Risk limits, drawdown checks, event ledger, stop/target monitoring, and emergency stop.
 - Separate Binance Spot Testnet LIMIT order flow, disabled by default.
@@ -37,7 +38,8 @@ GitHub Actions builds a debug APK. Follow [`docs/GET_ANDROID_APK.md`](docs/GET_A
 - Tokens are stored in browser `sessionStorage` for the active tab and expire after the configured period (default eight hours).
 - The built-in login throttle is per-process and best-effort. This is single-user private deployment, not a multi-user identity system.
 - Run one service instance and one Uvicorn worker while the SQLite persistent disk is used.
-- Automatic paper-trading opt-in resets OFF after restart.
+- Explicit paper-trading opt-in and kill-switch state persist across ordinary restarts; the kill switch and drawdown breaker keep new entries OFF.
+- The 12-worker analysis is on-demand and read-only; it does not authorize or submit orders. See [docs/MULTI_AGENT_WORKERS.md](docs/MULTI_AGENT_WORKERS.md).
 - Keep Testnet disabled until you have separately verified the exchange sandbox credentials, order filters, ledger reconciliation, and emergency stop.
 - No real-money trading, profit guarantee, trained ML model, or unattended wallet signing is included.
 
