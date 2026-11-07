@@ -397,10 +397,38 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.get("/api/automation/scan")
     async def scan_automation_status() -> dict[str, Any]:
-        return {"enabled": bool(app.state.auto_scan_enabled),
-                "interval_seconds": max(30, cfg.scan_interval_seconds),
-                "startup_exit_recovery": bool(app.state.startup_exit_recovery),
-                "scope": "scheduled market discovery and CEX paper stop/target monitoring; automatic entries are controlled separately"}
+        interval_seconds = max(30, cfg.scan_interval_seconds)
+        scan_enabled = bool(app.state.auto_scan_enabled or app.state.auto_paper_enabled)
+        scan_task = app.state.auto_scan_task
+        scheduler_running = scan_task is not None and not scan_task.done()
+        last_scan_at = float(app.state.last_scan_at or 0.0)
+        last_scan_age_seconds = max(0.0, time.time() - last_scan_at) if last_scan_at > 0 else None
+
+        if not scan_enabled:
+            scanner_status = "idle"
+        elif not scheduler_running:
+            scanner_status = "scheduler_stopped"
+        elif app.state.last_scan_error:
+            scanner_status = "error"
+        elif last_scan_age_seconds is None:
+            scanner_status = "starting"
+        elif last_scan_age_seconds > max(180, interval_seconds * 3):
+            scanner_status = "stale"
+        else:
+            scanner_status = "healthy"
+
+        return {
+            "enabled": bool(app.state.auto_scan_enabled),
+            "automatic_paper_trading_enabled": bool(app.state.auto_paper_enabled),
+            "interval_seconds": interval_seconds,
+            "startup_exit_recovery": bool(app.state.startup_exit_recovery),
+            "scheduler_running": scheduler_running,
+            "scanner_status": scanner_status,
+            "last_scan_at": last_scan_at or None,
+            "last_scan_age_seconds": round(last_scan_age_seconds, 1) if last_scan_age_seconds is not None else None,
+            "last_scan_error": str(app.state.last_scan_error)[:240] if app.state.last_scan_error else None,
+            "scope": "scheduled market discovery and CEX paper stop/target monitoring; automatic entries are controlled separately",
+        }
 
     @app.put("/api/automation/scan")
     async def set_scan_automation(payload: ScanAutomationRequest) -> dict[str, Any]:
