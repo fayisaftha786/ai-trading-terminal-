@@ -94,7 +94,7 @@ def main() -> int:
         "android_https_cloud_backend_allowlist_present": 'return "https".equals(scheme)' in android_activity and 'your-service.onrender.com' in android_activity and 'http".equals(scheme)' not in android_activity,
         "android_no_webview_file_access": "setAllowFileAccess(false)" in android_activity and "setAllowContentAccess(false)" in android_activity,
         "android_ci_apk_job_present": "AITradingTerminal-Android-v0.6.0-debug-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
-        "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in ("AITradingTerminal-Android-v0.6.0-debug.apk", "AITradingTerminal-Android-v0.6.0-debug.apk.sha256", "AITradingTerminal-Android-v0.5.0-build-info.txt")),
+        "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in ("AITradingTerminal-Android-v0.6.0-debug.apk", "AITradingTerminal-Android-v0.6.0-debug.apk.sha256", "AITradingTerminal-Android-v0.6.0-build-info.txt")),
         "android_local_build_verifies_sdk_and_signature": all(marker in (ROOT / "build-android-debug.sh").read_text() for marker in ("platforms/android-35/android.jar", "apksigner", "sha256sum")),
         "android_build_script_restricts_gradle_to_compatible_8x": "EXPECTED_GRADLE_MAX_MAJOR=\"8\"" in (ROOT / "build-android-debug.sh").read_text() and "parts[0] != 8" in (ROOT / "build-android-debug.sh").read_text(),
         "android_apk_metadata_verified_after_build": all(marker in (ROOT / "build-android-debug.sh").read_text() for marker in ("aapt dump badging", "versionCode='46'", "sdkVersion:'26'", "targetSdkVersion:'35'")),
