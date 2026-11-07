@@ -16,7 +16,8 @@ const args = [
 
 const child = spawn(command, args, {
   stdio: ["ignore", "pipe", "pipe"],
-  env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" }
+  env: { ...process.env, CI: "1", WRANGLER_SEND_METRICS: "false" },
+  detached: process.platform !== "win32"
 });
 
 let output = "";
@@ -33,12 +34,13 @@ async function request(path, options = {}) {
 
 try {
   let ready = false;
-  const deadline = Date.now() + 90000;
+  const deadline = Date.now() + 45000;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error("Wrangler dev exited early: " + child.exitCode);
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error("Wrangler dev exited early: " + child.exitCode + " " + child.signalCode);
     try {
       const response = await request("/api/health");
       if (response.ok) { ready = true; break; }
+      if (response.status >= 500) throw new Error("Local Worker health returned HTTP " + response.status + ": " + (await response.text()).slice(0, 1000));
     } catch {
       // The local workerd process may still be starting.
     }
@@ -102,9 +104,16 @@ try {
   process.stderr.write(String(error?.stack || error) + "\n");
   process.exitCode = 1;
 } finally {
-  child.kill("SIGTERM");
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGTERM");
+    else child.kill("SIGTERM");
+  } catch { /* The process may already have exited. */ }
   await Promise.race([
     new Promise((resolve) => child.once("exit", resolve)),
-    delay(5000)
+    delay(4000)
   ]);
+  try {
+    if (process.platform !== "win32" && child.pid) process.kill(-child.pid, "SIGKILL");
+    else if (child.exitCode === null) child.kill("SIGKILL");
+  } catch { /* The process group may already have exited. */ }
 }
