@@ -501,10 +501,14 @@ class TestnetAutoTrader:
                                         item.get("orderId") for item in child_orders
                                         if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
                                     ]
-                                    exit_states = []
+                                    exit_orders = []
                                     for order_id in exit_ids:
                                         exit_order = exchange.fetch_order(order_id, row["symbol"])
-                                        exit_states.append(str(exit_order.get("status") or "unknown").lower())
+                                        exit_orders.append(exit_order)
+                                    exit_states = [
+                                        str(exit_order.get("status") or "unknown").lower()
+                                        for exit_order in exit_orders
+                                    ]
                                     completed_exit = (
                                         str(remote_list.get("listOrderStatus") or "").upper() == "ALL_DONE"
                                         and any(
