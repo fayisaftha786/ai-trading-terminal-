@@ -95,7 +95,7 @@ public final class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Connect to your private cloud backend. Sign in with your dashboard account after the secure connection opens.");
+        subtitle.setText("Use the on-device paper terminal without hosting, or connect to a private cloud backend if you have one.");
         subtitle.setTextColor(Color.rgb(162, 176, 202));
         subtitle.setTextSize(14);
         subtitle.setPadding(0, dp(10), 0, dp(22));
@@ -120,6 +120,16 @@ public final class MainActivity extends Activity {
         LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(-1, dp(52));
         buttonParams.topMargin = dp(14);
         root.addView(connect, buttonParams);
+
+        Button localMode = new Button(this);
+        localMode.setText("OPEN ON-DEVICE PAPER TERMINAL");
+        localMode.setAllCaps(false);
+        localMode.setTextColor(Color.WHITE);
+        localMode.setBackground(rounded(Color.rgb(35, 112, 105), Color.rgb(35, 112, 105)));
+        LinearLayout.LayoutParams localParams = new LinearLayout.LayoutParams(-1, dp(52));
+        localParams.topMargin = dp(10);
+        root.addView(localMode, localParams);
+        localMode.setOnClickListener(v -> startActivity(new Intent(MainActivity.this, LocalPaperActivity.class)));
 
         TextView hint = new TextView(this);
         hint.setText("HTTPS cloud connections only\nPrivate dashboard login required · Never enter exchange API keys here.");
