@@ -27,6 +27,12 @@ class MarketDataService:
     def _put_cache(self, key: str, value: Any) -> None:
         self._cache[key] = (time.monotonic(), value)
 
+    def _get_cache_ttl(self, key: str, ttl_seconds: float) -> Any | None:
+        cached = self._cache.get(key)
+        if cached and time.monotonic() - cached[0] < max(0.0, ttl_seconds):
+            return cached[1]
+        return None
+
     async def _coinbase_tickers(self, cache_key: str, fallback_reason: str) -> dict[str, Any]:
         try:
             async with CoinbasePublicAdapter() as provider:
@@ -62,6 +68,11 @@ class MarketDataService:
     async def _coinbase_strategy_data(
         self, symbol: str, timeframe: str, limit: int, fallback_reason: str
     ) -> dict[str, Any]:
+        cache_key = f"coinbase_strategy:{symbol}:{timeframe}"
+        cached = self._get_cache_ttl(cache_key, 300.0)
+        if cached is not None:
+            return cached
+
         from app.services.strategy import analyze_candles, candle_integrity_report
 
         # These are exact Coinbase-supported intervals, not resampled or relabelled bars.
@@ -121,7 +132,7 @@ class MarketDataService:
                 analysis.get("regime") == higher_analysis.get("regime")
                 and analysis.get("regime") in {"UPTREND", "DOWNTREND"}
             )
-            return {
+            response = {
                 "status": "live",
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -152,6 +163,8 @@ class MarketDataService:
                     ),
                 },
             }
+            self._put_cache(cache_key, response)
+            return response
         except Exception as exc:
             return {
                 "status": "error",
