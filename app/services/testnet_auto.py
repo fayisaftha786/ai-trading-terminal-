@@ -15,7 +15,6 @@ class TestnetAutoTrader:
 
     MAX_ENTRIES_PER_DAY = 3
     SYMBOL_COOLDOWN_SECONDS = 4 * 60 * 60
-    EXIT_QUANTITY_RESERVE = 0.01
 
     def __init__(self, adapter: BinanceSpotTestnet, storage: Any, eligibility_engine: Any):
         self.adapter = adapter
@@ -49,7 +48,7 @@ class TestnetAutoTrader:
             "emergency_halted": halted,
             "active_order_lists": len(active),
             "max_entries_per_day": self.MAX_ENTRIES_PER_DAY,
-            "protection": "Binance native OTOCO (limit FOK entry + take-profit/stop-loss OCO)",
+            "protection": "Binance native OPOCO (net received BUY quantity + take-profit/stop-loss OCO)",
             "live_trading_enabled": False,
         }
 
@@ -287,8 +286,8 @@ class TestnetAutoTrader:
             if not market or not market.get("active", True) or market.get("spot") is False:
                 return {"accepted": False, "reason": "testnet_market_not_active_spot"}
             market_info = market.get("info") or {}
-            if market_info.get("ocoAllowed") is False or market_info.get("otoAllowed") is False:
-                return {"accepted": False, "reason": "testnet_symbol_does_not_allow_OTOCO"}
+            if not all(market_info.get(flag) is True for flag in ("otoAllowed", "opoAllowed", "ocoAllowed")):
+                return {"accepted": False, "reason": "testnet_symbol_does_not_confirm_OPOCO_permissions"}
             balance = exchange.fetch_balance()
             free_usdt = self._number((balance.get("free") or {}).get("USDT"))
             ask = self._number(ticker.get("ask"))
@@ -338,11 +337,9 @@ class TestnetAutoTrader:
             if amount is None or amount <= 0:
                 return {"accepted": False, "reason": "testnet_amount_precision_became_zero"}
             actual_notional = amount * entry_price
-            exit_amount = self._number(exchange.amount_to_precision(
-                symbol, amount * (1.0 - self.EXIT_QUANTITY_RESERVE)
-            ))
-            if exit_amount is None or exit_amount <= 0 or exit_amount > amount:
-                return {"accepted": False, "reason": "invalid_protected_exit_quantity"}
+            # OPOCO lets Binance derive pending SELL quantity from the net base
+            # asset actually received by the working BUY, after applicable commission.
+            # This avoids guessing a fixed fee reserve that can leave dust or reject exits.
             limits = market.get("limits") or {}
             min_amount = self._number((limits.get("amount") or {}).get("min")) or 0.0
             min_cost = self._number((limits.get("cost") or {}).get("min")) or 0.0
@@ -358,12 +355,15 @@ class TestnetAutoTrader:
                 symbol, entry_price * (1.0 + target_pct / 100.0)
             ))
             last_price = self._number(ticker.get("last"))
+            # Exchange validates pending OPOCO quantity after the working BUY fills;
+            # stop/target quote value is screened against the expected net fill.
+            expected_net_quantity = amount * 0.998
             if (
-                exit_amount < min_amount
-                or (stop_price is not None and exit_amount * stop_price < min_cost)
-                or (target_price is not None and exit_amount * target_price < min_cost)
+                expected_net_quantity < min_amount
+                or (stop_price is not None and expected_net_quantity * stop_price < min_cost)
+                or (target_price is not None and expected_net_quantity * target_price < min_cost)
             ):
-                return {"accepted": False, "reason": "protected_exit_quantity_below_exchange_minimum"}
+                return {"accepted": False, "reason": "expected_net_protected_exit_below_exchange_minimum"}
             if (stop_price is None or target_price is None or last_price is None
                     or stop_price <= 0 or target_price <= last_price or stop_price >= last_price):
                 return {"accepted": False, "reason": "invalid_oco_stop_or_target_price"}
@@ -375,7 +375,7 @@ class TestnetAutoTrader:
                 "list_client_order_id": list_client_id,
                 "symbol": symbol,
                 "quantity": amount,
-                "exit_quantity": exit_amount,
+                "exit_quantity": amount,
                 "entry_price": entry_price,
                 "stop_price": stop_price,
                 "target_price": target_price,
@@ -393,7 +393,8 @@ class TestnetAutoTrader:
                 "workingQuantity": amount,
                 "workingTimeInForce": "FOK",
                 "pendingSide": "SELL",
-                "pendingQuantity": exit_amount,
+                # OPOCO calculates the pending SELL quantity from the actual net
+                # base asset received by the fully-filled working BUY.
                 "pendingAboveType": "TAKE_PROFIT",
                 "pendingAboveStopPrice": target_price,
                 "pendingBelowType": "STOP_LOSS",
@@ -402,7 +403,7 @@ class TestnetAutoTrader:
                 "recvWindow": 5000,
             }
             submission_started = True
-            response = exchange.request("orderList/otoco", "private", "POST", params)
+            response = exchange.request("orderList/opoco", "private", "POST", params)
             orders = response.get("orders") or []
             reports = response.get("orderReports") or []
             working_order_id = (orders[0].get("orderId") if orders else None)
@@ -428,7 +429,7 @@ class TestnetAutoTrader:
                     "order_list_id": str(exchange_list_id),
                     "entry_price": entry_price,
                     "quantity": amount,
-                    "protected_exit_quantity": exit_amount,
+                    "protected_exit_quantity": "exchange_calculated_net_received_quantity",
                     "stop_loss": stop_price,
                     "take_profit": target_price,
                     "notional_usdt": actual_notional,
