@@ -20,14 +20,14 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 
 - Cloudflare Workers Free currently documents 100,000 Worker requests/day and 10 ms CPU per normal Worker HTTP/Cron invocation. Durable Objects have a separate default 30-second CPU allowance per invocation and SQLite-backed storage is available on Free. The Worker only routes/authenticates; the heavier market analysis runs inside the Durable Object.
 - Durable Objects Free currently documents 100,000 requests/day, 13,000 GB-seconds/day, and 5 GB total account SQLite storage. Quotas are not an unlimited 24/7 compute guarantee.
-- Three instruments × five unauthenticated public requests are used per scan. A 15-minute cycle is 96 cycles/day when all alarms execute, plus dashboard requests.
-- Alarms are at-least-once and the code keeps a durable next-alarm time. The scan cycle uses a unique open-position index and per-symbol cooldown; alarm scheduling is not an exchange-grade real-time guarantee.
+- Three instruments × five public requests are used per scan. Requests are paced at least 350 ms apart (about 2.9 requests/second) to remain below Coinbase public REST limits; each full scan is roughly 5.3 seconds of request pacing plus network latency. A 15-minute cycle is 96 cycles/day when all alarms execute, plus dashboard requests.
+- Alarms are at-least-once; the code stores the next alarm timestamp and a bounded 200-cycle idempotency ledger so a retried alarm does not create a second scan/trade cycle. A unique open-position index and per-symbol cooldown provide additional duplicate guards. Alarm scheduling is not an exchange-grade real-time guarantee.
 - The user must verify Coinbase public endpoint availability from the deployed Cloudflare region before trusting signals. The code fails closed when endpoints fail, timestamps are stale, candle history is incomplete, spread is wide or depth is low.
 - The Coinbase order-book timestamp is not included in the app's market snapshot; local retrieval time is recorded as weaker provenance. A paper candidate still needs adequate top-10 depth.
 - Coinbase 24-hour quote volume is estimated as reported base volume × latest price, not an exchange-supplied quote-volume field.
 - Strategy signal is a deterministic, uncalibrated rule score, not an ML model or probability.
 - Paper fills approximate an ask-plus-slippage entry and bid-minus-slippage exit. They do not model queue position, partial fills, exchange fees actually charged to your account, outages, market impact or latency.
-- The 15-minute scheduler can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price.
+- The 15-minute scheduler can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
 - No profit is promised. Paper results are not proof of live profitability.
 
 ## Default risk controls
