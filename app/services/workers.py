@@ -273,6 +273,7 @@ class WorkerManager:
                                              else ("active" if active_runs else (last.get("status") or "idle")),
                             "last_status": last.get("status"),
                             "last_duration_ms": last.get("duration_ms"),
+                            "last_summary": (last.get("result") or {}).get("summary"),
                             "execution_mode": "read_only"})
         return {"worker_count": len(workers), "ready_count": sum(x["availability"] == "ready" for x in workers),
                 "unavailable_count": sum(x["availability"] == "unavailable" for x in workers),
