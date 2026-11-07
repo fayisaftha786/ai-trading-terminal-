@@ -1,0 +1,54 @@
+name: ARM64 Docker compatibility
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "app/**"
+      - ".github/workflows/arm64-docker.yml"
+  push:
+    branches: ["work/arm64-cloud-compat"]
+    paths:
+      - "Dockerfile"
+      - "requirements.txt"
+      - "app/**"
+      - ".github/workflows/arm64-docker.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  arm64-image:
+    name: Build and smoke-test Linux ARM64 image
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build ARM64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/arm64
+          load: true
+          tags: ai-trading-terminal:arm64-check
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke-test ARM64 runtime and persistent SQLite initialization
+        run: |
+          docker run --rm --platform linux/arm64 \
+            -e APP_ENV=development \
+            -e DATABASE_PATH=/tmp/arm64-smoke/trading.db \
+            ai-trading-terminal:arm64-check \
+            python -c "import platform, ccxt; from app.main import app; from app.storage import Storage; db=Storage('/tmp/arm64-smoke/trading.db'); db.initialize(); assert platform.machine() in ('aarch64','arm64'), platform.machine(); print('ARM64_IMPORT_OK', platform.machine(), 'CCXT', ccxt.__version__, 'FASTAPI_APP_OK', app.title)"
