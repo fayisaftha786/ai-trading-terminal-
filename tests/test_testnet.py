@@ -289,6 +289,43 @@ def test_testnet_unknown_orders_consume_open_order_cap(monkeypatch):
         service.create_limit_order({**request, "idempotency_key": "buy-eth-order-008", "symbol": "ETH/USDT"}, db)
 
 
+def test_manual_and_automatic_testnet_orders_cannot_reserve_same_symbol():
+    auto_db = make_storage()
+    automatic = {
+        "idempotency_key": "auto-symbol-lock-001",
+        "list_client_order_id": "attautosymbollock001",
+        "symbol": "BTC/USDT",
+        "quantity": 0.001,
+        "exit_quantity": 0.001,
+        "entry_price": 10000,
+        "stop_price": 9900,
+        "target_price": 10200,
+        "notional_usdt": 10,
+        "signal_score": 90,
+        "status": "EXECUTING",
+    }
+    manual = {
+        "idempotency_key": "manual-symbol-lock-001",
+        "client_order_id": "attmanualsymbollock001",
+        "symbol": "BTC/USDT",
+        "side": "BUY",
+        "amount": 0.001,
+        "price": 10000,
+        "notional_usdt": 10,
+        "status": "SUBMITTING",
+    }
+    auto_db.create_testnet_auto_order(automatic)
+    with pytest.raises(ValueError, match="active automatic Testnet order"):
+        auto_db.create_testnet_order(manual)
+    assert auto_db.count_open_testnet_orders() == 1
+
+    manual_db = make_storage()
+    manual_db.create_testnet_order(manual)
+    with pytest.raises(ValueError, match="active manual Testnet order"):
+        manual_db.create_testnet_auto_order(automatic)
+    assert manual_db.count_open_testnet_orders() == 1
+
+
 def test_testnet_order_api_gate_stays_closed_by_default(client):
     response = client.post("/api/testnet/orders", json={
         "idempotency_key": "disabled-testnet-001", "symbol": "BTC/USDT",
