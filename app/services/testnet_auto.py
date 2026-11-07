@@ -67,29 +67,79 @@ class TestnetAutoTrader:
                     params: dict[str, Any] = {"origClientOrderId": row["list_client_order_id"]}
                     if row.get("exchange_list_id") is not None:
                         params = {"orderListId": row["exchange_list_id"]}
-                    result = exchange.request("orderList", "private", "GET", params)
-                    remote_status = str(result.get("listOrderStatus") or "").upper()
-                    if remote_status == "EXECUTING":
+                    remote_list = exchange.request("orderList", "private", "GET", params)
+                    list_status = str(remote_list.get("listOrderStatus") or "").upper()
+                    orders = remote_list.get("orders") or []
+                    working_id = row.get("working_order_id")
+                    if not working_id and orders:
+                        working_id = orders[0].get("orderId")
+                    if not working_id:
+                        raise ValueError("OTOCO working order ID is unavailable")
+                    working = exchange.fetch_order(working_id, row["symbol"])
+                    working_status = str(working.get("status") or "unknown").lower()
+
+                    if working_status in {"canceled", "cancelled", "expired", "rejected"}:
                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                            "status": "EXECUTING", "error_code": None,
-                        })
-                        counts["executing"] += 1
-                    elif remote_status == "ALL_DONE":
-                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                            "status": "CLOSED", "error_code": None,
+                            "working_order_id": str(working_id),
+                            "status": "NOT_FILLED",
+                            "error_code": None,
                         })
                         counts["completed"] += 1
-                    elif remote_status in {"REJECT", "REJECTED"}:
+                        continue
+
+                    if working_status == "closed":
+                        exit_ids = [
+                            item.get("orderId") for item in orders
+                            if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
+                        ]
+                        exit_states = []
+                        for order_id in exit_ids:
+                            try:
+                                exit_order = exchange.fetch_order(order_id, row["symbol"])
+                                exit_states.append(str(exit_order.get("status") or "unknown").lower())
+                            except Exception:
+                                exit_states.append("unknown")
+                        if "closed" in exit_states:
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "CLOSED",
+                                "error_code": None,
+                            })
+                            counts["completed"] += 1
+                        elif list_status == "EXECUTING" or any(state in {"open", "pending"} for state in exit_states):
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "EXECUTING",
+                                "error_code": None,
+                            })
+                            counts["executing"] += 1
+                        else:
+                            # The entry filled but no live protective exit can be confirmed.
+                            # Keep it active and block new entries until a human reconciles it.
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "UNPROTECTED",
+                                "error_code": "FILLED_ENTRY_WITHOUT_CONFIRMED_EXIT",
+                            })
+                            counts["unresolved"] += 1
+                        continue
+
+                    if working_status in {"open", "pending"} and list_status in {"EXECUTING", "EXEC_STARTED"}:
                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                            "status": "REJECTED", "error_code": "EXCHANGE_REJECTED",
+                            "working_order_id": str(working_id),
+                            "status": "EXECUTING",
+                            "error_code": None,
                         })
+                        counts["executing"] += 1
                     else:
                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                            "status": "UNKNOWN", "error_code": "UNRECOGNIZED_ORDER_LIST_STATE",
+                            "working_order_id": str(working_id),
+                            "status": "UNKNOWN",
+                            "error_code": "UNRECOGNIZED_ORDER_LIST_OR_WORKING_ORDER_STATE",
                         })
                         counts["unresolved"] += 1
                 except Exception:
-                    # An uncertain remote state must block replacement orders.
+                    # Unknown remote state must block replacement orders.
                     self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                         "status": "UNKNOWN", "error_code": "RECONCILIATION_UNAVAILABLE",
                     })
@@ -205,7 +255,7 @@ class TestnetAutoTrader:
         statuses = [row["status"] for row in self.storage.list_active_testnet_auto_orders()]
         return {
             "active": len(statuses),
-            "unknown": sum(1 for status in statuses if status == "UNKNOWN"),
+            "unknown": sum(1 for status in statuses if status in {"UNKNOWN", "UNPROTECTED"}),
             "executing": sum(1 for status in statuses if status == "EXECUTING"),
         }
 
@@ -368,7 +418,11 @@ class TestnetAutoTrader:
         with self._lock:
             self.storage.set_setting("testnet_auto_trading_enabled", False)
             canceled: list[str] = []
+            protected: list[str] = []
             unresolved: list[str] = []
+            # Refresh all order-list and child-order states before deciding what can be
+            # canceled. A filled entry must keep its exchange-side TP/SL OCO protection.
+            self._reconcile_locked()
             rows = self.storage.list_active_testnet_auto_orders()
             exchange = None
             if rows:
@@ -376,10 +430,35 @@ class TestnetAutoTrader:
                     exchange = self.adapter._new_exchange()
                     for row in rows:
                         list_id = row.get("exchange_list_id")
-                        if not list_id:
-                            unresolved.append(row["list_client_order_id"])
-                            continue
                         try:
+                            if not list_id:
+                                unresolved.append(row["list_client_order_id"])
+                                continue
+                            if row["status"] in {"EXECUTING", "UNPROTECTED", "UNKNOWN"}:
+                                params: dict[str, Any] = {"orderListId": list_id}
+                                remote_list = exchange.request("orderList", "private", "GET", params)
+                                child_orders = remote_list.get("orders") or []
+                                working_id = row.get("working_order_id") or (
+                                    child_orders[0].get("orderId") if child_orders else None
+                                )
+                                if not working_id:
+                                    unresolved.append(row["list_client_order_id"])
+                                    continue
+                                working = exchange.fetch_order(working_id, row["symbol"])
+                                working_status = str(working.get("status") or "unknown").lower()
+                                if working_status == "closed":
+                                    # Entry is filled: leave native TP/SL orders untouched.
+                                    protected.append(row["list_client_order_id"])
+                                    continue
+                                if working_status in {"canceled", "cancelled", "expired", "rejected"}:
+                                    self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                        "status": "NOT_FILLED", "error_code": None,
+                                    })
+                                    canceled.append(row["list_client_order_id"])
+                                    continue
+                                if working_status not in {"open", "pending"}:
+                                    unresolved.append(row["list_client_order_id"])
+                                    continue
                             exchange.request("orderList", "private", "DELETE", {
                                 "symbol": row["symbol"].replace("/", ""),
                                 "orderListId": list_id,
@@ -390,7 +469,7 @@ class TestnetAutoTrader:
                             canceled.append(row["list_client_order_id"])
                         except Exception:
                             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                                "status": "UNKNOWN", "error_code": "CANCEL_UNCERTAIN",
+                                "status": "UNKNOWN", "error_code": "CANCEL_OR_RECONCILIATION_UNCERTAIN",
                             })
                             unresolved.append(row["list_client_order_id"])
                 except Exception:
@@ -400,7 +479,8 @@ class TestnetAutoTrader:
             return {
                 "halted": True,
                 "new_auto_entries_disabled": True,
-                "canceled_order_lists": canceled,
+                "canceled_unfilled_order_lists": canceled,
+                "protection_preserved_for_filled_entries": protected,
                 "unresolved_order_lists": unresolved,
                 "live_trading_enabled": False,
             }
