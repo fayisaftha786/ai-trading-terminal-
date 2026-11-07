@@ -214,11 +214,20 @@ class MarketDataService:
                     markets.append({"symbol": symbol, "status": "error", "error": str(result)[:180]})
                 else:
                     markets.append(result)
-            if not markets or not all(row.get("status") == "live" for row in markets):
+            required_fields = (
+                "last", "bid", "ask", "quote_volume", "timestamp",
+                "bid_depth_quote", "ask_depth_quote", "orderbook_retrieved_at_ms",
+            )
+            primary_is_complete = bool(markets) and all(
+                row.get("status") == "live"
+                and all(row.get(field) is not None for field in required_fields)
+                for row in markets
+            )
+            if not primary_is_complete:
                 detail = "; ".join(str(row.get("error") or row.get("status")) for row in markets[:3])
                 return await self._coinbase_tickers(
                     cache_key,
-                    f"{self.config.cex_exchange} did not return every configured market: {detail}",
+                    f"{self.config.cex_exchange} did not return complete quotes and depth: {detail}",
                 )
             response = {
                 "status": "live",
