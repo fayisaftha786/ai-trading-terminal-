@@ -214,6 +214,10 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
       Math.min(market.bid_depth_quote, market.ask_depth_quote) < 5000) {
     return reject("top10_orderbook_depth_unavailable_or_low");
   }
+  if (!Number.isFinite(market.book_timestamp_ms) || market.book_timestamp_ms > nowMs + 1000 ||
+      nowMs - market.book_timestamp_ms > 15000) {
+    return reject("orderbook_timestamp_stale_or_missing");
+  }
   if (quoteVolume < 1000000) return reject("quote_volume_below_1m");
   const oneHourAge = nowMs - (primary.last_closed_candle_ms + 3600000);
   const sixHourAge = nowMs - (higher.last_closed_candle_ms + 21600000);
