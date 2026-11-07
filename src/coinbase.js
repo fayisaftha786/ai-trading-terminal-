@@ -1,6 +1,8 @@
 import { auditCandles } from "./strategy.js";
 
 const BASE_URL = "https://api.exchange.coinbase.com";
+const MIN_PUBLIC_REQUEST_GAP_MS = 350;
+let lastPublicRequestAt = 0;
 export const PRODUCTS = [
   { symbol: "BTC/USD", product: "BTC-USD" },
   { symbol: "ETH/USD", product: "ETH-USD" },
@@ -8,6 +10,9 @@ export const PRODUCTS = [
 ];
 
 async function getJson(path) {
+  const waitMs = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (Date.now() - lastPublicRequestAt));
+  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+  lastPublicRequestAt = Date.now();
   const response = await fetch(BASE_URL + path, {
     method: "GET",
     headers: {
@@ -53,13 +58,12 @@ function convertCandles(raw) {
 
 export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now()) {
   const encoded = encodeURIComponent(product);
-  const [ticker, stats, book, oneHourRaw, sixHourRaw] = await Promise.all([
-    getJson("/products/" + encoded + "/ticker"),
-    getJson("/products/" + encoded + "/stats"),
-    getJson("/products/" + encoded + "/book?level=2"),
-    getJson("/products/" + encoded + "/candles?granularity=3600"),
-    getJson("/products/" + encoded + "/candles?granularity=21600")
-  ]);
+  // Public endpoint pacing: keep one shared request stream below Coinbase's documented rate.
+  const ticker = await getJson("/products/" + encoded + "/ticker");
+  const stats = await getJson("/products/" + encoded + "/stats");
+  const book = await getJson("/products/" + encoded + "/book?level=2");
+  const oneHourRaw = await getJson("/products/" + encoded + "/candles?granularity=3600");
+  const sixHourRaw = await getJson("/products/" + encoded + "/candles?granularity=21600");
   const bid = Number(ticker.bid);
   const ask = Number(ticker.ask);
   const last = Number(ticker.price);
