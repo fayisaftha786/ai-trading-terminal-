@@ -91,21 +91,36 @@ class TestnetAutoTrader:
                             item.get("orderId") for item in orders
                             if str(item.get("orderId")) != str(working_id) and item.get("orderId") is not None
                         ]
-                        exit_states = []
+                        exit_orders = []
                         for order_id in exit_ids:
                             try:
-                                exit_order = exchange.fetch_order(order_id, row["symbol"])
-                                exit_states.append(str(exit_order.get("status") or "unknown").lower())
+                                exit_orders.append(exchange.fetch_order(order_id, row["symbol"]))
                             except Exception:
-                                exit_states.append("unknown")
-                        if "closed" in exit_states:
+                                exit_orders.append({"status": "unknown", "filled": 0})
+                        exit_states = [
+                            str(item.get("status") or "unknown").lower() for item in exit_orders
+                        ]
+                        # A child order can be terminal without having executed (for
+                        # example, the sibling OCO leg canceled it). Only ALL_DONE plus
+                        # a positive fill on an exit child proves the bracket completed.
+                        completed_exit = (
+                            list_status == "ALL_DONE"
+                            and any(
+                                str(item.get("status") or "").lower() == "closed"
+                                and (self._number(item.get("filled")) or 0.0) > 0
+                                for item in exit_orders
+                            )
+                        )
+                        if completed_exit:
                             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                 "working_order_id": str(working_id),
                                 "status": "CLOSED",
                                 "error_code": None,
                             })
                             counts["completed"] += 1
-                        elif list_status == "EXECUTING" or any(state in {"open", "pending"} for state in exit_states):
+                        elif list_status in {"EXECUTING", "EXEC_STARTED"} and any(
+                            state in {"open", "pending"} for state in exit_states
+                        ):
                             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                 "working_order_id": str(working_id),
                                 "status": "EXECUTING",
@@ -113,8 +128,8 @@ class TestnetAutoTrader:
                             })
                             counts["executing"] += 1
                         else:
-                            # The entry filled but no live protective exit can be confirmed.
-                            # Keep it active and block new entries until a human reconciles it.
+                            # A filled entry without a positively verified completed
+                            # bracket or live protective child is not safe to clear.
                             self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                 "working_order_id": str(working_id),
                                 "status": "UNPROTECTED",
@@ -490,7 +505,15 @@ class TestnetAutoTrader:
                                     for order_id in exit_ids:
                                         exit_order = exchange.fetch_order(order_id, row["symbol"])
                                         exit_states.append(str(exit_order.get("status") or "unknown").lower())
-                                    if "closed" in exit_states:
+                                    completed_exit = (
+                                        str(remote_list.get("listOrderStatus") or "").upper() == "ALL_DONE"
+                                        and any(
+                                            str(exit_order.get("status") or "").lower() == "closed"
+                                            and (self._number(exit_order.get("filled")) or 0.0) > 0
+                                            for exit_order in exit_orders
+                                        )
+                                    )
+                                    if completed_exit:
                                         self.storage.update_testnet_auto_order(row["list_client_order_id"], {
                                             "status": "CLOSED", "error_code": None,
                                         })
