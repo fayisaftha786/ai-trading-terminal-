@@ -17,7 +17,7 @@ if [[ -f "$ENV_FILE" ]]; then
   exit 1
 fi
 
-echo "Installing free Ubuntu packages and Docker..."
+echo "Installing Ubuntu packages and Docker..."
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates curl git openssl docker.io
 systemctl enable --now docker
@@ -33,39 +33,45 @@ else
   git clone --depth 1 --branch main "$REPO" "$APP_DIR"
 fi
 
-read -r -p "Dashboard username [admin]: " APP_USERNAME
-APP_USERNAME="${APP_USERNAME:-admin}"
-while true; do
-  read -r -s -p "Create dashboard password (minimum 16 characters): " APP_PASSWORD
-  echo
-  if [[ "${#APP_PASSWORD}" -ge 16 ]]; then break; fi
-  echo "Password too short. Try again."
-done
-
-APP_AUTH_SECRET="$(openssl rand -hex 32)"
-cat > "$ENV_FILE" <<EOF
-APP_ENV=production
-APP_USERNAME=$APP_USERNAME
-APP_PASSWORD=$APP_PASSWORD
-APP_AUTH_SECRET=$APP_AUTH_SECRET
-APP_TOKEN_TTL_MINUTES=480
-DATABASE_PATH=$DATA_DIR/trading.db
-PAPER_INITIAL_CAPITAL_USD=100
-SCAN_INTERVAL_SECONDS=60
-CEX_EXCHANGE=binance
-CEX_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT
-BINANCE_TESTNET_ENABLED=false
-BINANCE_TESTNET_ORDER_ENABLED=false
-BINANCE_TESTNET_API_KEY=
-BINANCE_TESTNET_API_SECRET=
-BINANCE_READONLY_ENABLED=false
-EOF
-chmod 600 "$ENV_FILE"
-unset APP_PASSWORD APP_AUTH_SECRET
-
 echo "Building current main-branch PAPER backend for this VM architecture..."
 cd "$APP_DIR"
 docker build --pull -t "$IMAGE" .
+
+read -r -p "Dashboard username [admin]: " APP_USERNAME
+APP_USERNAME="${APP_USERNAME:-admin}"
+if [[ ! "$APP_USERNAME" =~ ^[A-Za-z0-9_.-]{3,32}$ ]]; then
+  echo "Username must be 3-32 characters: letters, numbers, dot, underscore or hyphen." >&2
+  exit 1
+fi
+
+while true; do
+  read -r -s -p "Create dashboard password (minimum 16 characters): " APP_PASSWORD
+  echo
+  if [[ "${#APP_PASSWORD}" -ge 16 && "$APP_PASSWORD" != *$'\r'* ]]; then break; fi
+  echo "Password must be at least 16 characters and contain no carriage return."
+done
+
+APP_AUTH_SECRET="$(openssl rand -hex 32)"
+umask 077
+{
+  printf 'APP_ENV=production\n'
+  printf 'APP_USERNAME=%s\n' "$APP_USERNAME"
+  printf 'APP_PASSWORD=%s\n' "$APP_PASSWORD"
+  printf 'APP_AUTH_SECRET=%s\n' "$APP_AUTH_SECRET"
+  printf 'APP_TOKEN_TTL_MINUTES=480\n'
+  printf 'DATABASE_PATH=%s/trading.db\n' "$DATA_DIR"
+  printf 'PAPER_INITIAL_CAPITAL_USD=100\n'
+  printf 'SCAN_INTERVAL_SECONDS=60\n'
+  printf 'CEX_EXCHANGE=binance\n'
+  printf 'CEX_SYMBOLS=BTC/USDT,ETH/USDT,SOL/USDT\n'
+  printf 'BINANCE_TESTNET_ENABLED=false\n'
+  printf 'BINANCE_TESTNET_ORDER_ENABLED=false\n'
+  printf 'BINANCE_TESTNET_API_KEY=\n'
+  printf 'BINANCE_TESTNET_API_SECRET=\n'
+  printf 'BINANCE_READONLY_ENABLED=false\n'
+} > "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+unset APP_PASSWORD APP_AUTH_SECRET
 
 docker rm -f ai-trading-terminal >/dev/null 2>&1 || true
 docker run -d \
@@ -78,19 +84,22 @@ docker run -d \
 
 echo
 echo "Backend container started. Waiting briefly for health check..."
+health_ok=false
 for attempt in $(seq 1 30); do
   if curl -fsS http://127.0.0.1:8000/api/health >/dev/null; then
-    echo "Health check passed."
+    health_ok=true
     break
   fi
   sleep 2
 done
 
-if ! curl -fsS http://127.0.0.1:8000/api/health; then
+if [[ "$health_ok" != true ]]; then
   echo "Health check failed. Inspect: docker logs ai-trading-terminal" >&2
   exit 1
 fi
 
+curl -fsS http://127.0.0.1:8000/api/health
+echo
 echo
 echo "Install Tailscale using its official Linux instructions, sign this VM into your personal tailnet,"
 echo "then run: sudo tailscale serve --bg 8000"
