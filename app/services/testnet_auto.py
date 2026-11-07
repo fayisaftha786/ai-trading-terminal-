@@ -539,7 +539,8 @@ class TestnetAutoTrader:
     ) -> dict[str, Any]:
         ticker = item.get("ticker") or {}
         symbol = str(ticker.get("symbol") or item.get("symbol") or "")
-        candle_stamp = ticker.get("timestamp") or item.get("last_closed_candle_timestamp_ms") or "unknown"
+        # Idempotency is keyed to the strategy candle, not each new live ticker tick.
+        candle_stamp = item.get("last_closed_candle_timestamp_ms") or ticker.get("timestamp") or "unknown"
         key_source = f"{symbol}:{candle_stamp}"
         digest = hashlib.sha256(key_source.encode("utf-8")).hexdigest()
         idempotency_key = "auto_" + digest[:48]

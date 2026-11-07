@@ -645,6 +645,24 @@ def _make_auto_trader(monkeypatch, *, permissions=True, working_status="open", l
     return db, exchange, TestnetAutoTrader(adapter, db, engine)
 
 
+def test_testnet_auto_idempotency_uses_closed_candle_not_live_ticker_timestamp(monkeypatch):
+    from app.services.risk import validate_risk_profile
+
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    signal = _make_auto_signal()
+    risk = validate_risk_profile(db.get_risk())
+    first = trader._submit_protected_entry(signal, risk, 10.0)
+    assert first["accepted"] is True
+
+    next_tick_same_candle = _make_auto_signal()
+    next_tick_same_candle["ticker"]["timestamp"] += 15_000
+    next_tick_same_candle["last_closed_candle_timestamp_ms"] = signal["last_closed_candle_timestamp_ms"]
+    second = trader._submit_protected_entry(next_tick_same_candle, risk, 10.0)
+    assert second["accepted"] is False
+    assert second["reason"] == "duplicate_signal_already_recorded"
+    assert sum(1 for call in exchange.calls if call[0] == "orderList/opoco" and call[2] == "POST") == 1
+
+
 def test_testnet_auto_uses_opoco_net_received_quantity_and_fok_entry(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch)
     result = trader.run([_make_auto_signal()], True)
