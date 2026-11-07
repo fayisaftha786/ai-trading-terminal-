@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+import threading
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -249,17 +250,38 @@ class WorkerManager:
         self.concurrency = max(1, min(int(concurrency), len(_WORKERS)))
         self.timeout_seconds = max(0.25, min(float(timeout_seconds), 15.0))
         self.retries = max(0, min(int(retries), 2))
+        self._thread_slots = threading.BoundedSemaphore(self.concurrency)
+        self._state_lock = threading.Lock()
+        self._active_runs = 0
+        self._last_run_at: str | None = None
+        self._last_run_status: str | None = None
+        self._last_results: dict[str, dict[str, Any]] = {}
 
     def registry(self) -> dict[str, Any]:
+        with self._state_lock:
+            active_runs = self._active_runs
+            last_run_at = self._last_run_at
+            last_run_status = self._last_run_status
+            last_results = dict(self._last_results)
         workers = []
         for worker_id, name, description, _handler in _WORKERS:
+            availability = "unavailable" if worker_id == "news_sentiment" else "ready"
+            last = last_results.get(worker_id) or {}
             workers.append({"id": worker_id, "name": name, "description": description,
-                            "availability": "unavailable" if worker_id == "news_sentiment" else "ready",
+                            "availability": availability,
+                            "health_status": "active" if active_runs else (last.get("status") or "idle"),
+                            "last_status": last.get("status"),
+                            "last_duration_ms": last.get("duration_ms"),
                             "execution_mode": "read_only"})
         return {"worker_count": len(workers), "ready_count": sum(x["availability"] == "ready" for x in workers),
                 "unavailable_count": sum(x["availability"] == "unavailable" for x in workers),
-                "max_concurrency": self.concurrency, "workers": workers,
-                "live_trading_enabled": False}
+                "max_concurrency": self.concurrency, "active_runs": active_runs,
+                "last_run_at": last_run_at, "last_run_status": last_run_status,
+                "workers": workers, "live_trading_enabled": False}
+
+    def _execute_handler(self, handler: WorkerHandler, context: dict[str, Any]) -> dict[str, Any]:
+        with self._thread_slots:
+            return handler(context)
 
     async def _run_one(self, spec: tuple[str, str, str, WorkerHandler],
                        context: dict[str, Any], semaphore: asyncio.Semaphore) -> dict[str, Any]:
@@ -271,7 +293,7 @@ class WorkerManager:
                 attempts += 1
                 try:
                     result = await asyncio.wait_for(
-                        asyncio.to_thread(handler, context), timeout=self.timeout_seconds
+                        asyncio.to_thread(self._execute_handler, handler, context), timeout=self.timeout_seconds
                     )
                     status = str(result.get("status", "complete"))
                     if status not in {"complete", "blocked", "unavailable", "error"}:
@@ -295,8 +317,15 @@ class WorkerManager:
     async def analyze(self, context: dict[str, Any]) -> dict[str, Any]:
         started_at = datetime.now(timezone.utc).isoformat()
         started = time.perf_counter()
-        semaphore = asyncio.Semaphore(self.concurrency)
-        results = await asyncio.gather(*(self._run_one(spec, context, semaphore) for spec in _WORKERS))
+        run_id = str(uuid.uuid4())
+        with self._state_lock:
+            self._active_runs += 1
+        try:
+            semaphore = asyncio.Semaphore(self.concurrency)
+            results = await asyncio.gather(*(self._run_one(spec, context, semaphore) for spec in _WORKERS))
+        finally:
+            with self._state_lock:
+                self._active_runs = max(0, self._active_runs - 1)
         counts = {status: sum(1 for item in results if item["status"] == status)
                   for status in ("complete", "blocked", "unavailable", "error")}
         if counts["error"] == len(results):
@@ -305,9 +334,13 @@ class WorkerManager:
             overall = "partial"
         else:
             overall = "complete"
-        return {"run_id": str(uuid.uuid4()), "started_at": started_at,
-                "duration_ms": round((time.perf_counter() - started) * 1000, 2),
-                "status": overall, "worker_count": len(results),
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        with self._state_lock:
+            self._last_run_at = datetime.now(timezone.utc).isoformat()
+            self._last_run_status = overall
+            self._last_results = {item["id"]: item for item in results}
+        return {"run_id": run_id, "started_at": started_at,
+                "duration_ms": duration_ms, "status": overall, "worker_count": len(results),
                 "max_concurrency": self.concurrency, "counts": counts,
                 "workers": results, "mode": "read_only_market_analysis",
                 "live_trading_enabled": False, "execution_authorized": False,
