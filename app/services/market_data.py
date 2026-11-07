@@ -43,9 +43,18 @@ class MarketDataService:
             markets: list[dict[str, Any]] = []
             for symbol, result in zip(self.config.cex_symbols, results):
                 if isinstance(result, BaseException):
-                    markets.append({"symbol": symbol, "status": "error", "error": str(result)[:180]})
+                    markets.append({
+                        "symbol": symbol,
+                        "status": "error",
+                        "market_data_provider": "coinbase_public_fallback",
+                        "error": str(result)[:180],
+                    })
                 else:
-                    markets.append(result)
+                    markets.append({
+                        **result,
+                        "market_data_provider": "coinbase_public_fallback",
+                        "quote_currency": "USD",
+                    })
             response = {
                 "status": "live" if any(row.get("status") == "live" for row in markets) else "error",
                 "exchange": "coinbase_public_fallback",
@@ -197,6 +206,8 @@ class MarketDataService:
                 ticker = await exchange.fetch_ticker(symbol)
                 row = {
                     "symbol": symbol,
+                    "market_data_provider": self.config.cex_exchange,
+                    "quote_currency": symbol.split("/")[-1].split(":")[0].upper(),
                     "last": ticker.get("last"),
                     "bid": ticker.get("bid"),
                     "ask": ticker.get("ask"),
