@@ -649,7 +649,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         portfolio = db.portfolio_summary(
             fresh_marks,
             fee_bps_per_side=fee_bps,
-            slippage_bps_per_side=slippage_bps,
+            slippage_bps=slippage_bps,
         )
         context = {
             "market": market,
