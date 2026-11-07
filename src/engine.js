@@ -119,6 +119,21 @@ export class TradingEngine extends DurableObject {
         this.logEvent("emergency_stop_reset", "Paper entry halt reset; auto-entry remains OFF");
         return jsonResponse({ halted: false, auto_paper_enabled: false });
       }
+      if (request.method === "POST" && url.pathname.startsWith("/api/paper/close/")) {
+        const tradeId = Number(url.pathname.split("/").pop());
+        if (!Number.isSafeInteger(tradeId) || tradeId < 1) return jsonResponse({ error: "invalid_trade_id" }, 400);
+        const trade = this.getOpenTrades().find((item) => item.id === tradeId);
+        if (!trade) return jsonResponse({ error: "open_paper_trade_not_found" }, 404);
+        const market = this.getMarkets().find((item) => item.symbol === trade.symbol && item.status === "live");
+        const quoteTime = Date.parse(market?.ticker_time || "");
+        if (!Number.isFinite(quoteTime) || Date.now() - quoteTime < -5000 || Date.now() - quoteTime > MAX_QUOTE_AGE_MS ||
+            !Number.isFinite(market?.bid) || market.bid <= 0) {
+          return jsonResponse({ error: "fresh_bid_required_run_market_scan_first" }, 409);
+        }
+        const risk = { ...DEFAULT_RISK, ...(this.getState("settings")?.risk || {}) };
+        const closed = this.closeTradeAt(trade, market.bid, risk, Date.now(), "manual_owner_close");
+        return jsonResponse({ trade: closed, mode: "paper_only" });
+      }
       if (request.method === "POST" && url.pathname === "/api/scan") return jsonResponse(await this.runCycle("manual"));
       if (request.method === "GET" && url.pathname === "/api/automation/status") return jsonResponse(this.automationStatus());
       return jsonResponse({ error: "not_found" }, 404);
@@ -290,6 +305,22 @@ export class TradingEngine extends DurableObject {
       closed.push({ trade_id: trade.id, symbol: trade.symbol, reason, net_pnl_usd: netPnl });
     }
     return closed;
+  }
+
+  closeTradeAt(trade, bid, risk, nowMs, reason) {
+    const exitPrice = bid * (1 - risk.slippage_bps / 10000);
+    const exitFee = exitPrice * trade.quantity * risk.fee_bps_per_side / 10000;
+    const netPnl = (exitPrice - trade.entry_price) * trade.quantity - trade.fees_usd - exitFee;
+    const result = this.sql.exec(
+      "UPDATE trades SET status='CLOSED',closed_at_ms=?,exit_price=?,fees_usd=?,pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN'",
+      nowMs, exitPrice, trade.fees_usd + exitFee, netPnl,
+      JSON.stringify({ ...trade.metadata, close_reason: reason, close_reference_price: bid }), trade.id
+    );
+    if (result.rowsWritten !== 1) throw new Error("paper_trade_already_closed");
+    this.logEvent("paper_exit", "Paper position closed by owner", {
+      trade_id: trade.id, symbol: trade.symbol, net_pnl_usd: netPnl, reason
+    });
+    return this.getTrades(100).find((item) => item.id === trade.id);
   }
 
   portfolio(markBySymbol, risk, nowMs) {
