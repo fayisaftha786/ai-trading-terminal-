@@ -122,3 +122,10 @@ def test_apk_checksum_is_relocatable_after_artifact_download():
     guide = (ROOT / "docs/GET_ANDROID_APK.md").read_text()
     assert "Actions" in guide and "Artifacts" in guide
     assert "No Termux is required" in guide
+
+
+def test_gitignore_excludes_secret_environment_variants_but_keeps_example():
+    ignore = (ROOT / ".gitignore").read_text().splitlines()
+    assert ".env" in ignore
+    assert ".env.*" in ignore
+    assert "!.env.example" in ignore
