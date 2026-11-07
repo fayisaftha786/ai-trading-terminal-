@@ -10,9 +10,9 @@ Upload this exact file to the repository root:
 
 Expected SHA-256:
 
-`fa884a10abeaac4203949168b76e3adf1e5cd9e79483809a0e860022d4786f3b`
+`4a4d1fa4e95023d1e0a416ff40e81feb4466d221844359f895d19a69d841b9bb`
 
-The source package includes Supabase PostgreSQL cloud-storage support, the Render Free Blueprint, backend API, tests, dashboard, and Android Gradle project. SQLite remains available for local development and tests.
+The source package includes Supabase PostgreSQL cloud-storage support, the applied ledger migration under `supabase/migrations/`, the Render Free Blueprint, backend API, tests, dashboard, and Android Gradle project. SQLite remains available for local development and tests.
 
 ## One-time upload
 
