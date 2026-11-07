@@ -254,6 +254,46 @@ def test_restart_resumes_cex_exit_monitoring_but_keeps_new_entries_off(tmp_path)
 
 
 
+def test_testnet_auto_entries_require_fresh_opt_in_after_restart_and_reconciliation_continues(tmp_path):
+    from dataclasses import replace
+    from app.settings import settings
+    from app.main import create_app
+    from app.storage import Storage
+
+    database_path = tmp_path / "testnet-restart-safety.db"
+    seed = Storage(database_path)
+    seed.initialize(100.0)
+    seed.set_setting("testnet_auto_trading_enabled", True)
+    seed.create_testnet_auto_order({
+        "idempotency_key": "restart-fee-retry",
+        "list_client_order_id": "restart-fee-retry-client",
+        "symbol": "BTC/USDT",
+        "quantity": 0.001,
+        "exit_quantity": 0.001,
+        "entry_price": 10000,
+        "stop_price": 9900,
+        "target_price": 10200,
+        "notional_usdt": 10,
+        "signal_score": 90,
+        "status": "CLOSED",
+    })
+    seed.update_testnet_auto_order("restart-fee-retry-client", {
+        "status": "CLOSED",
+        "working_order_id": "501",
+        "above_order_id": "502",
+        "accounting_status": "FEES_UNRESOLVED",
+        "closed_at": "2026-11-07T00:00:00Z",
+    })
+
+    config = replace(settings, database_path=database_path, initial_capital_usd=100.0)
+    restarted = create_app(config=config, db_path=database_path)
+    assert restarted.state.auto_testnet_enabled is False
+    assert restarted.state.auto_scan_enabled is True
+    assert restarted.state.db.get_setting("testnet_auto_trading_enabled") is False
+    assert restarted.state.db.testnet_auto_unaccounted_closed_count() == 1
+    assert restarted.state.db.count_open_testnet_auto_orders() == 0
+
+
 def test_testnet_status_is_separate_from_live_trading(client):
     response = client.get("/api/testnet/status")
     assert response.status_code == 200
