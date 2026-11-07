@@ -542,8 +542,14 @@ class TestnetAutoTrader:
     ) -> dict[str, Any]:
         ticker = item.get("ticker") or {}
         symbol = str(ticker.get("symbol") or item.get("symbol") or "")
-        # Idempotency is keyed to the strategy candle, not each new live ticker tick.
-        candle_stamp = item.get("last_closed_candle_timestamp_ms") or ticker.get("timestamp") or "unknown"
+        allowed_symbols = tuple(getattr(self.adapter.config, "cex_symbols", ()) or ())
+        if symbol not in allowed_symbols or not symbol.endswith("/USDT"):
+            return {"accepted": False, "reason": "testnet_symbol_not_allowlisted"}
+        # Idempotency must use the closed strategy candle only. A changing live
+        # ticker timestamp must never create a new key for the same/missing candle.
+        candle_stamp = item.get("last_closed_candle_timestamp_ms")
+        if self._number(candle_stamp) is None:
+            return {"accepted": False, "reason": "closed_candle_timestamp_missing"}
         key_source = f"{symbol}:{candle_stamp}"
         digest = hashlib.sha256(key_source.encode("utf-8")).hexdigest()
         idempotency_key = "auto_" + digest[:48]
