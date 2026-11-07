@@ -412,3 +412,20 @@ def test_auto_paper_opt_in_persists_across_process_restart_and_kill_switch_clear
 
     after_kill = create_app(config=config, db_path=database_path)
     assert after_kill.state.auto_paper_enabled is False
+
+
+def test_binance_production_account_status_is_read_only_and_disabled_by_default(client):
+    response = client.get("/api/binance/account/status")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["environment"] == "production_read_only"
+    assert body["enabled"] is False
+    assert body["ready_for_connection_check"] is False
+    assert body["order_execution_available"] is False
+    assert body["live_trading_enabled"] is False
+
+
+def test_binance_production_connection_check_fails_closed_by_default(client):
+    response = client.post("/api/binance/account/connection-check")
+    assert response.status_code == 409
+    assert "disabled" in response.json()["detail"].lower()
