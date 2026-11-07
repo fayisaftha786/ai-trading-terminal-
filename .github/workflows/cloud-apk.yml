@@ -1,4 +1,4 @@
-name: AI Trading Terminal v0.5.0 — Cloud source verification and Android APK
+name: AI Trading Terminal v0.6.0 — Cloud source verification and Android APK
 
 on:
   push:
@@ -17,7 +17,7 @@ permissions:
   contents: write
 
 concurrency:
-  group: att-v050-cloud-apk-${{ github.ref }}
+  group: att-v060-cloud-apk-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
