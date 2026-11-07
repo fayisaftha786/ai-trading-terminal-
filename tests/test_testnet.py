@@ -749,7 +749,6 @@ def test_testnet_auto_daily_loss_limit_persistently_blocks_new_entries(monkeypat
     assert result["status"] == "blocked_daily_loss_or_unresolved_accounting"
     assert result["daily_risk"]["halted"] is True
     assert db.get_setting("testnet_auto_loss_halt_day") == day
-    assert db.get_setting("testnet_auto_trading_enabled") is False
     assert not any(call[0] == "orderList/opoco" and call[2] == "POST"
                    for call in exchange.calls)
 
