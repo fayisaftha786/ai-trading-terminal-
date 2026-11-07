@@ -13,6 +13,7 @@ def make_config(**overrides):
         "binance_testnet_order_enabled": False,
         "binance_testnet_max_order_usdt": 10.0,
         "binance_testnet_max_open_orders": 3,
+        "binance_testnet_daily_max_loss_usdt": 2.0,
         "cex_symbols": ("BTC/USDT", "ETH/USDT", "SOL/USDT"),
     }
     values.update(overrides)
@@ -728,6 +729,60 @@ def test_testnet_auto_schema_migrates_existing_table_and_exact_fee_ledger(monkey
     assert row["exit_fee_quote"] == 0.0102
     assert round(row["realized_pnl_quote"], 6) == round(10.197 - 9.99 - 0.01 - 0.0102, 6)
 
+
+
+def test_testnet_auto_daily_loss_limit_persistently_blocks_new_entries(monkeypatch):
+    from datetime import datetime, timezone
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    day = trader._utc_day_start(datetime.now(timezone.utc))
+    db.create_testnet_auto_order({
+        "idempotency_key": "loss-test", "list_client_order_id": "loss-test-client",
+        "symbol": "BTC/USDT", "quantity": 0.001, "exit_quantity": 0.001,
+        "entry_price": 10000, "stop_price": 9900, "target_price": 10200,
+        "notional_usdt": 10, "signal_score": 90, "status": "CLOSED",
+    })
+    db.update_testnet_auto_order("loss-test-client", {
+        "status": "CLOSED", "accounting_status": "EXACT",
+        "realized_pnl_quote": -2.25, "closed_at": day,
+    })
+    result = trader.run([_make_auto_signal()], True)
+    assert result["status"] == "blocked_daily_loss_or_unresolved_accounting"
+    assert result["daily_risk"]["halted"] is True
+    assert db.get_setting("testnet_auto_loss_halt_day") == day
+    assert db.get_setting("testnet_auto_trading_enabled") is False
+    assert not any(call[0] == "request" and len(call) > 1 and call[1] == "orderList/opoco"
+                   for call in exchange.calls)
+
+
+def test_testnet_auto_unresolved_closed_trade_blocks_new_entries(monkeypatch):
+    from datetime import datetime, timezone
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    day = trader._utc_day_start(datetime.now(timezone.utc))
+    db.create_testnet_auto_order({
+        "idempotency_key": "fee-unknown", "list_client_order_id": "fee-unknown-client",
+        "symbol": "BTC/USDT", "quantity": 0.001, "exit_quantity": 0.001,
+        "entry_price": 10000, "stop_price": 9900, "target_price": 10200,
+        "notional_usdt": 10, "signal_score": 90, "status": "CLOSED",
+    })
+    db.update_testnet_auto_order("fee-unknown-client", {
+        "status": "CLOSED", "accounting_status": "FEES_UNRESOLVED", "closed_at": day,
+    })
+    result = trader.run([_make_auto_signal()], True)
+    assert result["status"] == "blocked_daily_loss_or_unresolved_accounting"
+    assert result["daily_risk"]["reason"] == "closed_trade_fee_accounting_unresolved"
+    assert result["daily_risk"]["unresolved_closed_trades"] == 1
+    assert not any(call[0] == "request" and len(call) > 1 and call[1] == "orderList/opoco"
+                   for call in exchange.calls)
+
+
+def test_testnet_auto_daily_loss_halt_resets_on_next_utc_day(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    db, exchange, trader = _make_auto_trader(monkeypatch)
+    yesterday = trader._utc_day_start(datetime.now(timezone.utc) - timedelta(days=1))
+    db.set_setting("testnet_auto_loss_halt_day", yesterday)
+    guard = trader._daily_loss_guard(datetime.now(timezone.utc))
+    assert guard["halted"] is False
+    assert guard["reason"] is None
 
 def test_testnet_auto_performance_excludes_fee_unresolved_from_net_pnl(monkeypatch):
     db, exchange, trader = _make_auto_trader(monkeypatch, working_status="closed", list_status="ALL_DONE")
