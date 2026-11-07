@@ -207,12 +207,24 @@ class TestnetAutoTrader:
                     working_status = str(working.get("status") or "unknown").lower()
 
                     if working_status in {"canceled", "cancelled", "expired", "rejected"}:
-                        self.storage.update_testnet_auto_order(row["list_client_order_id"], {
-                            "working_order_id": str(working_id),
-                            "status": "NOT_FILLED",
-                            "error_code": None,
-                        })
-                        counts["completed"] += 1
+                        # FOK should be all-or-none, but never assume a terminal
+                        # status means zero exposure. Any reported fill must remain
+                        # unresolved until its protection is independently verified.
+                        terminal_filled = self._number(working.get("filled")) or 0.0
+                        if terminal_filled > 0:
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "UNPROTECTED",
+                                "error_code": "PARTIALLY_FILLED_ENTRY_WITHOUT_PROTECTED_EXIT",
+                            })
+                            counts["unresolved"] += 1
+                        else:
+                            self.storage.update_testnet_auto_order(row["list_client_order_id"], {
+                                "working_order_id": str(working_id),
+                                "status": "NOT_FILLED",
+                                "error_code": None,
+                            })
+                            counts["completed"] += 1
                         continue
 
                     if working_status == "closed":
