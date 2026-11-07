@@ -150,6 +150,9 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                 "notice": "Paper trading and isolated Binance Spot Testnet automation are separate. Testnet entries require fresh quotes, closed-candle multi-timeframe alignment, liquidity and spread filters, bounded sizing, and an exchange-native OTOCO take-profit/stop-loss bracket. No production orders are sent."}
 
     scan_lock = asyncio.Lock()
+    # Serialize all explicit automation toggles and emergency/reset operations.
+    # This prevents a stale in-flight enable request from undoing a kill switch.
+    automation_control_lock = asyncio.Lock()
 
     async def perform_scan() -> dict[str, Any]:
         # Serialize UI-triggered and background scans. This prevents two scans from
@@ -393,30 +396,35 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.post("/api/testnet/kill-switch")
     async def testnet_kill_switch() -> dict[str, Any]:
-        app.state.auto_testnet_enabled = False
-        db.set_setting("testnet_auto_trading_enabled", False)
-        auto_result = await asyncio.to_thread(testnet_auto.emergency_stop)
-        result = await asyncio.to_thread(testnet.emergency_stop, db)
-        result["automatic_order_lists"] = auto_result
-        db.log_event("testnet_kill_switch", "Persistent Testnet order lock activated", {
-            "canceled_count": len(result["canceled_client_order_ids"]),
-            "unresolved_count": len(result["unresolved_client_order_ids"]),
-            "auto_canceled_count": len(auto_result["canceled_order_lists"]),
-            "auto_unresolved_count": len(auto_result["unresolved_order_lists"])})
-        return result
+        async with automation_control_lock:
+            app.state.auto_testnet_enabled = False
+            db.set_setting("testnet_auto_trading_enabled", False)
+            auto_result = await asyncio.to_thread(testnet_auto.emergency_stop)
+            result = await asyncio.to_thread(testnet.emergency_stop, db)
+            result["automatic_order_lists"] = auto_result
+            db.log_event("testnet_kill_switch", "Persistent Testnet order lock activated", {
+                "canceled_count": len(result["canceled_client_order_ids"]),
+                "unresolved_count": len(result["unresolved_client_order_ids"]),
+                "auto_canceled_count": len(auto_result["canceled_order_lists"]),
+                "auto_unresolved_count": len(auto_result["unresolved_order_lists"])})
+            return result
 
     @app.post("/api/testnet/kill-switch/reset")
     async def reset_testnet_kill_switch(payload: TestnetKillSwitchResetRequest) -> dict[str, Any]:
-        unresolved = db.count_open_testnet_orders()
-        if unresolved:
-            raise HTTPException(status_code=409, detail=(
-                f"Cannot reset: {unresolved} open or unresolved Testnet order(s) remain. "
-                "Reconcile or cancel them first."
-            ))
-        db.set_setting("testnet_order_halted", False)
-        db.log_event("testnet_kill_switch_reset", "Testnet order lock reset after ledger reconciliation", {})
-        return {"halted": False, "order_execution_enabled": testnet.status(halted=False)["order_execution_enabled"],
-                "live_trading_enabled": False}
+        async with automation_control_lock:
+            # Resetting the order lock must never silently resume automatic entries.
+            app.state.auto_testnet_enabled = False
+            db.set_setting("testnet_auto_trading_enabled", False)
+            unresolved = db.count_open_testnet_orders()
+            if unresolved:
+                raise HTTPException(status_code=409, detail=(
+                    f"Cannot reset: {unresolved} open or unresolved Testnet order(s) remain. "
+                    "Reconcile or cancel them first."
+                ))
+            db.set_setting("testnet_order_halted", False)
+            db.log_event("testnet_kill_switch_reset", "Testnet order lock reset after ledger reconciliation; automation remains OFF", {})
+            return {"halted": False, "order_execution_enabled": testnet.status(halted=False)["order_execution_enabled"],
+                    "automatic_testnet_trading_enabled": False, "live_trading_enabled": False}
 
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
@@ -514,22 +522,23 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.put("/api/automation/paper-trading")
     async def set_paper_trading_automation(payload: ScanAutomationRequest) -> dict[str, Any]:
-        app.state.auto_paper_enabled = bool(payload.enabled)
-        db.set_setting("auto_paper_enabled", app.state.auto_paper_enabled)
-        cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
-        if payload.enabled or cex_positions_open:
-            # Auto-entry requires the scheduler even when no positions exist yet.
-            # Open positions also require read-only exit monitoring after entries are disabled.
-            app.state.auto_scan_enabled = True
-        # Explicit user opt-in persists across restarts; explicit OFF remains OFF.
-        # When disabling entries, read-only exit monitoring stays enabled as needed.
-        db.log_event("auto_paper_trading", "Automatic paper trading switched", {
-            "enabled": bool(payload.enabled), "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
-            "live_trading_enabled": False})
-        result = await paper_trading_automation_status()
-        result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
-        result["exit_monitoring_required"] = cex_positions_open and not payload.enabled
-        return result
+        async with automation_control_lock:
+            app.state.auto_paper_enabled = bool(payload.enabled)
+            db.set_setting("auto_paper_enabled", app.state.auto_paper_enabled)
+            cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
+            if payload.enabled or cex_positions_open:
+                # Auto-entry requires the scheduler even when no positions exist yet.
+                # Open positions also require read-only exit monitoring after entries are disabled.
+                app.state.auto_scan_enabled = True
+            # Explicit user opt-in persists across restarts; explicit OFF remains OFF.
+            # When disabling entries, read-only exit monitoring stays enabled as needed.
+            db.log_event("auto_paper_trading", "Automatic paper trading switched", {
+                "enabled": bool(payload.enabled), "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
+                "live_trading_enabled": False})
+            result = await paper_trading_automation_status()
+            result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
+            result["exit_monitoring_required"] = cex_positions_open and not payload.enabled
+            return result
 
     @app.get("/api/automation/testnet-trading")
     async def testnet_auto_trading_status() -> dict[str, Any]:
@@ -540,29 +549,30 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.put("/api/automation/testnet-trading")
     async def set_testnet_auto_trading(payload: ScanAutomationRequest) -> dict[str, Any]:
-        requested = bool(payload.enabled)
-        halted = bool(db.get_setting("testnet_order_halted", False))
-        state = testnet.status(halted=halted)
-        if requested and halted:
-            raise HTTPException(status_code=409, detail="Testnet emergency lock is active. Reconcile and reset it before enabling automation.")
-        if requested and not state["order_execution_enabled"]:
-            raise HTTPException(status_code=409, detail=(
-                "Testnet auto-trading is locked. Enable the isolated Testnet connector, configure Testnet API credentials, "
-                "and explicitly enable the Testnet order gate first."
-            ))
-        app.state.auto_testnet_enabled = requested
-        db.set_setting("testnet_auto_trading_enabled", requested)
-        if (requested or db.count_open_testnet_auto_orders() > 0
-                or db.testnet_auto_unaccounted_closed_count() > 0):
-            app.state.auto_scan_enabled = True
-        db.log_event("testnet_auto_trading", "Automatic strategy-driven Binance Testnet trading switched", {
-            "enabled": requested, "mode": "testnet_only", "live_trading_enabled": False,
-        })
-        result = testnet_auto.status(requested)
-        result["scan_interval_seconds"] = max(30, cfg.scan_interval_seconds)
-        result["active_order_lists"] = db.list_active_testnet_auto_orders()
-        result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
-        return result
+        async with automation_control_lock:
+            requested = bool(payload.enabled)
+            halted = bool(db.get_setting("testnet_order_halted", False))
+            state = testnet.status(halted=halted)
+            if requested and halted:
+                raise HTTPException(status_code=409, detail="Testnet emergency lock is active. Reconcile and reset it before enabling automation.")
+            if requested and not state["order_execution_enabled"]:
+                raise HTTPException(status_code=409, detail=(
+                    "Testnet auto-trading is locked. Enable the isolated Testnet connector, configure Testnet API credentials, "
+                    "and explicitly enable the Testnet order gate first."
+                ))
+            app.state.auto_testnet_enabled = requested
+            db.set_setting("testnet_auto_trading_enabled", requested)
+            if (requested or db.count_open_testnet_auto_orders() > 0
+                    or db.testnet_auto_unaccounted_closed_count() > 0):
+                app.state.auto_scan_enabled = True
+            db.log_event("testnet_auto_trading", "Automatic strategy-driven Binance Testnet trading switched", {
+                "enabled": requested, "mode": "testnet_only", "live_trading_enabled": False,
+            })
+            result = testnet_auto.status(requested)
+            result["scan_interval_seconds"] = max(30, cfg.scan_interval_seconds)
+            result["active_order_lists"] = db.list_active_testnet_auto_orders()
+            result["automatic_scan_enabled"] = bool(app.state.auto_scan_enabled)
+            return result
 
     @app.get("/api/testnet/auto-performance")
     async def testnet_auto_performance() -> dict[str, Any]:
@@ -608,29 +618,30 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.post("/api/automation/kill-switch")
     async def kill_switch() -> dict[str, Any]:
-        app.state.auto_paper_enabled = False
-        db.set_setting("auto_paper_enabled", False)
-        app.state.auto_testnet_enabled = False
-        db.set_setting("testnet_auto_trading_enabled", False)
-        # Stop all new automatic entries, but preserve exchange-native exits for any
-        # filled Testnet position and keep scanning active for all outstanding exposure.
-        testnet_auto_stop = await asyncio.to_thread(testnet_auto.emergency_stop)
-        testnet_order_stop = await asyncio.to_thread(testnet.emergency_stop, db)
-        cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
-        testnet_orders_open = db.count_open_testnet_auto_orders() > 0
-        app.state.auto_scan_enabled = bool(cex_positions_open or testnet_orders_open)
-        db.log_event("kill_switch", "Global emergency new-entry stop activated", {
-            "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
-            "testnet_protected_order_lists": len(testnet_auto_stop["protection_preserved_for_filled_entries"]),
-            "testnet_unresolved_order_lists": len(testnet_auto_stop["unresolved_order_lists"]),
-            "live_trading_enabled": False})
-        return {"stopped": True, "automatic_paper_trading_enabled": False,
-                "automatic_testnet_trading_enabled": False,
-                "automatic_scan_enabled": bool(app.state.auto_scan_enabled),
+        async with automation_control_lock:
+            app.state.auto_paper_enabled = False
+            db.set_setting("auto_paper_enabled", False)
+            app.state.auto_testnet_enabled = False
+            db.set_setting("testnet_auto_trading_enabled", False)
+            # Stop all new automatic entries, but preserve exchange-native exits for any
+            # filled Testnet position and keep scanning active for all outstanding exposure.
+            testnet_auto_stop = await asyncio.to_thread(testnet_auto.emergency_stop)
+            testnet_order_stop = await asyncio.to_thread(testnet.emergency_stop, db)
+            cex_positions_open = any(t.get("engine") == "multi_crypto" for t in db.open_trades())
+            testnet_orders_open = db.count_open_testnet_auto_orders() > 0
+            app.state.auto_scan_enabled = bool(cex_positions_open or testnet_orders_open)
+            db.log_event("kill_switch", "Global emergency new-entry stop activated", {
                 "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
-                "testnet_automatic_orders": testnet_auto_stop,
-                "testnet_manual_orders": testnet_order_stop,
-                "live_trading_enabled": False}
+                "testnet_protected_order_lists": len(testnet_auto_stop["protection_preserved_for_filled_entries"]),
+                "testnet_unresolved_order_lists": len(testnet_auto_stop["unresolved_order_lists"]),
+                "live_trading_enabled": False})
+            return {"stopped": True, "automatic_paper_trading_enabled": False,
+                    "automatic_testnet_trading_enabled": False,
+                    "automatic_scan_enabled": bool(app.state.auto_scan_enabled),
+                    "exit_monitoring_kept_on": bool(app.state.auto_scan_enabled),
+                    "testnet_automatic_orders": testnet_auto_stop,
+                    "testnet_manual_orders": testnet_order_stop,
+                    "live_trading_enabled": False}
 
     @app.post("/api/paper/orders")
     async def paper_order(payload: PaperOrderRequest) -> dict[str, Any]:
