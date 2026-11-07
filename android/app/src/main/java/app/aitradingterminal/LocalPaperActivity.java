@@ -98,7 +98,7 @@ public final class LocalPaperActivity extends Activity {
             int code=c.getResponseCode(); if(code!=200) throw new IllegalStateException("Market provider HTTP "+code);
             StringBuilder s=new StringBuilder(); try(BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream()))) {String line;while((line=r.readLine())!=null)s.append(line);}
             JSONArray arr=new JSONArray(s.toString()); List<Candle> out=new ArrayList<>();
-            for(int i=0;i<arr.length();i++){JSONArray x=arr.getJSONArray(i); double o=x.getDouble(1),h=x.getDouble(2),l=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5); if(o>0&&h>=l&&l>0&&cl>0&&vol>=0)out.add(new Candle(o,h,l,cl,vol));}
+            for(int i=0;i<arr.length();i++){JSONArray x=arr.getJSONArray(i); long closeTime=x.getLong(6); double o=x.getDouble(1),h=x.getDouble(2),lo=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5); if(closeTime<=System.currentTimeMillis()&&o>0&&h>=lo&&lo>0&&cl>0&&vol>=0)out.add(new Candle(o,h,lo,cl,vol));}
             return out;
         } finally {c.disconnect();}
     }
