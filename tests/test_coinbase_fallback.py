@@ -2,8 +2,6 @@ import asyncio
 import time
 from dataclasses import replace
 
-import pytest
-
 from app.services.market_data import MarketDataService
 from app.settings import settings
 
