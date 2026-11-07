@@ -79,13 +79,15 @@ function addSecurityHeaders(response) {
 
 async function login(request, env) {
   const expectedUsername = env.ADMIN_USERNAME || "admin";
-  if (!env.ADMIN_PASSWORD || !env.SESSION_SECRET || env.SESSION_SECRET.length < 32) {
+  if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 16 ||
+      !env.SESSION_SECRET || env.SESSION_SECRET.length < 32) {
     return json({ error: "deployment_secrets_missing_or_invalid" }, 503);
   }
-  const length = Number(request.headers.get("content-length") || 0);
-  if (length > 4096) return json({ error: "request_too_large" }, 413);
+  let rawBody;
+  try { rawBody = await request.text(); } catch { return json({ error: "invalid_request_body" }, 400); }
+  if (encoder.encode(rawBody).byteLength > 4096) return json({ error: "request_too_large" }, 413);
   let body;
-  try { body = await request.json(); } catch { return json({ error: "invalid_json" }, 400); }
+  try { body = JSON.parse(rawBody); } catch { return json({ error: "invalid_json" }, 400); }
   const username = String(body.username || "");
   const password = String(body.password || "");
   if (username.length > 128 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
@@ -95,6 +97,10 @@ async function login(request, env) {
   if (recent.length >= 8) return json({ error: "too_many_login_attempts" }, 429);
   recent.push(now);
   loginAttempts.set(key, recent);
+  if (loginAttempts.size > 1000) {
+    const oldestKey = loginAttempts.keys().next().value;
+    if (oldestKey !== undefined && oldestKey !== key) loginAttempts.delete(oldestKey);
+  }
   const usernameMatch = equalBytes(await sha256(username), await sha256(expectedUsername));
   const passwordMatch = equalBytes(await sha256(password), await sha256(env.ADMIN_PASSWORD));
   if (!usernameMatch || !passwordMatch) return json({ error: "invalid_credentials" }, 401);
