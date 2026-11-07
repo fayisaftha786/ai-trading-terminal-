@@ -2,6 +2,8 @@ package app.aitradingterminal;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.view.Gravity;
@@ -16,11 +18,14 @@ import android.database.sqlite.SQLiteOpenHelper;
 import android.content.ContentValues;
 import android.content.Context;
 import org.json.JSONArray;
+import org.json.JSONObject;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.TimeZone;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
@@ -35,11 +40,23 @@ public final class LocalPaperActivity extends Activity {
     private static final int BG=0xFF080D1A, CARD=0xFF111A2E, TEXT=0xFFF7FAFF, MUTED=0xFFA2B0CA, ACCENT=0xFF8B7CFF;
     private static final long HOUR_MS=60L*60L*1000L;
     private static final long MAX_CANDLE_AGE_MS=2L*HOUR_MS;
+    private static final long FOUR_HOURS_MS=4L*HOUR_MS;
+    private static final long AUTO_REFRESH_MS=5L*60L*1000L;
+    private static final int MAX_AUTO_ENTRIES_PER_UTC_DAY=3;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
+    private final Handler mainHandler=new Handler(Looper.getMainLooper());
+    private final Runnable autoRefreshTask=new Runnable(){
+        @Override public void run(){
+            if(db!=null&&!isFinishing()&&db.isAutoEnabled()){
+                refreshMarket();
+                mainHandler.postDelayed(this,AUTO_REFRESH_MS);
+            }
+        }
+    };
     private LocalDb db;
     private LinearLayout body;
     private TextView status, price, wallet, analysis, history;
-    private Button openButton, closeButton, stopButton;
+    private Button openButton, closeButton, stopButton, autoButton;
     private volatile List<Candle> candles=new ArrayList<>();
     private volatile double lastPrice=0;
     private volatile boolean marketLive=false;
@@ -59,7 +76,10 @@ public final class LocalPaperActivity extends Activity {
         wallet=label("",14,true,TEXT); body.addView(card(wallet));
         Button refresh=button("REFRESH MARKET + RUN 12 DIAGNOSTICS"); body.addView(refresh);
         refresh.setOnClickListener(v->refreshMarket());
-        openButton=button("OPEN PAPER POSITION · $100"); body.addView(openButton);
+        autoButton=button(db.isAutoEnabled()?"AUTO DEMO: ON · FOREGROUND ONLY":"AUTO DEMO: OFF");
+        body.addView(autoButton);
+        autoButton.setOnClickListener(v->toggleAutoDemo());
+        openButton=button("MANUAL PAPER ENTRY · $100"); body.addView(openButton);
         openButton.setOnClickListener(v->openPaper());
         closeButton=button("CLOSE PAPER POSITION"); body.addView(closeButton);
         closeButton.setOnClickListener(v->closePaper());
@@ -73,7 +93,7 @@ public final class LocalPaperActivity extends Activity {
             updateControls();
         });
         body.addView(label("PAPER ASSUMPTIONS",12,true,ACCENT));
-        body.addView(card(label("$1,000 starting virtual cash · $100 fixed position · 0.10% fee per side · 0.05% slippage per fill · 2% stop-loss · 4% take-profit. Costs are estimates, not exchange fills.",12,false,MUTED)));
+        body.addView(card(label("$1,000 virtual capital · $100 fixed position · 0.10% fee + 0.05% slippage per side · 2% SL / 4% TP. AUTO DEMO is opt-in, paper-only and refreshes every 5 minutes while this screen stays in the foreground.",12,false,MUTED)));
         history=label("No paper trades yet.",12,false,TEXT); body.addView(card(history));
         analysis=label("12-worker diagnostics will appear here.\nNews sentiment is unavailable without a connected provider.",13,false,TEXT);
         body.addView(card(analysis));
@@ -84,26 +104,76 @@ public final class LocalPaperActivity extends Activity {
         refreshMarket();
     }
 
+    private void toggleAutoDemo() {
+        boolean enabled=!db.isAutoEnabled();
+        db.setAutoEnabled(enabled);
+        updateAutoButton();
+        if(enabled) {
+            status.setText("AUTO DEMO enabled — entries require fresh 1h/4h agreement, spread, depth, liquidity and risk checks. Foreground only.");
+            refreshMarket();
+            mainHandler.removeCallbacks(autoRefreshTask);
+            mainHandler.postDelayed(autoRefreshTask,AUTO_REFRESH_MS);
+        } else {
+            mainHandler.removeCallbacks(autoRefreshTask);
+            status.setText("AUTO DEMO disabled — existing paper exits continue on successful market refreshes.");
+        }
+        updateControls();
+    }
+
+    private void updateAutoButton() {
+        if(autoButton!=null) autoButton.setText(db.isAutoEnabled()?"AUTO DEMO: ON · FOREGROUND ONLY":"AUTO DEMO: OFF");
+    }
+
+    @Override protected void onResume() {
+        super.onResume();
+        if(db!=null&&db.isAutoEnabled()) {
+            mainHandler.removeCallbacks(autoRefreshTask);
+            mainHandler.postDelayed(autoRefreshTask,AUTO_REFRESH_MS);
+        }
+    }
+
+    @Override protected void onPause() {
+        mainHandler.removeCallbacks(autoRefreshTask);
+        super.onPause();
+    }
+
     private void refreshMarket() {
         marketLive=false;
-        status.setText("Fetching public BTC/USDT closed candles… New entries are paused until fresh data is verified.");
+        status.setText("Fetching fresh closed 1h/4h candles, ticker, spread and top-10 order-book depth…");
         updateControls();
         io.execute(()->{
             try {
-                List<Candle> loaded=fetchCandles();
+                MarketSnapshot snapshot=fetchSnapshot();
+                List<Candle> loaded=snapshot.primary;
                 Candle latest=loaded.get(loaded.size()-1);
-                candles=loaded; lastPrice=latest.close;
+                candles=loaded;
+                lastPrice=snapshot.quote.last;
                 db.cache(loaded);
                 String automaticExit=db.evaluateExits(loaded);
-                List<String> results=analyze(loaded);
+                PaperSignal.Analysis primary=PaperSignal.analyze(toBars(loaded,HOUR_MS),24);
+                PaperSignal.Analysis higher=PaperSignal.analyze(toBars(snapshot.higher,FOUR_HOURS_MS),6);
+                PaperSignal.Decision decision=PaperSignal.assess(primary,higher,snapshot.quote,System.currentTimeMillis());
+                String automaticEntry=null;
+                if(db.isAutoEnabled()) {
+                    if(stopped) automaticEntry="BLOCKED · emergency stop active";
+                    else if(decision.eligible) automaticEntry=db.openAuto(lastPrice,latest.openTime);
+                    else automaticEntry="BLOCKED · "+decision.reason;
+                }
+                List<String> results=analyze(loaded,primary,higher,decision,snapshot.quote);
                 marketLive=true;
+                final String exitResult=automaticExit;
+                final String entryResult=automaticEntry;
                 runOnUiThread(()->{
                     price.setText(String.format(Locale.US,"BTC/USDT  $%,.2f",lastPrice));
-                    status.setText("LIVE CLOSED-CANDLE DATA · "+loaded.size()+" candles · newest close "+ageText(System.currentTimeMillis()-latest.closeTime));
+                    String autoStatus=db.isAutoEnabled()?" · AUTO DEMO ON (foreground)":" · AUTO DEMO OFF";
+                    status.setText("LIVE CLOSED DATA · 1h "+loaded.size()+" / 4h "+snapshot.higher.size()+
+                            " bars · last close "+ageText(System.currentTimeMillis()-latest.closeTime)+autoStatus);
                     analysis.setText(String.join("\n\n",results));
-                    if(automaticExit!=null) toast("Paper "+automaticExit+" executed from a closed candle");
+                    if(exitResult!=null) toast("Paper "+exitResult+" executed from a closed candle");
+                    if("OPENED".equals(entryResult)) toast("AUTO DEMO opened one virtual $100 BTC position; no real order sent");
                     updateWallet();
                     updateControls();
+                    updateAutoButton();
                 });
             } catch(Exception ex) {
                 marketLive=false;
@@ -113,13 +183,13 @@ public final class LocalPaperActivity extends Activity {
                     long age=System.currentTimeMillis()-cached.get(cached.size()-1).closeTime;
                     runOnUiThread(()->{
                         price.setText(String.format(Locale.US,"BTC/USDT  $%,.2f (CACHED)",lastPrice));
-                        status.setText("NETWORK / DATA CHECK FAILED — cached mark age "+ageText(age)+". New entries and automatic exits are paused. "+ex.getMessage());
+                        status.setText("NETWORK / MARKET CHECK FAILED — cached mark age "+ageText(age)+". AUTO DEMO entries and automatic exits are paused. "+ex.getMessage());
                         analysis.setText(String.join("\n\n",analyze(cached)));
                         updateWallet();
                         updateControls();
                     });
                 } else runOnUiThread(()->{
-                    status.setText("Market data unavailable and no timestamped cache exists: "+ex.getMessage());
+                    status.setText("Market data unavailable; auto entries fail closed: "+ex.getMessage());
                     updateWallet();
                     updateControls();
                 });
@@ -127,65 +197,125 @@ public final class LocalPaperActivity extends Activity {
         });
     }
 
-    private List<Candle> fetchCandles() throws Exception {
-        URL url=new URL("https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1h&limit=200");
-        HttpURLConnection c=(HttpURLConnection)url.openConnection();
-        c.setConnectTimeout(9000); c.setReadTimeout(12000); c.setRequestMethod("GET"); c.setRequestProperty("Accept","application/json");
-        try {
-            int code=c.getResponseCode(); if(code!=200) throw new IllegalStateException("Market provider HTTP "+code);
-            StringBuilder s=new StringBuilder();
-            try(BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream()))) {String line;while((line=r.readLine())!=null)s.append(line);}
-            JSONArray arr=new JSONArray(s.toString()); List<Candle> out=new ArrayList<>();
-            long now=System.currentTimeMillis(), previousOpen=Long.MIN_VALUE;
-            for(int i=0;i<arr.length();i++) {
-                JSONArray x=arr.getJSONArray(i);
-                long openTime=x.getLong(0), closeTime=x.getLong(6);
-                if(closeTime>=now) continue; // ignore the currently forming candle
-                double o=x.getDouble(1),h=x.getDouble(2),lo=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5);
-                if(!finitePositive(o)||!finitePositive(h)||!finitePositive(lo)||!finitePositive(cl)||
-                        !Double.isFinite(vol)||vol<0||h<Math.max(o,Math.max(lo,cl))||lo>Math.min(o,Math.min(h,cl))||
-                        closeTime<openTime||closeTime-openTime>=HOUR_MS) {
-                    throw new IllegalStateException("Malformed OHLCV candle rejected");
-                }
-                if(previousOpen!=Long.MIN_VALUE && openTime-previousOpen!=HOUR_MS) {
-                    throw new IllegalStateException("Candle history has a gap or duplicate; refusing unsafe analysis");
-                }
-                out.add(new Candle(openTime,closeTime,o,h,lo,cl,vol));
-                previousOpen=openTime;
+    private MarketSnapshot fetchSnapshot() throws Exception {
+        List<Candle> primary=fetchCandles("1h",200,HOUR_MS,MAX_CANDLE_AGE_MS);
+        List<Candle> higher=fetchCandles("4h",180,FOUR_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS);
+        PaperSignal.Quote quote=fetchQuote();
+        return new MarketSnapshot(primary,higher,quote);
+    }
+
+    private List<Candle> fetchCandles(String interval,int limit,long intervalMs,long maxAgeMs) throws Exception {
+        String endpoint="https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval="+interval+"&limit="+limit;
+        JSONArray arr=new JSONArray(httpGet(endpoint));
+        List<Candle> out=new ArrayList<>();
+        long now=System.currentTimeMillis(), previousOpen=Long.MIN_VALUE;
+        for(int i=0;i<arr.length();i++) {
+            JSONArray x=arr.getJSONArray(i);
+            long openTime=x.getLong(0), closeTime=x.getLong(6);
+            if(closeTime>=now) continue; // ignore the currently forming candle
+            double o=x.getDouble(1),h=x.getDouble(2),lo=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5);
+            if(!finitePositive(o)||!finitePositive(h)||!finitePositive(lo)||!finitePositive(cl)||
+                    !Double.isFinite(vol)||vol<0||h<Math.max(o,Math.max(lo,cl))||lo>Math.min(o,Math.min(h,cl))||
+                    closeTime<openTime||Math.abs((closeTime-openTime+1L)-intervalMs)>1L) {
+                throw new IllegalStateException("Malformed "+interval+" OHLCV candle rejected");
             }
-            if(out.size()<40) throw new IllegalStateException("Not enough valid closed candles");
-            long age=now-out.get(out.size()-1).closeTime;
-            if(age<0||age>MAX_CANDLE_AGE_MS) throw new IllegalStateException("Latest closed candle is stale ("+ageText(age)+")");
-            return out;
+            if(previousOpen!=Long.MIN_VALUE && openTime-previousOpen!=intervalMs) {
+                throw new IllegalStateException(interval+" candle history has a gap or duplicate");
+            }
+            out.add(new Candle(openTime,closeTime,o,h,lo,cl,vol));
+            previousOpen=openTime;
+        }
+        if(out.size()<PaperSignal.MIN_HISTORY) throw new IllegalStateException("At least "+PaperSignal.MIN_HISTORY+" closed "+interval+" candles are required");
+        long age=now-out.get(out.size()-1).closeTime;
+        if(age<0||age>maxAgeMs) throw new IllegalStateException("Latest "+interval+" closed candle is stale ("+ageText(age)+")");
+        return out;
+    }
+
+    private String httpGet(String endpoint) throws Exception {
+        HttpURLConnection c=(HttpURLConnection)new URL(endpoint).openConnection();
+        c.setConnectTimeout(9000); c.setReadTimeout(12000); c.setRequestMethod("GET");
+        c.setRequestProperty("Accept","application/json");
+        try {
+            int code=c.getResponseCode();
+            if(code!=200) throw new IllegalStateException("Market provider HTTP "+code);
+            StringBuilder s=new StringBuilder();
+            try(BufferedReader r=new BufferedReader(new InputStreamReader(c.getInputStream()))) {
+                String line; while((line=r.readLine())!=null)s.append(line);
+            }
+            return s.toString();
         } finally {c.disconnect();}
+    }
+
+    private PaperSignal.Quote fetchQuote() throws Exception {
+        JSONObject book=new JSONObject(httpGet("https://api.binance.com/api/v3/ticker/bookTicker?symbol=BTCUSDT"));
+        long bookRetrievedAt=System.currentTimeMillis();
+        JSONObject depth=new JSONObject(httpGet("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=10"));
+        double bidDepth=depthUsd(depth.getJSONArray("bids"));
+        double askDepth=depthUsd(depth.getJSONArray("asks"));
+        long depthRetrievedAt=System.currentTimeMillis();
+        JSONObject ticker=new JSONObject(httpGet("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"));
+        long tickerStamp=ticker.getLong("closeTime");
+        return new PaperSignal.Quote(ticker.getDouble("lastPrice"),
+                book.getDouble("bidPrice"),book.getDouble("askPrice"),
+                bidDepth,askDepth,ticker.getDouble("quoteVolume"),tickerStamp,depthRetrievedAt);
+    }
+
+    private double depthUsd(JSONArray rows) throws Exception {
+        double total=0;
+        for(int i=0;i<Math.min(rows.length(),10);i++) {
+            JSONArray level=rows.getJSONArray(i);
+            double price=level.getDouble(0),quantity=level.getDouble(1);
+            if(!finitePositive(price)||!Double.isFinite(quantity)||quantity<0)
+                throw new IllegalStateException("Invalid order-book depth value");
+            total+=price*quantity;
+        }
+        if(!Double.isFinite(total)) throw new IllegalStateException("Non-finite order-book depth");
+        return total;
+    }
+
+    private List<PaperSignal.Bar> toBars(List<Candle> source,long intervalMs) {
+        List<PaperSignal.Bar> out=new ArrayList<>();
+        for(Candle c:source) out.add(new PaperSignal.Bar(c.openTime,intervalMs,c.open,c.high,c.low,c.close,c.volume));
+        return out;
     }
 
     private boolean finitePositive(double v){return Double.isFinite(v)&&v>0;}
     private String ageText(long age){if(age<0)return "future timestamp";return String.format(Locale.US,"%.0f min",age/60000.0);}
 
+
     private List<String> analyze(List<Candle> data) {
+        return analyze(data,null,null,null,null);
+    }
+
+    private List<String> analyze(List<Candle> data,PaperSignal.Analysis primary,
+                                 PaperSignal.Analysis higher,PaperSignal.Decision decision,
+                                 PaperSignal.Quote quote) {
         List<String> out=new ArrayList<>(); int n=data.size(); Candle z=data.get(n-1);
         double emaFast=ema(data,12), emaSlow=ema(data,26), rsi=rsi(data,14), atr=atr(data,14), volNow=0,volPrev=0;
-        for(int i=n-20;i<n-1;i++) volNow+=data.get(i).volume; for(int i=n-40;i<n-20;i++)volPrev+=data.get(i).volume;
+        for(int i=n-20;i<n-1;i++) volNow+=data.get(i).volume;
+        for(int i=n-40;i<n-20;i++) volPrev+=data.get(i).volume;
         double volRatio=volPrev>0?(volNow/19)/(volPrev/20):0;
-        double high=0,low=Double.MAX_VALUE; for(int i=n-21;i<n-1;i++){high=Math.max(high,data.get(i).high);low=Math.min(low,data.get(i).low);}
+        double high=0,low=Double.MAX_VALUE;
+        for(int i=n-21;i<n-1;i++){high=Math.max(high,data.get(i).high);low=Math.min(low,data.get(i).low);}
         int positive=0,negative=0;
         String trend=emaFast>emaSlow?"Bullish":"Bearish"; if(emaFast>emaSlow)positive++;else negative++;
         String momentum=rsi>=55?"Positive":rsi<=45?"Negative":"Neutral";if(rsi>=55)positive++;else if(rsi<=45)negative++;
-        out.add(worker("1. Market data integrity", n>=60?"PASS — "+n+" contiguous closed candles":"LIMITED — history short"));
+        out.add(worker("1. Market data integrity", n>=PaperSignal.MIN_HISTORY?"PASS — contiguous closed candles":"LIMITED — history short"));
         out.add(worker("2. Trend analyst",trend+" · EMA12 "+fmt(emaFast)+" / EMA26 "+fmt(emaSlow)));
         out.add(worker("3. Momentum analyst",momentum+" · RSI14 "+fmt(rsi)));
         out.add(worker("4. Volume analyst","20-bar relative volume "+fmt(volRatio)+"x"));
-        out.add(worker("5. Multi-timeframe analyst","UNAVAILABLE — higher timeframe not yet fetched; no agreement assumed"));
+        out.add(worker("5. Multi-timeframe analyst",higher==null?"UNAVAILABLE — higher timeframe not loaded":"1h "+(primary==null?"?":primary.regime)+" · 4h "+higher.regime));
         out.add(worker("6. Breakout & range analyst",z.close>high?"Above prior 20-bar high":z.close<low?"Below prior 20-bar low":"Inside prior 20-bar range"));
         out.add(worker("7. Volatility analyst","ATR14 "+fmt(atr)+" · "+fmt(atr/z.close*100)+"% of price"));
         out.add(worker("8. News & sentiment","UNAVAILABLE — no licensed news provider configured"));
-        out.add(worker("9. Strategy reviewer",positive>negative?"Bullish diagnostics lead":negative>positive?"Bearish diagnostics lead":"Mixed diagnostics"));
+        out.add(worker("9. Strategy reviewer",primary==null?"LOCAL DIAGNOSTIC ONLY":primary.signal+" · score "+primary.score+" · "+primary.reason));
         out.add(worker("10. Risk guard",stopped?"BLOCKED — emergency stop active":"PAPER ONLY — live execution disabled"));
-        out.add(worker("11. Research readiness",n>=100?"READY for local historical review":"LIMITED — collect more history"));
-        out.add(worker("12. Portfolio monitor",db.openCount()+" open local paper position(s) · fee-aware ledger · entries never sent to exchange"));
+        out.add(worker("11. Execution-quality gate",decision==null?"NOT EVALUATED":decision.eligible?"PASS · spread "+fmt(decision.spreadBps)+" bps · depth/liquidity verified":"BLOCK · "+decision.reason+(quote==null?"":" · spread "+fmt(decision.spreadBps)+" bps")));
+        out.add(worker("12. Portfolio monitor",db.openCount()+" open local paper position(s) · fee-aware ledger · no exchange orders"));
         return out;
     }
+
+
     private String worker(String name,String result){return name+"\n"+result;}
     private double ema(List<Candle>d,int p){double a=2.0/(p+1),v=d.get(0).close;for(int i=1;i<d.size();i++)v=d.get(i).close*a+v*(1-a);return v;}
     private double rsi(List<Candle>d,int p){double g=0,l=0;for(int i=d.size()-p;i<d.size();i++){double x=d.get(i).close-d.get(i-1).close;if(x>0)g+=x;else l-=x;}if(l==0)return 100;return 100-100/(1+g/l);}
@@ -222,6 +352,7 @@ public final class LocalPaperActivity extends Activity {
         if(openButton==null)return;
         openButton.setEnabled(marketLive&&!stopped&&lastPrice>0&&db.openCount()==0&&db.availableCash()>=PaperMath.POSITION_NOTIONAL_USD*(1+PaperMath.FEE_RATE));
         closeButton.setEnabled(lastPrice>0&&db.openCount()>0);
+        updateAutoButton();
     }
     private TextView label(String s,int size,boolean bold,int color){TextView t=new TextView(this);t.setText(s);t.setTextSize(size);t.setTextColor(color);if(bold)t.setTypeface(Typeface.DEFAULT,Typeface.BOLD);t.setPadding(0,dp(8),0,dp(8));return t;}
     private android.view.View card(TextView t){LinearLayout box=new LinearLayout(this);box.setPadding(dp(14),dp(10),dp(14),dp(10));box.setBackgroundColor(CARD);box.addView(t);LinearLayout.LayoutParams p=new LinearLayout.LayoutParams(-1,-2);p.topMargin=dp(10);box.setLayoutParams(p);return box;}
@@ -229,11 +360,16 @@ public final class LocalPaperActivity extends Activity {
     private int dp(int v){return Math.round(v*getResources().getDisplayMetrics().density);}
     private String fmt(double v){return String.format(Locale.US,"%.2f",v);}
     private void toast(String s){Toast.makeText(this,s,Toast.LENGTH_SHORT).show();}
-    @Override protected void onDestroy(){io.shutdownNow();if(db!=null)db.close();super.onDestroy();}
+    @Override protected void onDestroy(){mainHandler.removeCallbacks(autoRefreshTask);io.shutdownNow();if(db!=null)db.close();super.onDestroy();}
 
     private static final class Candle {
         final long openTime,closeTime; final double open,high,low,close,volume;
         Candle(long ot,long ct,double o,double h,double l,double c,double v){openTime=ot;closeTime=ct;open=o;high=h;low=l;close=c;volume=v;}
+    }
+    private static final class MarketSnapshot {
+        final List<Candle> primary,higher;
+        final PaperSignal.Quote quote;
+        MarketSnapshot(List<Candle> p,List<Candle> h,PaperSignal.Quote q){primary=p;higher=h;quote=q;}
     }
     private static final class WalletStats {
         final double availableCash,equity,realizedPnl,unrealizedPnl,feesPaid;
