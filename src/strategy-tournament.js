@@ -187,7 +187,7 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
   const allocation = options.allocationPct;
   const finish = Math.min(endIndex - 1, bars.length - 1);
 
-  function closePosition(rawPrice, index, reason, gap = false) {
+  function closePosition(rawPrice, index, reason, conflict = false) {
     const fillPrice = rawPrice * (1 - slipRate);
     const exitNotional = position.quantity * fillPrice;
     const exitFee = exitNotional * feeRate;
@@ -195,6 +195,7 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
     const net = gross - position.entryFee - exitFee;
     equity += net;
     trades.push({
+      signal_time: new Date(position.signalTime).toISOString(),
       entry_time: new Date(position.entryTime).toISOString(),
       exit_time: new Date(bars[index].time).toISOString(),
       entry_price: Number(position.entryFill.toFixed(8)),
@@ -204,16 +205,18 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
       fees: Number((position.entryFee + exitFee).toFixed(8)),
       holdBars: index - position.entryIndex + 1,
       exit_reason: reason,
-      conservative_stop_first: Boolean(gap)
+      same_bar_stop_target_conflict_resolved_stop_first: Boolean(conflict),
+      entry_reason: position.reason
     });
     position = null;
   }
 
   for (let i = startIndex; i <= finish; i += 1) {
     const bar = bars[i];
+    const heldDuringBar = Boolean(position);
     if (position) {
       if (bar.open <= position.stop) {
-        closePosition(bar.open, i, "stop_gap", true);
+        closePosition(bar.open, i, "stop_gap");
       } else if (bar.open >= position.target) {
         closePosition(position.target, i, "target_gap");
       } else {
@@ -249,7 +252,7 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
         if (Number.isFinite(stop) && stop > 0 && Number.isFinite(target) && target > entryFill) {
           position = {
             entryFill, quantity, entryFee, stop, target,
-            entryTime: next.time, entryIndex: i + 1, reason: signal.reason
+            signalTime: bar.time, entryTime: next.time, entryIndex: i + 1, reason: signal.reason
           };
         }
       }
@@ -259,7 +262,7 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
       ? equity + (bar.close - markedPosition.entryFill) * markedPosition.quantity - markedPosition.entryFee
       : equity;
     curve.push(mark);
-    exposure.push(Boolean(markedPosition));
+    exposure.push(heldDuringBar);
   }
   if (position) closePosition(bars[finish].close, finish, "end_of_window");
   const finalEquity = equity;
@@ -322,6 +325,7 @@ export function runStrategyTournament({
       intrabar_stop_target_conflict: "stop_first",
       max_bars_in_trade: settings.maxBarsInTrade
     },
+    cash_no_trade: { net_pnl: 0, net_return_pct: 0 },
     benchmark: buyAndHold(oneHour, settings, start, finish),
     strategies: results
   };
