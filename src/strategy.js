@@ -239,6 +239,20 @@ export function analyzeTimeframe(audit) {
 export function assessCandidate({ market, primary, higher, nowMs, costs }) {
   const reject = (reason) => ({ eligible: false, reason });
   if (market?.status !== "live") return reject("market_data_unavailable");
+  if (!Number.isFinite(nowMs)) return reject("invalid_evaluation_time");
+  if (!primary || typeof primary !== "object" || !higher || typeof higher !== "object") {
+    return reject("timeframe_analysis_unavailable");
+  }
+  const timeframeMetrics = [
+    primary.score, primary.atr_pct, primary.rsi14, primary.adx14,
+    primary.plus_di14, primary.minus_di14, primary.last_closed_candle_ms,
+    higher.last_closed_candle_ms
+  ];
+  if (!timeframeMetrics.every(Number.isFinite)) return reject("timeframe_metrics_invalid");
+  if (!costs || !Number.isFinite(costs.feeBpsPerSide) || costs.feeBpsPerSide < 0 ||
+      !Number.isFinite(costs.slippageBps) || costs.slippageBps < 0) {
+    return reject("execution_cost_assumptions_invalid");
+  }
   const quoteTime = Date.parse(market.ticker_time || "");
   if (!Number.isFinite(quoteTime) || nowMs - quoteTime < -5000 || nowMs - quoteTime > 120000) {
     return reject("ticker_stale_or_timestamp_invalid");
@@ -261,8 +275,11 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
   if (quoteVolume < 1000000) return reject("quote_volume_below_1m");
   const oneHourAge = nowMs - (primary.last_closed_candle_ms + 3600000);
   const sixHourAge = nowMs - (higher.last_closed_candle_ms + 21600000);
-  if (oneHourAge < -1000 || oneHourAge > 9000000) return reject("one_hour_candle_stale");
-  if (sixHourAge < -1000 || sixHourAge > 43200000) return reject("six_hour_candle_stale");
+  // A closed 1h candle should normally be less than one hour old, and a
+  // closed 6h candle less than six hours old. Allow a modest 30m/1h margin
+  // for provider timing, but reject older analysis before considering entry.
+  if (oneHourAge < -1000 || oneHourAge > 5400000) return reject("one_hour_candle_stale");
+  if (sixHourAge < -1000 || sixHourAge > 25200000) return reject("six_hour_candle_stale");
   if (primary.signal !== "BUY_CANDIDATE" || primary.score < 75) return reject("primary_signal_not_qualified");
   if (primary.regime !== "UPTREND" || higher.regime !== "UPTREND") return reject("timeframes_not_both_uptrend");
   if (primary.atr_pct >= 5 || primary.rsi14 >= 68 || primary.adx14 < 18 ||
