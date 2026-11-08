@@ -537,6 +537,9 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
     const runtime = {
       next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
+      last_scheduled_alarm_at_ms: previousRuntime.last_scheduled_alarm_at_ms ?? null,
+      last_scheduled_scan_status: previousRuntime.last_scheduled_scan_status || "not_run",
+      last_scheduled_scan_error: previousRuntime.last_scheduled_scan_error || null,
       last_scan_at_ms: Date.now(),
       last_scan_status: marketFeed.healthy ? "completed"
         : markets.some((market) => market.status === "live") ? "partial" : "unavailable",
