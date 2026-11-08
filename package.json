@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/engine.js && node --check src/coinbase.js && node --check src/strategy.js && node --check test/strategy.test.js",
+    "check": "node --check src/index.js && node --check src/engine.js && node --check src/coinbase.js && node --check src/strategy.js && node --check test/strategy.test.js && node --check test/coinbase.test.js",
     "build": "npx --yes wrangler@4 deploy --dry-run --outdir=.wrangler-dry-run",
     "smoke": "node scripts/smoke-cloudflare-worker.mjs"
   }
