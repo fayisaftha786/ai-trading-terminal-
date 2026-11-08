@@ -69,15 +69,16 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
 4. Configure the Worker from the repository root:
    - Root directory: leave the field blank/default so Cloudflare uses the repository root
    - Build command: `npm run check && npm test`
-   - Deploy command: `npx wrangler@4 deploy`
+   - Deploy command: `npx wrangler@4 deploy --tag "$WORKERS_CI_COMMIT_SHA" --message "Git commit $WORKERS_CI_COMMIT_SHA"`
    - Worker name must remain `ai-trading-terminal`, matching `wrangler.jsonc`
+   - Workers Builds provides `WORKERS_CI_COMMIT_SHA`; this tag is exposed at runtime through `CF_VERSION_METADATA`.
    - Do not add D1, KV, R2, Queues, Containers, paid compute, or any other product. The required SQLite Durable Object is declared in `wrangler.jsonc`.
 5. Select **Save and Deploy**. The first deployment applies the SQLite Durable Object migration. A failed login before secrets are configured is expected; no trading will start.
 6. Open the new Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**. Add these two runtime secrets:
    - `ADMIN_PASSWORD`: a unique password at least 16 characters long.
    - `SESSION_SECRET`: a randomly generated secret at least 32 characters long.
    Save/deploy the Worker after adding both secrets. Do not reuse your GitHub or email password, and never send either value here. `ADMIN_USERNAME` defaults to `admin`; it can be overridden as a non-secret variable.
-7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`.
+7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `worker_version.id`, `worker_version.tag` (the Git commit SHA when deployed with the command above), and a version timestamp. Compare the tag with the repository `main` SHA before treating the new deployment as current.
 8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, local order-book response retrieval age under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
 9. Confirm the scan timestamp advances after the first alarm and again roughly every 15 minutes. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
 10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real trading and Binance Testnet remain disabled.
@@ -99,7 +100,7 @@ Cloudflare's Git integration instructions: [Workers Builds](https://developers.c
 For a trusted computer with Node.js 22+:
 ```sh
 npm install
-npx wrangler@4 deploy
+npx wrangler@4 deploy --tag "$GITHUB_SHA" --message "Git commit $GITHUB_SHA"
 npx wrangler secret put ADMIN_PASSWORD
 npx wrangler secret put SESSION_SECRET
 ```
