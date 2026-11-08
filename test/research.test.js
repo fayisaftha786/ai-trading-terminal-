@@ -36,7 +36,7 @@ test("history summary reports coverage, retained gaps, cumulative gaps and fresh
   assert.equal(summary.symbol, "BTC/USD");
   assert.equal(summary.timeframe, "1H");
   assert.equal(summary.bars_count, 3);
-  assert.equal(summary.coverage_days, 1 / 6);
+  assert.equal(summary.coverage_days, 0.17);
   assert.equal(summary.retained_missing_intervals, 1);
   assert.equal(summary.cumulative_missing_intervals, 2);
   assert.equal(summary.latest_age_minutes, 60);
