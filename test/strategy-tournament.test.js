@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { runStrategyTournament, runWalkForwardResearch } from "../src/strategy-tournament.js";
+import { runStrategyTournament, runWalkForwardResearch, resolveLongBarExit } from "../src/strategy-tournament.js";
 
 function makeSeries(count, intervalMs, start, drift = 0.02, wave = 0.8) {
   return Array.from({ length: count }, (_, index) => {
@@ -55,7 +55,7 @@ test("tournament uses next-bar fills and reports cost assumptions", () => {
 });
 
 test("walk-forward evaluation is chronological and includes a final untouched holdout", () => {
-  const oneHour = makeSeries(420, 3600000, 0, 0.03, 1.5);
+  const oneHour = makeSeries(520, 3600000, 0, 0.03, 1.5);
   const sixHour = makeSeries(100, 21600000, 0, 0.15, 2);
   const result = runWalkForwardResearch({ candles1h: oneHour, candles6h: sixHour });
   assert.equal(result.ok, true);
@@ -68,11 +68,11 @@ test("walk-forward evaluation is chronological and includes a final untouched ho
 });
 
 test("walk-forward refuses a short current archive instead of overclaiming validation", () => {
-  const oneHour = makeSeries(299, 3600000, 0);
+  const oneHour = makeSeries(499, 3600000, 0);
   const sixHour = makeSeries(80, 21600000, 0);
   const result = runWalkForwardResearch({ candles1h: oneHour, candles6h: sixHour });
   assert.equal(result.ok, false);
-  assert.equal(result.reason, "need_at_least_300_clean_1h_and_50_clean_6h_bars");
+  assert.equal(result.reason, "need_at_least_500_clean_1h_and_50_clean_6h_bars");
 });
 
 test("backtest refuses leverage-like allocation and invalid costs", () => {
@@ -84,4 +84,18 @@ test("backtest refuses leverage-like allocation and invalid costs", () => {
   });
   assert.equal(result.ok, false);
   assert.equal(result.reason, "invalid_backtest_options");
+});
+
+
+test("same-bar stop and target collision resolves to stop first", () => {
+  const result = resolveLongBarExit({
+    open: 100, high: 106, low: 94, close: 101
+  }, 95, 105);
+  assert.deepEqual(result, { price: 95, reason: "stop", conflict: true });
+  assert.deepEqual(resolveLongBarExit({
+    open: 93, high: 101, low: 92, close: 96
+  }, 95, 105), { price: 93, reason: "stop_gap", conflict: false });
+  assert.deepEqual(resolveLongBarExit({
+    open: 106, high: 108, low: 104, close: 107
+  }, 95, 105), { price: 105, reason: "target_gap", conflict: false });
 });
