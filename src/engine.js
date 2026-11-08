@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
+import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_AGE_MS = 120000;
@@ -31,7 +32,10 @@ export class TradingEngine extends DurableObject {
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms)",
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}')",
       "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL)",
-      "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)"
+      "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)",
+      "CREATE TABLE IF NOT EXISTS research_candles(exchange TEXT NOT NULL,product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,candle_open_ms INTEGER NOT NULL,open REAL NOT NULL,high REAL NOT NULL,low REAL NOT NULL,close REAL NOT NULL,volume REAL NOT NULL,received_at_ms INTEGER NOT NULL,schema_version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(exchange,product,timeframe_seconds,candle_open_ms))",
+      "CREATE INDEX IF NOT EXISTS idx_research_candles_product_time ON research_candles(product,timeframe_seconds,candle_open_ms)",
+      "CREATE TABLE IF NOT EXISTS research_history_state(product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,bars_count INTEGER NOT NULL DEFAULT 0,first_candle_ms INTEGER,last_candle_ms INTEGER,cumulative_missing_intervals INTEGER NOT NULL DEFAULT 0,last_quality_check_at_ms INTEGER,last_ingested_at_ms INTEGER,last_quality_status TEXT NOT NULL DEFAULT 'not_started',PRIMARY KEY(product,timeframe_seconds))"
     ];
     // Durable Object SQL exec expects a single statement per call.
     for (const statement of schemaStatements) this.sql.exec(statement);
@@ -102,6 +106,9 @@ export class TradingEngine extends DurableObject {
       }
       if (request.method === "GET" && url.pathname === "/api/analytics") {
         return jsonResponse(this.tradeAnalytics());
+      }
+      if (request.method === "GET" && url.pathname === "/api/research/history") {
+        return jsonResponse({ mode: "read_only", history: this.researchHistorySummary() });
       }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
@@ -202,9 +209,16 @@ export class TradingEngine extends DurableObject {
     }
     const nowMs = Date.now();
     const markets = [];
+    const candleArchives = [];
     for (const product of PRODUCTS) {
       try {
         const snapshot = await fetchProductSnapshot(product, Date.now());
+        candleArchives.push({
+          product: product.product,
+          one_hour: snapshot.one_hour_audit,
+          six_hour: snapshot.six_hour_audit,
+          received_at_ms: Date.now()
+        });
         const primary = analyzeTimeframe(snapshot.one_hour_audit);
         const higher = analyzeTimeframe(snapshot.six_hour_audit);
         // Store compact evidence only; never include hundreds of raw candles in each dashboard payload.
@@ -246,8 +260,22 @@ export class TradingEngine extends DurableObject {
         };
         markets.push(market);
       } catch (error) {
+        candleArchives.push({ product: product.product, provider_error: true, error: String(error?.message || error).slice(0, 120), received_at_ms: Date.now() });
         const failed = { symbol: product.symbol, product: product.product, status: "error", error: String(error?.message || error).slice(0, 180), fetched_at_ms: Date.now() };
         markets.push(failed);
+      }
+    }
+
+    // Research ingestion is independent of owner automation settings and can only
+    // persist validated, fully closed public candles; it never creates paper trades.
+    for (const archive of candleArchives) {
+      const checkedAt = archive.received_at_ms || Date.now();
+      if (archive.provider_error) {
+        this.markResearchHistoryUnavailable(archive.product, 3600, checkedAt);
+        this.markResearchHistoryUnavailable(archive.product, 21600, checkedAt);
+      } else {
+        this.archiveClosedCandles(archive.product, 3600, archive.one_hour, checkedAt);
+        this.archiveClosedCandles(archive.product, 21600, archive.six_hour, checkedAt);
       }
     }
 
@@ -353,6 +381,112 @@ export class TradingEngine extends DurableObject {
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
       portfolio: updatedPortfolio, live_trading_enabled: false, binance_testnet_enabled: false
     };
+  }
+
+  markResearchHistoryUnavailable(product, timeframeSeconds, checkedAtMs) {
+    this.sql.exec(
+      "INSERT INTO research_history_state(product,timeframe_seconds,bars_count,last_quality_check_at_ms,last_quality_status) " +
+      "VALUES(?,?,0,?,'provider_unavailable') ON CONFLICT(product,timeframe_seconds) DO UPDATE SET " +
+      "last_quality_check_at_ms=excluded.last_quality_check_at_ms,last_quality_status=excluded.last_quality_status",
+      product, timeframeSeconds, checkedAtMs
+    );
+  }
+
+  archiveClosedCandles(product, timeframeSeconds, audit, receivedAtMs) {
+    const intervalMs = timeframeSeconds * 1000;
+    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    const previous = this.sql.exec(
+      "SELECT * FROM research_history_state WHERE product=? AND timeframe_seconds=?",
+      product, timeframeSeconds
+    ).toArray()[0] || {};
+    if (!retentionBars || !audit?.ok || !Array.isArray(audit.rows)) {
+      const reason = !retentionBars ? "unsupported_timeframe"
+        : (audit?.issues || ["candle_audit_failed"]).slice(0, 2).join(",");
+      this.sql.exec(
+        "INSERT INTO research_history_state(product,timeframe_seconds,bars_count,last_quality_check_at_ms,last_quality_status) " +
+        "VALUES(?,?,0,?,?) ON CONFLICT(product,timeframe_seconds) DO UPDATE SET " +
+        "last_quality_check_at_ms=excluded.last_quality_check_at_ms,last_quality_status=excluded.last_quality_status",
+        product, timeframeSeconds, receivedAtMs, "audit_rejected:" + reason
+      );
+      return { stored: 0, status: "audit_rejected" };
+    }
+
+    const previousLast = Number.isFinite(Number(previous.last_candle_ms))
+      ? Number(previous.last_candle_ms) : null;
+    const newRows = selectNewClosedCandles(audit.rows, previousLast, intervalMs, receivedAtMs);
+    const gapCount = countMissingArchiveBars(previousLast, newRows, intervalMs);
+    if (gapCount === null) {
+      this.sql.exec(
+        "INSERT INTO research_history_state(product,timeframe_seconds,bars_count,last_quality_check_at_ms,last_quality_status) " +
+        "VALUES(?,?,0,?,'archive_gap_alignment_error') ON CONFLICT(product,timeframe_seconds) DO UPDATE SET " +
+        "last_quality_check_at_ms=excluded.last_quality_check_at_ms,last_quality_status=excluded.last_quality_status",
+        product, timeframeSeconds, receivedAtMs
+      );
+      return { stored: 0, status: "archive_gap_alignment_error" };
+    }
+
+    let inserted = 0;
+    const batchSize = 40;
+    for (let offset = 0; offset < newRows.length; offset += batchSize) {
+      const batch = newRows.slice(offset, offset + batchSize);
+      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
+      const values = batch.flatMap((row) => [
+        "coinbase_exchange", product, timeframeSeconds, row.time,
+        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
+      ]);
+      inserted += this.sql.exec(
+        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
+        "VALUES " + valuesSql + " RETURNING candle_open_ms",
+        ...values
+      ).toArray().length;
+    }
+
+    const latest = newRows.length ? newRows[newRows.length - 1].time : previousLast;
+    const first = Number.isFinite(Number(previous.first_candle_ms))
+      ? Number(previous.first_candle_ms) : (newRows[0]?.time ?? null);
+    let barsCount = Math.max(0, Number(previous.bars_count) || 0) + inserted;
+    const cumulativeGaps = Math.max(0, Number(previous.cumulative_missing_intervals) || 0) + gapCount;
+    let retainedFirst = first;
+
+    if (Number.isFinite(latest) && barsCount > retentionBars) {
+      const cutoff = latest - ((retentionBars - 1) * intervalMs);
+      const deleted = Number(this.sql.exec(
+        "SELECT COUNT(*) AS count FROM research_candles WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
+        product, timeframeSeconds, cutoff
+      ).toArray()[0]?.count || 0);
+      if (deleted > 0) {
+        this.sql.exec(
+          "DELETE FROM research_candles WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
+          product, timeframeSeconds, cutoff
+        );
+        barsCount = Math.max(0, barsCount - deleted);
+        retainedFirst = this.sql.exec(
+          "SELECT MIN(candle_open_ms) AS first_candle_ms FROM research_candles WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=?",
+          product, timeframeSeconds
+        ).toArray()[0]?.first_candle_ms ?? null;
+      }
+    }
+
+    this.sql.exec(
+      "INSERT INTO research_history_state(product,timeframe_seconds,bars_count,first_candle_ms,last_candle_ms,cumulative_missing_intervals,last_quality_check_at_ms,last_ingested_at_ms,last_quality_status) " +
+      "VALUES(?,?,?,?,?,?,?,?, 'clean') ON CONFLICT(product,timeframe_seconds) DO UPDATE SET " +
+      "bars_count=excluded.bars_count,first_candle_ms=excluded.first_candle_ms,last_candle_ms=excluded.last_candle_ms," +
+      "cumulative_missing_intervals=excluded.cumulative_missing_intervals,last_quality_check_at_ms=excluded.last_quality_check_at_ms," +
+      "last_ingested_at_ms=COALESCE(excluded.last_ingested_at_ms,research_history_state.last_ingested_at_ms)," +
+      "last_quality_status=excluded.last_quality_status",
+      product, timeframeSeconds, barsCount, retainedFirst, latest,
+      cumulativeGaps, receivedAtMs, inserted > 0 ? receivedAtMs : null
+    );
+    return { stored: inserted, bars_count: barsCount, cumulative_missing_intervals: cumulativeGaps, status: "clean" };
+  }
+
+  researchHistorySummary() {
+    const records = this.sql.exec(
+      "SELECT product,timeframe_seconds,bars_count,first_candle_ms,last_candle_ms,cumulative_missing_intervals," +
+      "last_quality_check_at_ms,last_ingested_at_ms,last_quality_status FROM research_history_state " +
+      "ORDER BY product,timeframe_seconds"
+    ).toArray();
+    return buildResearchHistorySummary(records, Date.now());
   }
 
   saveMarket(market, status) {
@@ -669,7 +803,7 @@ export class TradingEngine extends DurableObject {
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
       },
       automation: this.automationStatus(), portfolio, markets, trades, open_positions: openPositions,
-      runtime, analytics: this.tradeAnalytics(),
+      runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
   }
