@@ -73,6 +73,22 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)");
   }
 
+  loadResearchCandleCache(product, timeframeSeconds) {
+    return this.sql.exec(
+      "SELECT candle_open_ms AS time,open,high,low,close,volume FROM research_candles " +
+      "WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? " +
+      "ORDER BY candle_open_ms DESC LIMIT 300",
+      product, timeframeSeconds
+    ).toArray().reverse().map((row) => ({
+      time: Number(row.time),
+      open: Number(row.open),
+      high: Number(row.high),
+      low: Number(row.low),
+      close: Number(row.close),
+      volume: Number(row.volume)
+    }));
+  }
+
   async ensureAlarm() {
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm === null) {
@@ -216,7 +232,24 @@ export class TradingEngine extends DurableObject {
     const candleArchives = [];
     for (const product of PRODUCTS) {
       try {
-        const snapshot = await fetchProductSnapshot(product, Date.now());
+        const cachedCandles = {};
+        try {
+          cachedCandles.one_hour = this.loadResearchCandleCache(product.product, 3600);
+        } catch (error) {
+          this.logEvent("research_cache_read_error", "1H research cache read failed; fetching fresh candles", {
+            product: product.product, timeframe_seconds: 3600,
+            error: String(error?.message || error).slice(0, 160)
+          });
+        }
+        try {
+          cachedCandles.six_hour = this.loadResearchCandleCache(product.product, 21600);
+        } catch (error) {
+          this.logEvent("research_cache_read_error", "6H research cache read failed; fetching fresh candles", {
+            product: product.product, timeframe_seconds: 21600,
+            error: String(error?.message || error).slice(0, 160)
+          });
+        }
+        const snapshot = await fetchProductSnapshot(product, Date.now(), cachedCandles);
         candleArchives.push({
           product: product.product,
           one_hour: snapshot.one_hour_audit,
