@@ -181,10 +181,11 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
   let position = null;
   const trades = [];
   const curve = [];
+  const exposure = [];
   const feeRate = options.feeBpsPerSide / 10000;
   const slipRate = options.slippageBps / 10000;
   const allocation = options.allocationPct;
-  const finish = Math.min(endIndex, bars.length - 1);
+  const finish = Math.min(endIndex - 1, bars.length - 1);
 
   function closePosition(rawPrice, index, reason, gap = false) {
     const fillPrice = rawPrice * (1 - slipRate);
@@ -253,12 +254,19 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
         }
       }
     }
-    const mark = position ? position.quantity * bar.close + (equity - position.entryFee) : equity;
+    const markedPosition = position && position.entryIndex <= i ? position : null;
+    const mark = markedPosition
+      ? equity + (bar.close - markedPosition.entryFill) * markedPosition.quantity - markedPosition.entryFee
+      : equity;
     curve.push(mark);
+    exposure.push(Boolean(markedPosition));
   }
   if (position) closePosition(bars[finish].close, finish, "end_of_window");
   const finalEquity = equity;
-  return { ...metrics(trades, curve, initialEquity, finalEquity), trades };
+  const summary = metrics(trades, curve, initialEquity, finalEquity);
+  summary.exposure_pct = exposure.length
+    ? Number((exposure.filter(Boolean).length / exposure.length * 100).toFixed(2)) : 0;
+  return { ...summary, trades };
 }
 
 function buyAndHold(bars, options, startIndex, endIndex) {
