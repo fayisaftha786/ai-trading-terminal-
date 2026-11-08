@@ -73,6 +73,12 @@ try {
   assert.equal(dashboard.mode, "paper_only");
   assert.equal(dashboard.settings.auto_paper_enabled, false, "paper automation must default OFF");
   assert.equal(dashboard.live_trading_enabled, false);
+  assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
+  const researchHistory = await request("/api/research/history", { headers: auth });
+  assert.equal(researchHistory.status, 200, "owner research-history API must load");
+  const researchPayload = await researchHistory.json();
+  assert.equal(researchPayload.mode, "read_only");
+  assert.deepEqual(researchPayload.history, []);
 
   const enable = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
@@ -100,6 +106,8 @@ try {
   assert.match(staticHtml, /AI TRADING TERMINAL/);
   assert.match(staticHtml, /ENTRY GATE/);
   assert.match(staticHtml, /Per-market gate results are read-only diagnostics/);
+  assert.match(staticHtml, /Research data archive/);
+  assert.match(staticHtml, /id="researchHistory"/);
 
   process.stdout.write("CLOUDFLARE_LOCAL_RUNTIME_SMOKE_OK\n");
 } catch (error) {
