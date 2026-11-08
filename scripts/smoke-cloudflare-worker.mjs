@@ -58,6 +58,8 @@ try {
   assert.equal(anonymousDashboard.status, 401, "dashboard must require authentication");
   const anonymousResearch = await request("/api/research/history");
   assert.equal(anonymousResearch.status, 401, "research archive must require authentication");
+  const anonymousTournament = await request("/api/research/tournament");
+  assert.equal(anonymousTournament.status, 401, "strategy tournament must require authentication");
 
   const loginResponse = await request("/api/auth/login", {
     method: "POST",
@@ -81,6 +83,16 @@ try {
   const researchPayload = await researchHistory.json();
   assert.equal(researchPayload.mode, "read_only");
   assert.deepEqual(researchPayload.history, []);
+
+  const tournamentResponse = await request("/api/research/tournament", { headers: auth });
+  assert.equal(tournamentResponse.status, 200, "owner strategy tournament API must load");
+  const tournament = await tournamentResponse.json();
+  assert.equal(tournament.mode, "offline_research_only");
+  assert.equal(tournament.no_trading_side_effects, true);
+  assert.equal(tournament.assets.length, 3);
+  assert.ok(tournament.assets.every((asset) => asset.exploratory.ok === false));
+  const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
+  assert.equal(settingsAfterResearch.enabled, false, "research must not enable paper automation");
 
   const enable = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
@@ -110,6 +122,8 @@ try {
   assert.match(staticHtml, /Per-market gate results are read-only diagnostics/);
   assert.match(staticHtml, /Research data archive/);
   assert.match(staticHtml, /id="researchHistory"/);
+  assert.match(staticHtml, /Strategy tournament/);
+  assert.match(staticHtml, /id="runTournament"/);
 
   process.stdout.write("CLOUDFLARE_LOCAL_RUNTIME_SMOKE_OK\n");
 } catch (error) {
