@@ -71,6 +71,42 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   assert.equal(assessCandidate({ market: { ...market, ask: 101 }, primary, higher, nowMs: now, costs }).reason, "spread_too_wide");
 });
 
+test("candidate gate rejects stale timeframe candles and invalid execution assumptions", () => {
+  const now = Date.now();
+  const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
+    last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000,
+    book_retrieved_at_ms: now - 1000 };
+  const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000, atr_pct: 2, rsi14: 55,
+    adx14: 30, plus_di14: 40, minus_di14: 10 };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const costs = { feeBpsPerSide: 15, slippageBps: 10 };
+
+  assert.equal(assessCandidate({
+    market, primary: { ...primary, last_closed_candle_ms: now - 3600000 - 5400001 },
+    higher, nowMs: now, costs
+  }).reason, "one_hour_candle_stale");
+
+  assert.equal(assessCandidate({
+    market, primary,
+    higher: { ...higher, last_closed_candle_ms: now - 21600000 - 25200001 },
+    nowMs: now, costs
+  }).reason, "six_hour_candle_stale");
+
+  assert.equal(assessCandidate({
+    market, primary, higher, nowMs: now,
+    costs: { feeBpsPerSide: Number.NaN, slippageBps: 10 }
+  }).reason, "execution_cost_assumptions_invalid");
+
+  assert.equal(assessCandidate({
+    market, primary: null, higher, nowMs: now, costs
+  }).reason, "timeframe_analysis_unavailable");
+
+  assert.equal(assessCandidate({
+    market, primary: { ...primary, score: Number.NaN }, higher, nowMs: now, costs
+  }).reason, "timeframe_metrics_invalid");
+});
+
 test("candidate gate blocks signals without higher-timeframe agreement", () => {
   const now = Date.now();
   const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
