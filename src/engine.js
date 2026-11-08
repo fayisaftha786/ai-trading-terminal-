@@ -897,8 +897,8 @@ export class TradingEngine extends DurableObject {
     const lastScanAtMs = Number(runtime.last_scan_at_ms);
     const lastScanAgeMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
       ? Math.max(0, nowMs - lastScanAtMs) : null;
-    const nextAlarmAtMs = Number(runtime.next_alarm_at_ms);
-    const nextAlarmInMs = Number.isFinite(nextAlarmAtMs)
+    const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
+    const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
       ? Math.max(0, nextAlarmAtMs - nowMs) : null;
     const status = runtime.last_scan_status;
     const scannerStatus = status === "error" ? "error"
