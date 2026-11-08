@@ -33,11 +33,17 @@ This is read-only observability. It does not loosen thresholds, create trades, c
 - Keep the exact same candidate assessment for diagnostics and actual entry selection to avoid the UI claiming a different rule set from the engine.
 - Validate Worker syntax, unit suite, Wrangler dry-run and local Durable Object/auth/kill-switch smoke.
 
-### P1 — Build a durable research dataset
+### P1 — Durable research dataset (implemented in the archive branch)
 
-The current Cloud Worker does not persist its raw candle history; the market snapshot table is overwritten per symbol. It therefore cannot independently reconstruct a long historical sample from the cloud ledger.
+- A separate `research_candles` SQLite table stores validated, fully closed Coinbase OHLCV bars; market snapshots and trade ledger remain separate.
+- The composite key is exchange + product + timeframe + candle-open UTC timestamp. Inserts are idempotent, schema-versioned and batched in small SQL statements.
+- Only candles that pass the existing candle-integrity audit are archived. Active candles, malformed bars and any scan with candle gaps are rejected rather than silently repaired.
+- The archive grows incrementally: the first clean scan seeds the available provider history; later scans write only bars newer than the last stored candle. Re-fetching the same 349-bar window does not rewrite those records.
+- Retention is capped at 4,320 one-hour bars (about 180 days) and 1,440 six-hour bars (about 360 days) per product. This bounds storage and leaves ample room under the intended free SQLite budget.
+- `research_history_state` stores per-product/timeframe coverage counts, first/last candle times, cumulative missing intervals and most recent quality state. Dashboard and authenticated `GET /api/research/history` read only this compact state table; they do not scan the raw candle archive on every refresh.
+- Research ingestion does not create trades or modify the paper ledger, risk controls, automation state or real-money permissions.
 
-Add an idempotent OHLCV table keyed by exchange, product, timeframe and candle-open timestamp. Store only validated closed bars, with a schema/version marker and receive time. Upsert duplicates safely, reject revisions that break integrity, and apply retention limits consistent with the Cloudflare Free SQL quota. Keep raw market data separate from trade records so research cannot mutate the PAPER ledger.
+Coverage is not immediately a 180-day backtest: on the initial deployment it begins with the provider history already returned (currently about 349 closed bars per timeframe) and grows only as new candles close. Historical API pagination/backfill remains a later enhancement, to be added only after verifying provider limits and free-plan request budgets.
 
 ### P2 — Strategy tournament, not live strategy replacement
 
