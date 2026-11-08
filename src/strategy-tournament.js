@@ -175,6 +175,16 @@ function metrics(trades, equityCurve, initialEquity, finalEquity) {
   };
 }
 
+export function resolveLongBarExit(bar, stop, target) {
+  if (bar.open <= stop) return { price: bar.open, reason: "stop_gap", conflict: false };
+  if (bar.open >= target) return { price: target, reason: "target_gap", conflict: false };
+  const stopHit = bar.low <= stop;
+  const targetHit = bar.high >= target;
+  if (stopHit) return { price: stop, reason: "stop", conflict: targetHit };
+  if (targetHit) return { price: target, reason: "target", conflict: false };
+  return null;
+}
+
 function simulate(name, bars, featureRows, options, startIndex, endIndex) {
   const initialEquity = options.initialEquity;
   let equity = initialEquity;
@@ -215,24 +225,17 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
     const bar = bars[i];
     const heldDuringBar = Boolean(position);
     if (position) {
-      if (bar.open <= position.stop) {
-        closePosition(bar.open, i, "stop_gap");
-      } else if (bar.open >= position.target) {
-        closePosition(position.target, i, "target_gap");
+      const barExit = resolveLongBarExit(bar, position.stop, position.target);
+      if (barExit) {
+        closePosition(barExit.price, i, barExit.reason, barExit.conflict);
+      } else if (i - position.entryIndex >= options.maxBarsInTrade) {
+        closePosition(bar.close, i, "time_exit");
       } else {
-        const stopHit = bar.low <= position.stop;
-        const targetHit = Number.isFinite(position.target) && bar.high >= position.target;
-        if (stopHit) closePosition(position.stop, i, "stop", targetHit);
-        else if (targetHit) closePosition(position.target, i, "target");
-        else if (i - position.entryIndex >= options.maxBarsInTrade) {
-          closePosition(bar.close, i, "time_exit");
-        } else {
-          const currentFeature = featureRows[i];
-          if (name === "range_mean_reversion" && Number.isFinite(currentFeature.middleBand) &&
-              bar.close >= currentFeature.middleBand) {
-            if (i + 1 <= finish) closePosition(bars[i + 1].open, i + 1, "mean_reversion_exit");
-            else closePosition(bar.close, i, "end_of_window");
-          }
+        const currentFeature = featureRows[i];
+        if (name === "range_mean_reversion" && Number.isFinite(currentFeature.middleBand) &&
+            bar.close >= currentFeature.middleBand) {
+          if (i + 1 <= finish) closePosition(bars[i + 1].open, i + 1, "mean_reversion_exit");
+          else closePosition(bar.close, i, "end_of_window");
         }
       }
     }
@@ -334,14 +337,16 @@ export function runStrategyTournament({
 export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
   const oneHour = normalizeBars(candles1h, HOUR_MS);
   const sixHour = normalizeBars(candles6h, SIX_HOUR_MS);
-  if (oneHour.length < 300 || sixHour.length < 50) {
-    return { ok: false, reason: "need_at_least_300_clean_1h_and_50_clean_6h_bars",
+  if (oneHour.length < 500 || sixHour.length < 50) {
+    return { ok: false, reason: "need_at_least_500_clean_1h_and_50_clean_6h_bars",
       bars_1h: oneHour.length, bars_6h: sixHour.length };
   }
-  const firstEvaluation = 100;
+  // 50 closed 6H bars are about 300 hours of higher-timeframe warmup.
+  // Reserve at least 50 subsequent 1H bars for each of three folds and holdout.
+  const firstEvaluation = 300;
   const available = oneHour.length - firstEvaluation;
   const foldSize = Math.floor(available / 4);
-  if (foldSize < 20) return { ok: false, reason: "walk_forward_folds_too_short" };
+  if (foldSize < 50) return { ok: false, reason: "walk_forward_folds_too_short" };
   const folds = [];
   for (let index = 0; index < 4; index += 1) {
     const start = firstEvaluation + index * foldSize;
