@@ -52,8 +52,11 @@ Coverage is not immediately a 180-day backtest: on the initial deployment it beg
 - Every strategy uses the same 10% notional allocation, fee/slippage assumptions, one-position-at-a-time rule and 72-bar time exit. Allocation is capped at 25%; leverage is not modeled.
 - The report includes net P&L, net return, win rate, profit factor, expectancy, maximum drawdown, average hold and exposure, plus a cost-adjusted buy-and-hold benchmark.
 - `runWalkForwardResearch` requires at least 500 clean 1H and 50 clean 6H bars, reserves 300 1H bars for the 50-bar 6H indicator warmup, three chronological non-overlapping evaluation folds and a final untouched holdout, and repeats the full sample under 1.0x, 1.5x and 2.0x fee/slippage assumptions.
-- This module is not connected to order entry, paper automation or the dashboard. It does not select a winner, tune parameters, or approve a strategy. The first current archive (about 349 bars/timeframe) is only enough for exploratory slices, not robust evidence; a longer clean archive is still required.
-- The module is pure offline research code and is covered by deterministic tests.
+- The module is exposed through authenticated, manual `GET /api/research/tournament`; it reads at most 1,000 archived bars per timeframe/product and returns compact metrics without raw trade lists.
+- The dashboard runs it only when the owner presses **Run strategy tournament**; it is not invoked during ordinary refreshes or scheduled scans.
+- The module has no connection to order entry or paper automation. It does not select a winner, tune parameters, or approve a strategy. The current archive (about 349 bars/timeframe) can produce exploratory slices but cannot pass the 500-bar walk-forward gate.
+- OHLCV archive does not include historical spread/order-book depth. The research report explicitly identifies this limitation and uses slippage assumptions as a cost proxy; it must not be presented as exact historical execution simulation.
+- The module and authenticated read-only endpoint are covered by deterministic tests and local Durable Object smoke checks.
 
 ### P3 — Robust validation and reporting
 
