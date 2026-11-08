@@ -49,6 +49,11 @@ test("market-universe gate rejects stale and crossed quotes", () => {
   const crossed = healthyMarket("BTC/USD");
   crossed.ask = crossed.bid - 0.1;
   assert.ok(assessMarketUniverse([crossed], symbols, NOW).issues[0].reason.includes("invalid_or_crossed_quote"));
+
+  const missingBarCount = healthyMarket("BTC/USD");
+  delete missingBarCount.one_hour_audit_summary.valid_closed_bars;
+  assert.ok(assessMarketUniverse([missingBarCount], symbols, NOW).issues[0].reason.includes("1h_candle_integrity_failed"));
+
 });
 
 test("only scheduled unhealthy scans increase the consecutive failure streak", () => {
