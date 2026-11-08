@@ -45,15 +45,15 @@ This is read-only observability. It does not loosen thresholds, create trades, c
 
 Coverage is not immediately a 180-day backtest: on the initial deployment it begins with the provider history already returned (currently about 349 closed bars per timeframe) and grows only as new candles close. Historical API pagination/backfill remains a later enhancement, to be added only after verifying provider limits and free-plan request budgets.
 
-### P2 — Strategy tournament, not live strategy replacement
+### P2 — Strategy tournament (implemented as isolated offline research code)
 
-Evaluate three transparent hypotheses in a separate research path:
-
-1. Trend continuation: the current EMA/trend-confirmation baseline.
-2. Range mean reversion: only in a range regime; use volatility-scaled entry/exit rules and strict cost gates.
-3. Breakout continuation: a closed-bar range breakout requiring relative-volume confirmation and higher-timeframe context.
-
-Use identical time windows, position sizing, fees, spread/slippage stress assumptions and execution rules. Signals from candle close must fill no earlier than the next bar; when stop and target are both touched in one candle, resolve conservatively stop-first. Compare against cash/no-trade and a clearly defined buy-and-hold benchmark.
+- `src/strategy-tournament.js` evaluates three transparent hypotheses: EMA trend continuation, range-only lower-band/RSI mean reversion, and 20-bar breakout with relative-volume and closed 6H trend confirmation.
+- Signals are calculated only from already-closed bars. Entries and signal exits fill at the next 1H open; stops/targets are checked against subsequent OHLC bars, with stop-first resolution when both are touched.
+- Every strategy uses the same 10% notional allocation, fee/slippage assumptions, one-position-at-a-time rule and 72-bar time exit. Allocation is capped at 25%; leverage is not modeled.
+- The report includes net P&L, net return, win rate, profit factor, expectancy, maximum drawdown, average hold and exposure, plus a cost-adjusted buy-and-hold benchmark.
+- `runWalkForwardResearch` requires at least 300 clean 1H and 50 clean 6H bars, uses a 100-bar indicator warmup, three chronological non-overlapping evaluation folds and a final untouched holdout, and repeats the full sample under 1.0x, 1.5x and 2.0x fee/slippage assumptions.
+- This module is not connected to order entry, paper automation or the dashboard. It does not select a winner, tune parameters, or approve a strategy. The first current archive (about 349 bars/timeframe) is only enough for exploratory slices, not robust evidence; a longer clean archive is still required.
+- The module is pure offline research code and is covered by deterministic tests.
 
 ### P3 — Robust validation and reporting
 
