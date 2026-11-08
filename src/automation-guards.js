@@ -61,8 +61,8 @@ export function assessMarketUniverse(markets, expectedSymbols, nowMs = Date.now(
 
 export function advanceUnhealthyScanStreak(previousCount, source, marketFeedHealthy) {
   const previous = Number.isSafeInteger(previousCount) && previousCount > 0 ? previousCount : 0;
-  if (marketFeedHealthy) return 0;
-  return source === "scheduled" ? previous + 1 : previous;
+  if (source !== "scheduled") return previous;
+  return marketFeedHealthy ? 0 : previous + 1;
 }
 
 export function shouldHaltPaperAutomation({
