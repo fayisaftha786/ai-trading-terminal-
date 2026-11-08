@@ -30,6 +30,14 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - The 15-minute scheduler can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
 - No profit is promised. Paper results are not proof of live profitability.
 
+## Market-data and scheduler safety watchdog
+
+- PAPER auto-entry can only be enabled after a recent complete scan verifies all configured BTC/USD, ETH/USD and SOL/USD markets, fresh two-sided quotes, and at least 150 clean closed candles on both 1H and 6H for every market.
+- One market with a stale quote, a failed provider request, or a candle-integrity failure blocks the complete market universe from opening new positions. Existing exits continue to be monitored using any fresh available bid marks.
+- Three consecutive unhealthy scheduled scans latch-stop new PAPER entries. A gap of more than 45 minutes since the last healthy complete scan also latches the stop when the engine next runs. The event log records the reason.
+- A watchdog latch is not cleared automatically when Coinbase recovers. Close open paper positions, use **Reset stop lock**, run a fresh complete scan, then explicitly enable PAPER again. This avoids surprise re-entry after an extended data outage.
+- The provider's final retry response also persists its Retry-After cooldown so subsequent symbols do not immediately repeat requests while the provider is still rate-limiting the Worker.
+
 ## Default risk controls
 
 - PAPER starting equity: USD 100 of virtual funds only.
