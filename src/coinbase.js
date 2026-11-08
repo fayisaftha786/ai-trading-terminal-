@@ -3,15 +3,19 @@ import { auditCandles } from "./strategy.js";
 const BASE_URL = "https://api.exchange.coinbase.com";
 const MIN_PUBLIC_REQUEST_GAP_MS = 350;
 const MAX_RETRY_ATTEMPTS = 3;
+// Avoid sleeping through most of a scheduled scan when a provider asks for a long cooldown.
+const MAX_INLINE_COOLDOWN_WAIT_MS = 30000;
 let lastPublicRequestAt = 0;
 let publicCooldownUntilMs = 0;
 
 export function parseRetryAfterMs(value, nowMs = Date.now()) {
   if (value == null || value === "") return null;
-  const seconds = Number(value);
-  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(30000, seconds * 1000);
-  const dateMs = Date.parse(value);
-  return Number.isFinite(dateMs) ? Math.max(0, Math.min(30000, dateMs - nowMs)) : null;
+  const text = String(value).trim();
+  if (!text) return null;
+  const seconds = Number(text);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  const dateMs = Date.parse(text);
+  return Number.isFinite(dateMs) ? Math.max(0, dateMs - nowMs) : null;
 }
 export const PRODUCTS = [
   { symbol: "BTC/USD", product: "BTC-USD" },
@@ -24,6 +28,12 @@ export async function getJson(path) {
     const now = Date.now();
     const pacingWait = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (now - lastPublicRequestAt));
     const cooldownWait = Math.max(0, publicCooldownUntilMs - now);
+    if (cooldownWait > MAX_INLINE_COOLDOWN_WAIT_MS) {
+      const error = new Error("Coinbase public API cooldown active; request deferred");
+      error.status = 429;
+      error.retryAfterMs = cooldownWait;
+      throw error;
+    }
     const waitMs = Math.max(pacingWait, cooldownWait);
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
     lastPublicRequestAt = Date.now();
@@ -50,6 +60,12 @@ export async function getJson(path) {
       const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
       const backoffMs = retryAfter ?? (Math.min(8000, 1000 * (2 ** attempt)) + Math.floor(Math.random() * 250));
       publicCooldownUntilMs = Math.max(publicCooldownUntilMs, Date.now() + backoffMs);
+      if (retryAfter !== null && retryAfter > MAX_INLINE_COOLDOWN_WAIT_MS) {
+        const error = new Error("Coinbase public API rate limited; retry deferred by Retry-After");
+        error.status = 429;
+        error.retryAfterMs = retryAfter;
+        throw error;
+      }
       continue;
     }
     const error = new Error("Coinbase public API returned HTTP " + status);
