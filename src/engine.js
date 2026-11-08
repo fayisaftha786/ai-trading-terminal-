@@ -92,7 +92,16 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
       if (request.method === "GET" && url.pathname === "/api/markets") return jsonResponse({ markets: this.getMarkets() });
       if (request.method === "GET" && url.pathname === "/api/trades") {
-        return jsonResponse({ trades: this.getTrades(100), open_positions: this.getOpenTrades() });
+        const limit = Math.max(1, Math.min(100, Number.parseInt(url.searchParams.get("limit") || "50", 10) || 50));
+        const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") || "0", 10) || 0);
+        const total = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
+        return jsonResponse({
+          trades: this.getTrades(limit, offset), total, limit, offset,
+          has_more: offset + limit < total, open_positions: this.getOpenTrades()
+        });
+      }
+      if (request.method === "GET" && url.pathname === "/api/analytics") {
+        return jsonResponse(this.tradeAnalytics());
       }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
@@ -349,9 +358,86 @@ export class TradingEngine extends DurableObject {
       .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
   }
 
-  getTrades(limit = 100) {
-    return this.sql.exec("SELECT * FROM trades ORDER BY id DESC LIMIT ?", Math.max(1, Math.min(100, limit))).toArray()
+  getTrades(limit = 100, offset = 0) {
+    const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 100)));
+    const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
+    return this.sql.exec("SELECT * FROM trades ORDER BY id DESC LIMIT ? OFFSET ?", safeLimit, safeOffset).toArray()
       .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
+  }
+
+  tradeAnalytics() {
+    const totals = this.sql.exec(
+      "SELECT COUNT(*) AS total_trades, " +
+      "SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed_trades, " +
+      "SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open_trades, " +
+      "SUM(CASE WHEN status='CLOSED' AND pnl_usd>0 THEN 1 ELSE 0 END) AS wins, " +
+      "SUM(CASE WHEN status='CLOSED' AND pnl_usd<0 THEN 1 ELSE 0 END) AS losses, " +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' AND pnl_usd>0 THEN pnl_usd ELSE 0 END),0) AS gross_profit_usd, " +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' AND pnl_usd<0 THEN pnl_usd ELSE 0 END),0) AS gross_loss_signed_usd, " +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' THEN pnl_usd ELSE 0 END),0) AS net_realized_pnl_usd, " +
+      "COALESCE(SUM(fees_usd),0) AS total_fees_usd, " +
+      "AVG(CASE WHEN status='CLOSED' THEN pnl_usd END) AS expectancy_per_closed_trade_usd, " +
+      "AVG(CASE WHEN status='CLOSED' AND pnl_usd>0 THEN pnl_usd END) AS average_win_usd, " +
+      "AVG(CASE WHEN status='CLOSED' AND pnl_usd<0 THEN pnl_usd END) AS average_loss_usd, " +
+      "AVG(CASE WHEN status='CLOSED' THEN (closed_at_ms-opened_at_ms)/60000.0 END) AS average_holding_minutes " +
+      "FROM trades"
+    ).toArray()[0] || {};
+    const closed = Number(totals.closed_trades || 0);
+    const wins = Number(totals.wins || 0);
+    const grossProfit = Number(totals.gross_profit_usd || 0);
+    const grossLossAbs = Math.abs(Number(totals.gross_loss_signed_usd || 0));
+    const perSymbol = this.sql.exec(
+      "SELECT symbol, COUNT(*) AS total_trades, " +
+      "SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed_trades, " +
+      "SUM(CASE WHEN status='CLOSED' AND pnl_usd>0 THEN 1 ELSE 0 END) AS wins, " +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' THEN pnl_usd ELSE 0 END),0) AS net_pnl_usd, " +
+      "COALESCE(SUM(fees_usd),0) AS fees_usd " +
+      "FROM trades GROUP BY symbol ORDER BY symbol"
+    ).toArray();
+    const equityHistory = this.sql.exec(
+      "SELECT at_ms,equity_usd,realized_pnl_usd,unrealized_pnl_usd,open_positions,drawdown_pct " +
+      "FROM (SELECT * FROM equity_snapshots ORDER BY at_ms DESC LIMIT 200) ORDER BY at_ms ASC"
+    ).toArray();
+    const recentClosed = this.sql.exec(
+      "SELECT pnl_usd FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT 1000"
+    ).toArray();
+    let currentLossStreak = 0;
+    let longestRecentLossStreak = 0;
+    for (const row of recentClosed) {
+      if (Number(row.pnl_usd) < 0) {
+        currentLossStreak += 1;
+        longestRecentLossStreak = Math.max(longestRecentLossStreak, currentLossStreak);
+      } else {
+        currentLossStreak = 0;
+      }
+    }
+    return {
+      mode: "paper_only",
+      total_trades: Number(totals.total_trades || 0),
+      closed_trades: closed,
+      open_trades: Number(totals.open_trades || 0),
+      wins, losses: Number(totals.losses || 0),
+      win_rate_pct: closed ? Number((wins / closed * 100).toFixed(2)) : null,
+      gross_profit_usd: grossProfit,
+      gross_loss_usd: grossLossAbs,
+      profit_factor: grossLossAbs > 0 ? Number((grossProfit / grossLossAbs).toFixed(4)) : null,
+      profit_factor_unbounded: grossProfit > 0 && grossLossAbs === 0,
+      net_realized_pnl_usd: Number(totals.net_realized_pnl_usd || 0),
+      total_fees_usd: Number(totals.total_fees_usd || 0),
+      expectancy_per_closed_trade_usd: totals.expectancy_per_closed_trade_usd == null ? null : Number(totals.expectancy_per_closed_trade_usd),
+      average_win_usd: totals.average_win_usd == null ? null : Number(totals.average_win_usd),
+      average_loss_usd: totals.average_loss_usd == null ? null : Number(totals.average_loss_usd),
+      average_holding_minutes: totals.average_holding_minutes == null ? null : Number(totals.average_holding_minutes),
+      longest_loss_streak_in_latest_1000_closed: longestRecentLossStreak,
+      loss_streak_scope: "latest 1000 closed trades",
+      per_symbol: perSymbol.map((row) => ({
+        symbol: row.symbol, total_trades: Number(row.total_trades || 0),
+        closed_trades: Number(row.closed_trades || 0), wins: Number(row.wins || 0),
+        win_rate_pct: Number(row.closed_trades || 0) ? Number((Number(row.wins || 0) / Number(row.closed_trades) * 100).toFixed(2)) : null,
+        net_pnl_usd: Number(row.net_pnl_usd || 0), fees_usd: Number(row.fees_usd || 0)
+      })),
+      equity_history: equityHistory
+    };
   }
 
   parseJson(value) {
@@ -568,7 +654,8 @@ export class TradingEngine extends DurableObject {
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
       },
       automation: this.automationStatus(), portfolio, markets, trades, open_positions: openPositions,
-      runtime, recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
+      runtime, analytics: this.tradeAnalytics(),
+      recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
   }
 }
