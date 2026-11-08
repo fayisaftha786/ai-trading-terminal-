@@ -28,8 +28,10 @@ test("tournament rejects insufficient or discontinuous candle history", () => {
 });
 
 test("tournament uses next-bar fills and reports cost assumptions", () => {
-  const oneHour = makeSeries(360, 3600000, 0, 0.04, 1.2);
-  const sixHour = makeSeries(100, 21600000, 0, 0.25, 1.5);
+  const oneHour = makeSeries(420, 3600000, 0, 1, 0.2).map((bar, index) => ({
+    ...bar, volume: index > 300 ? 2200 : 1000
+  }));
+  const sixHour = makeSeries(100, 21600000, 0, 5, 0.5);
   const result = runStrategyTournament({
     candles1h: oneHour, candles6h: sixHour, startIndex: 100
   });
@@ -40,11 +42,16 @@ test("tournament uses next-bar fills and reports cost assumptions", () => {
   assert.deepEqual(Object.keys(result.strategies).sort(), [
     "breakout_continuation", "range_mean_reversion", "trend_continuation"
   ]);
+  assert.deepEqual(result.cash_no_trade, { net_pnl: 0, net_return_pct: 0 });
   for (const strategy of Object.values(result.strategies)) {
     assert.ok(Number.isFinite(strategy.net_return_pct));
     assert.ok(Number.isFinite(strategy.max_drawdown_pct));
     assert.ok(strategy.trade_count >= 0);
   }
+  const breakoutTrades = result.strategies.breakout_continuation.trades;
+  assert.ok(breakoutTrades.length > 0, "rising breakout fixture should produce trades");
+  assert.ok(Date.parse(breakoutTrades[0].entry_time) > Date.parse(breakoutTrades[0].signal_time),
+    "a signal at candle close must fill on a later bar");
 });
 
 test("walk-forward evaluation is chronological and includes a final untouched holdout", () => {
