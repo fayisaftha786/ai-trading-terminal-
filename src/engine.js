@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
+import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000;
 const MAX_QUOTE_AGE_MS = 120000;
@@ -109,6 +110,9 @@ export class TradingEngine extends DurableObject {
       }
       if (request.method === "GET" && url.pathname === "/api/research/history") {
         return jsonResponse({ mode: "read_only", history: this.researchHistorySummary() });
+      }
+      if (request.method === "GET" && url.pathname === "/api/research/tournament") {
+        return jsonResponse(this.researchTournament());
       }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
@@ -479,6 +483,80 @@ export class TradingEngine extends DurableObject {
       cumulativeGaps, receivedAtMs, inserted > 0 ? receivedAtMs : null
     );
     return { stored: inserted, bars_count: barsCount, cumulative_missing_intervals: cumulativeGaps, status: "clean" };
+  }
+
+  researchTournament() {
+    const settings = this.getState("settings") || {};
+    const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const initialEquity = Number(settings.initial_capital_usd) > 0 ? Number(settings.initial_capital_usd) : 100;
+    const assets = PRODUCTS.map(({ symbol, product }) => {
+      const loadBars = (timeframeSeconds, limit) => this.sql.exec(
+        "SELECT candle_open_ms AS time,open,high,low,close,volume FROM research_candles " +
+        "WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? " +
+        "ORDER BY candle_open_ms DESC LIMIT ?",
+        product, timeframeSeconds, limit
+      ).toArray().reverse();
+      const candles1h = loadBars(3600, 1000);
+      const candles6h = loadBars(21600, 1000);
+      const options = {
+        initialEquity,
+        allocationPct: 0.1,
+        feeBpsPerSide: risk.fee_bps_per_side,
+        slippageBps: risk.slippage_bps
+      };
+      const exploratory = runStrategyTournament({
+        candles1h, candles6h, options,
+        startIndex: 100
+      });
+      const walkForward = runWalkForwardResearch({ candles1h, candles6h, options });
+      const compactStrategies = (strategies) => Object.fromEntries(
+        Object.entries(strategies || {}).map(([name, result]) => {
+          const { trades = [], ...summary } = result;
+          return [name, { ...summary, trade_records_omitted: trades.length }];
+        })
+      );
+      const compactExploratory = exploratory.ok
+        ? { ...exploratory, strategies: compactStrategies(exploratory.strategies) }
+        : exploratory;
+      const compactWalkForward = walkForward.ok
+        ? {
+          ...walkForward,
+          folds: walkForward.folds.map((fold) => ({
+            ...fold,
+            results: compactStrategies(fold.results)
+          })),
+          cost_stress: walkForward.cost_stress.map((item) => ({
+            cost_multiplier: item.cost_multiplier,
+            result: item.result.ok
+              ? { ...item.result, strategies: compactStrategies(item.result.strategies) }
+              : item.result
+          }))
+        }
+        : walkForward;
+      return {
+        symbol,
+        product,
+        history: { bars_1h: candles1h.length, bars_6h: candles6h.length },
+        exploratory: compactExploratory,
+        walk_forward: compactWalkForward
+      };
+    });
+    return {
+      mode: "offline_research_only",
+      generated_at_ms: Date.now(),
+      no_trading_side_effects: true,
+      assumptions: {
+        initial_equity_usd: initialEquity,
+        allocation_pct: 10,
+        fee_bps_per_side: risk.fee_bps_per_side,
+        slippage_bps_per_side: risk.slippage_bps,
+        spread_model: "not_available_in_ohlcv_archive; slippage_is_a_stress_proxy",
+        execution: "next_1h_open",
+        stop_target_conflict: "stop_first",
+        live_execution_enabled: false
+      },
+      assets
+    };
   }
 
   researchHistorySummary() {
