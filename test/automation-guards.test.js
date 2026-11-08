@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assessMarketUniverse,
   advanceUnhealthyScanStreak,
+  deriveSchedulerStatus,
   shouldHaltPaperAutomation
 } from "../src/automation-guards.js";
 
@@ -60,6 +61,7 @@ test("only scheduled unhealthy scans increase the consecutive failure streak", (
   assert.equal(advanceUnhealthyScanStreak(1, "scheduled", false), 2);
   assert.equal(advanceUnhealthyScanStreak(2, "manual", false), 2);
   assert.equal(advanceUnhealthyScanStreak(2, "scheduled", true), 0);
+  assert.equal(advanceUnhealthyScanStreak(2, "manual", true), 2);
   assert.equal(advanceUnhealthyScanStreak(0, "manual", true), 0);
 });
 
@@ -93,4 +95,38 @@ test("a long gap since a healthy scan halts entries even when current feed recov
     autoEnabled: true, halted: false, consecutiveUnhealthyScans: 3,
     lastHealthyScanAtMs: null, nowMs: NOW
   }).reason, "consecutive_market_data_failures");
+});
+
+
+test("scheduler heartbeat is independent of manual scans and reports missed alarms", () => {
+  assert.deepEqual(deriveSchedulerStatus({
+    lastScheduledAlarmAtMs: null,
+    lastScheduledScanStatus: "completed",
+    nowMs: NOW
+  }), { status: "starting", ageMs: null });
+
+  assert.deepEqual(deriveSchedulerStatus({
+    lastScheduledAlarmAtMs: NOW - 60_000,
+    lastScheduledScanStatus: "completed",
+    nowMs: NOW
+  }), { status: "healthy", ageMs: 60_000 });
+
+  // A later manual scan is deliberately not an input: it cannot refresh
+  // the scheduled-alarm heartbeat or hide a stopped scheduler.
+  assert.deepEqual(deriveSchedulerStatus({
+    lastScheduledAlarmAtMs: NOW - 46 * 60 * 1000,
+    lastScheduledScanStatus: "completed",
+    nowMs: NOW
+  }), { status: "stale", ageMs: 46 * 60 * 1000 });
+
+  assert.equal(deriveSchedulerStatus({
+    lastScheduledAlarmAtMs: NOW - 30_000,
+    lastScheduledScanStatus: "error",
+    nowMs: NOW
+  }).status, "error");
+  assert.equal(deriveSchedulerStatus({
+    lastScheduledAlarmAtMs: NOW - 30_000,
+    lastScheduledScanStatus: "running",
+    nowMs: NOW
+  }).status, "running");
 });
