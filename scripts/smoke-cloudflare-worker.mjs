@@ -97,6 +97,8 @@ try {
   const staticPage = await request("/");
   assert.equal(staticPage.status, 200);
   assert.match(await staticPage.text(), /AI TRADING TERMINAL/);
+  assert.match(await staticPage.clone().text(), /ENTRY GATE/);
+  assert.match(await staticPage.clone().text(), /Per-market gate results are read-only diagnostics/);
 
   process.stdout.write("CLOUDFLARE_LOCAL_RUNTIME_SMOKE_OK\n");
 } catch (error) {
