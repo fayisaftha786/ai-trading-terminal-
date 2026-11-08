@@ -2,31 +2,61 @@ import { auditCandles } from "./strategy.js";
 
 const BASE_URL = "https://api.exchange.coinbase.com";
 const MIN_PUBLIC_REQUEST_GAP_MS = 350;
+const MAX_RETRY_ATTEMPTS = 3;
 let lastPublicRequestAt = 0;
+let publicCooldownUntilMs = 0;
+
+export function parseRetryAfterMs(value, nowMs = Date.now()) {
+  if (value == null || value === "") return null;
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.min(30000, seconds * 1000);
+  const dateMs = Date.parse(value);
+  return Number.isFinite(dateMs) ? Math.max(0, Math.min(30000, dateMs - nowMs)) : null;
+}
 export const PRODUCTS = [
   { symbol: "BTC/USD", product: "BTC-USD" },
   { symbol: "ETH/USD", product: "ETH-USD" },
   { symbol: "SOL/USD", product: "SOL-USD" }
 ];
 
-async function getJson(path) {
-  const waitMs = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (Date.now() - lastPublicRequestAt));
-  if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-  lastPublicRequestAt = Date.now();
-  const response = await fetch(BASE_URL + path, {
-    method: "GET",
-    headers: {
-      "Accept": "application/json",
-      "User-Agent": "AI-Trading-Terminal-Free-Paper/1.0"
-    },
-    signal: AbortSignal.timeout(10000)
-  });
-  if (!response.ok) {
-    const error = new Error("Coinbase public API returned HTTP " + response.status);
-    error.status = response.status;
+export async function getJson(path) {
+  for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
+    const now = Date.now();
+    const pacingWait = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (now - lastPublicRequestAt));
+    const cooldownWait = Math.max(0, publicCooldownUntilMs - now);
+    const waitMs = Math.max(pacingWait, cooldownWait);
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    lastPublicRequestAt = Date.now();
+    let response;
+    try {
+      response = await fetch(BASE_URL + path, {
+        method: "GET",
+        headers: {
+          "Accept": "application/json",
+          "User-Agent": "AI-Trading-Terminal-Free-Paper/1.0"
+        },
+        signal: AbortSignal.timeout(10000)
+      });
+    } catch (cause) {
+      if (attempt === MAX_RETRY_ATTEMPTS - 1) throw cause;
+      const backoffMs = Math.min(8000, 1000 * (2 ** attempt)) + Math.floor(Math.random() * 250);
+      publicCooldownUntilMs = Math.max(publicCooldownUntilMs, Date.now() + backoffMs);
+      continue;
+    }
+    if (response.ok) return response.json();
+    const status = response.status;
+    const retryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
+    if (retryable && attempt < MAX_RETRY_ATTEMPTS - 1) {
+      const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
+      const backoffMs = retryAfter ?? (Math.min(8000, 1000 * (2 ** attempt)) + Math.floor(Math.random() * 250));
+      publicCooldownUntilMs = Math.max(publicCooldownUntilMs, Date.now() + backoffMs);
+      continue;
+    }
+    const error = new Error("Coinbase public API returned HTTP " + status);
+    error.status = status;
     throw error;
   }
-  return response.json();
+  throw new Error("Coinbase public API retry attempts exhausted");
 }
 
 function parseBookSide(levels) {
