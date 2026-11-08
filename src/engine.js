@@ -213,12 +213,40 @@ export class TradingEngine extends DurableObject {
     try {
       await this.runCycle("scheduled", cycleKey);
     } catch (error) {
+      const nowMs = Date.now();
       const runtime = this.getState("runtime") || {};
+      const settings = this.getState("settings") || {};
+      runtime.consecutive_unhealthy_scheduled_scans =
+        Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
       runtime.last_scan_status = "error";
       runtime.last_scan_error = String(error?.message || error).slice(0, 180);
-      runtime.last_scan_at_ms = Date.now();
+      runtime.last_scan_at_ms = nowMs;
+      const previousHealthyScanAtMs = runtime.last_healthy_scan_at_ms ??
+        (runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
+      const watchdogDecision = shouldHaltPaperAutomation({
+        autoEnabled: !!settings.auto_paper_enabled,
+        halted: !!settings.halted,
+        consecutiveUnhealthyScans: runtime.consecutive_unhealthy_scheduled_scans,
+        lastHealthyScanAtMs: previousHealthyScanAtMs,
+        nowMs,
+        staleAfterMs: SCAN_INTERVAL_MS * 3,
+        failureThreshold: 3
+      });
+      if (watchdogDecision.halt) {
+        settings.auto_paper_enabled = false;
+        settings.halted = true;
+        this.setState("settings", settings);
+        this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted after scheduled scan failures", {
+          reason: watchdogDecision.reason,
+          consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans,
+          last_healthy_scan_at_ms: previousHealthyScanAtMs
+        });
+      }
       this.setState("runtime", runtime);
-      this.logEvent("scheduled_scan_error", "Scheduled market scan failed", { error: runtime.last_scan_error });
+      this.logEvent("scheduled_scan_error", "Scheduled market scan failed", {
+        error: runtime.last_scan_error,
+        consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
+      });
     } finally {
       const nextAt = Date.now() + SCAN_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
@@ -404,7 +432,7 @@ export class TradingEngine extends DurableObject {
       autoEnabled: !!state.auto_paper_enabled,
       halted: !!state.halted,
       consecutiveUnhealthyScans,
-      lastHealthyScanAtMs,
+      lastHealthyScanAtMs: previousHealthyScanAtMs,
       nowMs: Date.now(),
       staleAfterMs: SCAN_INTERVAL_MS * 3,
       failureThreshold: 3
