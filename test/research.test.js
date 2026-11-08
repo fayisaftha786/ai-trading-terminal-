@@ -7,9 +7,9 @@ const HOUR = 60 * 60 * 1000;
 test("archive selector stores only aligned, new, fully closed candles", () => {
   const rows = [
     { time: 0 }, { time: HOUR }, { time: 2 * HOUR },
-    { time: 3 * HOUR + 1 }, { time: 9 * HOUR }
+    { time: 3 * HOUR }, { time: 3 * HOUR + 1 }, { time: 9 * HOUR }
   ];
-  const selected = selectNewClosedCandles(rows, 0, HOUR, 4 * HOUR);
+  const selected = selectNewClosedCandles(rows, 0, HOUR, 3.5 * HOUR);
   assert.deepEqual(selected.map((row) => row.time), [HOUR, 2 * HOUR]);
 });
 
