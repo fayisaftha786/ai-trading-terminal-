@@ -893,7 +893,33 @@ export class TradingEngine extends DurableObject {
   automationStatus() {
     const settings = this.getState("settings");
     const runtime = this.getState("runtime") || {};
-    return { enabled: !!settings.auto_paper_enabled, halted: !!settings.halted, schedule_minutes: 15, runtime, engine: "durable_object_alarm", mode: "paper_only" };
+    const nowMs = Date.now();
+    const lastScanAtMs = Number(runtime.last_scan_at_ms);
+    const lastScanAgeMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
+      ? Math.max(0, nowMs - lastScanAtMs) : null;
+    const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
+    const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
+      ? Math.max(0, nextAlarmAtMs - nowMs) : null;
+    const status = runtime.last_scan_status;
+    const scannerStatus = status === "error" ? "error"
+      : lastScanAgeMs === null ? "starting"
+        : lastScanAgeMs > (SCAN_INTERVAL_MS * 3) ? "stale"
+          : status === "partial" ? "partial"
+            : status === "unavailable" ? "unavailable"
+              : status === "completed" ? "healthy" : "unknown";
+    return {
+      enabled: !!settings.auto_paper_enabled,
+      halted: !!settings.halted,
+      schedule_minutes: SCAN_INTERVAL_MS / 60000,
+      scanner_status: scannerStatus,
+      last_scan_age_ms: lastScanAgeMs,
+      last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 180) : null,
+      next_alarm_at_ms: Number.isFinite(nextAlarmAtMs) ? nextAlarmAtMs : null,
+      next_alarm_in_ms: nextAlarmInMs,
+      runtime,
+      engine: "durable_object_alarm",
+      mode: "paper_only"
+    };
   }
 
   dashboard() {
