@@ -244,17 +244,31 @@ export class TradingEngine extends DurableObject {
           regime_1h: primary.regime,
           regime_6h: higher.regime
         };
-        this.saveMarket(market, "live");
         markets.push(market);
       } catch (error) {
         const failed = { symbol: product.symbol, product: product.product, status: "error", error: String(error?.message || error).slice(0, 180), fetched_at_ms: Date.now() };
-        this.saveMarket(failed, "error");
         markets.push(failed);
       }
     }
 
-    const state = this.getState("settings");
+    // Read the latest owner settings after public fetches complete so a concurrent
+    // disable action cannot be hidden by a stale pre-fetch automation setting.
+    const state = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
+    for (const market of markets) {
+      if (market.status === "live") {
+        market.entry_gate = assessCandidate({
+          market,
+          primary: market.primary || {},
+          higher: market.higher || {},
+          nowMs: Date.now(),
+          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
+        });
+      } else {
+        market.entry_gate = { eligible: false, reason: "market_data_unavailable" };
+      }
+      this.saveMarket(market, market.status === "live" ? "live" : "error");
+    }
     const markBySymbol = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
@@ -280,7 +294,7 @@ export class TradingEngine extends DurableObject {
           const candidates = [];
         for (const market of markets) {
           if (market.status !== "live") continue;
-          const assessment = assessCandidate({
+          const assessment = market.entry_gate || assessCandidate({
             market, primary: market.primary || {}, higher: market.higher || {},
             nowMs: Date.now(), costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
           });
@@ -319,7 +333,8 @@ export class TradingEngine extends DurableObject {
       last_scan_error: markets.every((market) => market.status === "live") ? null
         : markets.map((market) => market.status === "live" ? null : market.symbol + ": " + (market.error || "provider unavailable"))
           .filter(Boolean).join("; ").slice(0, 180),
-      source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus
+      source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
+      last_entry_results: entryResults.slice(0, 10)
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
