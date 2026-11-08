@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { getJson, parseRetryAfterMs } from "../src/coinbase.js";
 
-test("Retry-After parses seconds and HTTP dates with a safe cap", () => {
+test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
   assert.equal(parseRetryAfterMs("0", 1000), 0);
   assert.equal(parseRetryAfterMs("invalid", 1000), null);
