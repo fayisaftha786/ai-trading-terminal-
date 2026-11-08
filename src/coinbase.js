@@ -23,6 +23,19 @@ export const PRODUCTS = [
   { symbol: "SOL/USD", product: "SOL-USD" }
 ];
 
+/**
+ * Reuse a persisted snapshot until the next timeframe candle has closed.
+ * Each row time is its candle-open timestamp; the next bar closes at
+ * lastTime + 2 * intervalMs. Invalid or short histories force a refresh.
+ */
+export function shouldRefreshCandleHistory(rows, intervalMs, nowMs = Date.now(), minimumBars = 150) {
+  if (!Array.isArray(rows) || !Number.isFinite(intervalMs) || intervalMs <= 0 ||
+      !Number.isFinite(nowMs) || rows.length < minimumBars) return true;
+  const lastTime = Number(rows[rows.length - 1]?.time);
+  if (!Number.isFinite(lastTime) || lastTime % intervalMs !== 0) return true;
+  return nowMs >= lastTime + (2 * intervalMs);
+}
+
 export async function getJson(path) {
   for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
     const now = Date.now();
@@ -102,7 +115,7 @@ function convertCandles(raw) {
   }).filter(Boolean);
 }
 
-export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now()) {
+export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now(), cachedCandles = {}) {
   const encoded = encodeURIComponent(product);
   // Public endpoint pacing: keep one shared request stream below Coinbase's documented rate.
   const ticker = await getJson("/products/" + encoded + "/ticker");
@@ -111,17 +124,29 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   // Coinbase Exchange L2 REST snapshots expose sequence/bids/asks, not a reliable
   // exchange event timestamp. Record when this response was received locally.
   const bookRetrievedAtMs = Date.now();
-  const oneHourRaw = await getJson("/products/" + encoded + "/candles?granularity=3600");
-  const sixHourRaw = await getJson("/products/" + encoded + "/candles?granularity=21600");
+  const cachedOneHour = Array.isArray(cachedCandles.one_hour) ? cachedCandles.one_hour : [];
+  const cachedSixHour = Array.isArray(cachedCandles.six_hour) ? cachedCandles.six_hour : [];
+  const cachedOneHourAudit = cachedOneHour.length
+    ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
+  const cachedSixHourAudit = cachedSixHour.length
+    ? auditCandles(cachedSixHour, 21600000, nowMs, 150) : null;
+  const useCachedOneHour = !!cachedOneHourAudit?.ok &&
+    !shouldRefreshCandleHistory(cachedOneHour, 3600000, nowMs, 150);
+  const useCachedSixHour = !!cachedSixHourAudit?.ok &&
+    !shouldRefreshCandleHistory(cachedSixHour, 21600000, nowMs, 150);
+  const oneHourRaw = useCachedOneHour ? null
+    : await getJson("/products/" + encoded + "/candles?granularity=3600");
+  const sixHourRaw = useCachedSixHour ? null
+    : await getJson("/products/" + encoded + "/candles?granularity=21600");
   const bid = Number(ticker.bid);
   const ask = Number(ticker.ask);
   const last = Number(ticker.price);
   const baseVolume = Number(stats.volume);
   const quoteVolume = baseVolume * last;
-  const oneHour = convertCandles(oneHourRaw);
-  const sixHour = convertCandles(sixHourRaw);
-  const oneHourAudit = auditCandles(oneHour, 3600000, nowMs, 150);
-  const sixHourAudit = auditCandles(sixHour, 21600000, nowMs, 150);
+  const oneHour = useCachedOneHour ? cachedOneHour : convertCandles(oneHourRaw);
+  const sixHour = useCachedSixHour ? cachedSixHour : convertCandles(sixHourRaw);
+  const oneHourAudit = useCachedOneHour ? cachedOneHourAudit : auditCandles(oneHour, 3600000, nowMs, 150);
+  const sixHourAudit = useCachedSixHour ? cachedSixHourAudit : auditCandles(sixHour, 21600000, nowMs, 150);
   const bidDepth = parseBookSide(book.bids);
   const askDepth = parseBookSide(book.asks);
   const tickerMs = Date.parse(ticker.time || "");
@@ -148,6 +173,8 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
     data_quality: {
       one_hour: { ok: oneHourAudit.ok, issues: oneHourAudit.issues, bars: oneHourAudit.valid_closed_bars },
       six_hour: { ok: sixHourAudit.ok, issues: sixHourAudit.issues, bars: sixHourAudit.valid_closed_bars },
+      one_hour_source: useCachedOneHour ? "durable_object_archive" : "coinbase_exchange_rest",
+      six_hour_source: useCachedSixHour ? "durable_object_archive" : "coinbase_exchange_rest",
       book_freshness_source: "local_retrieval_time",
       book_sequence_available: book.sequence != null && Number.isSafeInteger(Number(book.sequence))
     }
