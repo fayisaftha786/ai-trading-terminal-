@@ -62,7 +62,7 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
    - Root directory: leave the field blank/default so Cloudflare uses the repository root
    - Build command: `npm run check && npm test`
    - Deploy command: `npx wrangler@4 deploy`
-   - Worker name must remain `ai-trading-terminal-free-paper`, matching `wrangler.jsonc`
+   - Worker name must remain `ai-trading-terminal`, matching `wrangler.jsonc`
    - Do not add D1, KV, R2, Queues, Containers, paid compute, or any other product. The required SQLite Durable Object is declared in `wrangler.jsonc`.
 5. Select **Save and Deploy**. The first deployment applies the SQLite Durable Object migration. A failed login before secrets are configured is expected; no trading will start.
 6. Open the new Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**. Add these two runtime secrets:
@@ -74,6 +74,15 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
 9. Confirm the scan timestamp advances after the first alarm and again roughly every 15 minutes. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
 10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real trading and Binance Testnet remain disabled.
 11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
+
+### GitHub Actions deploy workflow (separate from Cloudflare Git integration)
+
+The repository also contains `.github/workflows/deploy-cloudflare-worker.yml`. It is **manual-dispatch only** and requires two GitHub repository Actions secrets:
+
+- `CLOUDFLARE_API_TOKEN` — a narrowly scoped Cloudflare API token with permission to deploy this Worker.
+- `CLOUDFLARE_ACCOUNT_ID` — the target Cloudflare account identifier.
+
+These GitHub Actions secrets are separate from the Worker's runtime secrets (`ADMIN_PASSWORD` and `SESSION_SECRET`). On 2026-11-08, the repository Actions secrets page showed that both required deployment secret names were missing. Add them yourself under GitHub → repository **Settings** → **Secrets and variables** → **Actions** before using **Actions** → **Deploy Cloudflare Worker** → **Run workflow**. Never paste their values into chat, commit them, or put them in ordinary workflow variables. Until these secrets exist, the manual GitHub Actions deployment cannot run. Cloudflare Dashboard Git integration can be used instead and does not require these GitHub Actions secrets.
 
 Cloudflare's Git integration instructions: [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) and [build configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/). Runtime secrets are configured separately from build variables; see [Cloudflare Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
 
