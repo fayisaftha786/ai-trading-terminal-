@@ -78,6 +78,14 @@ try {
   assert.equal(dashboard.settings.auto_paper_enabled, false, "paper automation must default OFF");
   assert.equal(dashboard.live_trading_enabled, false);
   assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
+
+  const initialScheduler = await request("/api/automation/status", { headers: auth });
+  assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
+  const scheduler = await initialScheduler.json();
+  assert.equal(scheduler.scanner_status, "starting", "scheduler watchdog must expose starting state before its first scan");
+  assert.equal(scheduler.last_scan_age_ms, null, "scan age must be null before the first completed scan");
+  assert.ok(Number.isFinite(scheduler.next_alarm_in_ms), "scheduler watchdog must expose the next durable alarm countdown");
+  assert.ok(scheduler.next_alarm_in_ms >= 0 && scheduler.next_alarm_in_ms <= 30000, "first alarm must be scheduled within 30 seconds");
   const researchHistory = await request("/api/research/history", { headers: auth });
   assert.equal(researchHistory.status, 200, "owner research-history API must load");
   const researchPayload = await researchHistory.json();
@@ -121,6 +129,9 @@ try {
   assert.match(staticHtml, /ENTRY GATE/);
   assert.match(staticHtml, /Per-market gate results are read-only diagnostics/);
   assert.match(staticHtml, /Research data archive/);
+  assert.match(staticHtml, /schedulerLabels/);
+  assert.match(staticHtml, /last_scan_error/);
+  assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
