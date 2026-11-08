@@ -56,6 +56,8 @@ try {
 
   const anonymousDashboard = await request("/api/dashboard");
   assert.equal(anonymousDashboard.status, 401, "dashboard must require authentication");
+  const anonymousResearch = await request("/api/research/history");
+  assert.equal(anonymousResearch.status, 401, "research archive must require authentication");
 
   const loginResponse = await request("/api/auth/login", {
     method: "POST",
