@@ -216,13 +216,13 @@ export class TradingEngine extends DurableObject {
       const nowMs = Date.now();
       const runtime = this.getState("runtime") || {};
       const settings = this.getState("settings") || {};
+      const previousHealthyScanAtMs = runtime.last_healthy_scan_at_ms ??
+        (runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
       runtime.consecutive_unhealthy_scheduled_scans =
         Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
       runtime.last_scan_status = "error";
       runtime.last_scan_error = String(error?.message || error).slice(0, 180);
       runtime.last_scan_at_ms = nowMs;
-      const previousHealthyScanAtMs = runtime.last_healthy_scan_at_ms ??
-        (runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
       const watchdogDecision = shouldHaltPaperAutomation({
         autoEnabled: !!settings.auto_paper_enabled,
         halted: !!settings.halted,
