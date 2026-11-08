@@ -88,3 +88,28 @@ export function shouldHaltPaperAutomation({
   }
   return { halt: false, reason: null };
 }
+
+
+export function deriveSchedulerStatus({
+  lastScheduledAlarmAtMs,
+  lastScheduledScanStatus,
+  nowMs = Date.now(),
+  staleAfterMs = 45 * 60 * 1000
+}) {
+  const lastAlarm = Number(lastScheduledAlarmAtMs);
+  if (!Number.isFinite(lastAlarm) || lastAlarm <= 0 || lastAlarm > nowMs + 5000) {
+    return { status: "starting", ageMs: null };
+  }
+
+  const ageMs = Math.max(0, nowMs - lastAlarm);
+  if (ageMs > staleAfterMs) return { status: "stale", ageMs };
+
+  const statuses = {
+    running: "running",
+    completed: "healthy",
+    partial: "partial",
+    unavailable: "unavailable",
+    error: "error"
+  };
+  return { status: statuses[lastScheduledScanStatus] || "unknown", ageMs };
+}
