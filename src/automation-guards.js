@@ -61,8 +61,8 @@ export function assessMarketUniverse(markets, expectedSymbols, nowMs = Date.now(
 
 export function advanceUnhealthyScanStreak(previousCount, source, marketFeedHealthy) {
   const previous = Number.isSafeInteger(previousCount) && previousCount > 0 ? previousCount : 0;
-  if (marketFeedHealthy) return 0;
-  return source === "scheduled" ? previous + 1 : previous;
+  if (source !== "scheduled") return previous;
+  return marketFeedHealthy ? 0 : previous + 1;
 }
 
 export function shouldHaltPaperAutomation({
@@ -87,4 +87,29 @@ export function shouldHaltPaperAutomation({
     return { halt: true, reason: "consecutive_market_data_failures" };
   }
   return { halt: false, reason: null };
+}
+
+
+export function deriveSchedulerStatus({
+  lastScheduledAlarmAtMs,
+  lastScheduledScanStatus,
+  nowMs = Date.now(),
+  staleAfterMs = 45 * 60 * 1000
+}) {
+  const lastAlarm = Number(lastScheduledAlarmAtMs);
+  if (!Number.isFinite(lastAlarm) || lastAlarm <= 0 || lastAlarm > nowMs + 5000) {
+    return { status: "starting", ageMs: null };
+  }
+
+  const ageMs = Math.max(0, nowMs - lastAlarm);
+  if (ageMs > staleAfterMs) return { status: "stale", ageMs };
+
+  const statuses = {
+    running: "running",
+    completed: "healthy",
+    partial: "partial",
+    unavailable: "unavailable",
+    error: "error"
+  };
+  return { status: statuses[lastScheduledScanStatus] || "unknown", ageMs };
 }

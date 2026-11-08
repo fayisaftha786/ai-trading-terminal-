@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, shouldHaltPaperAutomation } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, deriveSchedulerStatus, shouldHaltPaperAutomation } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -148,13 +148,20 @@ export class TradingEngine extends DurableObject {
           const runtime = this.getState("runtime") || {};
           const lastScanAtMs = Number(runtime.last_scan_at_ms);
           const scanAgeMs = Number.isFinite(lastScanAtMs) ? nowMs - lastScanAtMs : Number.POSITIVE_INFINITY;
+          const lastScheduledScanAtMs = Number(runtime.last_healthy_scheduled_scan_at_ms);
+          const scheduledScanAgeMs = Number.isFinite(lastScheduledScanAtMs)
+            ? nowMs - lastScheduledScanAtMs : Number.POSITIVE_INFINITY;
           const marketFeed = assessMarketUniverse(
             this.getMarkets(), PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
           );
           if (runtime.last_scan_status !== "completed" || scanAgeMs < 0 ||
-              scanAgeMs > (SCAN_INTERVAL_MS * 3) || !marketFeed.healthy) {
+              scanAgeMs > (SCAN_INTERVAL_MS * 3) || !marketFeed.healthy ||
+              runtime.last_scheduled_scan_status !== "completed" ||
+              scheduledScanAgeMs < 0 || scheduledScanAgeMs > (SCAN_INTERVAL_MS * 3)) {
             return jsonResponse({
-              error: "fresh_complete_market_scan_required",
+              error: "fresh_complete_scheduled_scan_required",
+              scheduled_scan_status: runtime.last_scheduled_scan_status || "not_run",
+              scheduled_scan_age_ms: Number.isFinite(scheduledScanAgeMs) ? scheduledScanAgeMs : null,
               healthy_market_count: marketFeed.healthy_market_count,
               expected_market_count: marketFeed.expected_market_count,
               issues: marketFeed.issues
@@ -208,20 +215,46 @@ export class TradingEngine extends DurableObject {
   }
 
   async alarm() {
+    const invokedAtMs = Date.now();
+    const startingRuntime = this.getState("runtime") || {};
+    const previousScheduledScanStatus = startingRuntime.last_scheduled_scan_status || "not_run";
+    const previousScheduledScanError = startingRuntime.last_scheduled_scan_error || null;
+    startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
+    startingRuntime.last_scheduled_scan_status = "running";
+    startingRuntime.last_scheduled_scan_error = null;
+    this.setState("runtime", startingRuntime);
     const priorRuntime = this.getState("runtime") || {};
-    const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(Date.now() / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
+    const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
-      await this.runCycle("scheduled", cycleKey);
+      const result = await this.runCycle("scheduled", cycleKey);
+      const runtime = this.getState("runtime") || {};
+      runtime.last_scheduled_alarm_at_ms = invokedAtMs;
+      if (!result?.skipped) {
+        const feed = result?.market_feed;
+        runtime.last_scheduled_scan_status = feed?.healthy === true ? "completed"
+          : feed ? (Number(feed.healthy_market_count || 0) > 0 ? "partial" : "unavailable")
+            : "error";
+        runtime.last_scheduled_scan_error = feed?.healthy === true ? null
+          : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
+            .join("; ").slice(0, 180) || null;
+      } else {
+        runtime.last_scheduled_scan_status = previousScheduledScanStatus;
+        runtime.last_scheduled_scan_error = previousScheduledScanError;
+      }
+      this.setState("runtime", runtime);
     } catch (error) {
       const nowMs = Date.now();
       const runtime = this.getState("runtime") || {};
       const settings = this.getState("settings") || {};
-      const previousHealthyScanAtMs = runtime.last_healthy_scan_at_ms ??
-        (runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
+      const previousHealthyScanAtMs = runtime.last_healthy_scheduled_scan_at_ms ??
+        (runtime.source === "scheduled" && runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
+      runtime.last_scheduled_alarm_at_ms = invokedAtMs;
+      runtime.last_scheduled_scan_status = "error";
+      runtime.last_scheduled_scan_error = String(error?.message || error).slice(0, 180);
       runtime.consecutive_unhealthy_scheduled_scans =
         Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
       runtime.last_scan_status = "error";
-      runtime.last_scan_error = String(error?.message || error).slice(0, 180);
+      runtime.last_scan_error = runtime.last_scheduled_scan_error;
       runtime.last_scan_at_ms = nowMs;
       const watchdogDecision = shouldHaltPaperAutomation({
         autoEnabled: !!settings.auto_paper_enabled,
@@ -239,7 +272,7 @@ export class TradingEngine extends DurableObject {
         this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted after scheduled scan failures", {
           reason: watchdogDecision.reason,
           consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans,
-          last_healthy_scan_at_ms: previousHealthyScanAtMs
+          last_healthy_scheduled_scan_at_ms: previousHealthyScanAtMs
         });
       }
       this.setState("runtime", runtime);
@@ -428,11 +461,16 @@ export class TradingEngine extends DurableObject {
     const previousHealthyScanAtMs = previousRuntime.last_healthy_scan_at_ms ??
       (previousRuntime.last_scan_status === "completed" ? previousRuntime.last_scan_at_ms : null);
     const lastHealthyScanAtMs = marketFeed.healthy ? Date.now() : previousHealthyScanAtMs;
+    const previousHealthyScheduledScanAtMs = previousRuntime.last_healthy_scheduled_scan_at_ms ??
+      (previousRuntime.source === "scheduled" && previousRuntime.last_scan_status === "completed"
+        ? previousRuntime.last_scan_at_ms : null);
+    const lastHealthyScheduledScanAtMs = source === "scheduled" && marketFeed.healthy
+      ? Date.now() : previousHealthyScheduledScanAtMs;
     const watchdogDecision = shouldHaltPaperAutomation({
       autoEnabled: !!state.auto_paper_enabled,
       halted: !!state.halted,
       consecutiveUnhealthyScans,
-      lastHealthyScanAtMs: previousHealthyScanAtMs,
+      lastHealthyScanAtMs: previousHealthyScheduledScanAtMs,
       nowMs: Date.now(),
       staleAfterMs: SCAN_INTERVAL_MS * 3,
       failureThreshold: 3
@@ -499,6 +537,9 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
     const runtime = {
       next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
+      last_scheduled_alarm_at_ms: previousRuntime.last_scheduled_alarm_at_ms ?? null,
+      last_scheduled_scan_status: previousRuntime.last_scheduled_scan_status || "not_run",
+      last_scheduled_scan_error: previousRuntime.last_scheduled_scan_error || null,
       last_scan_at_ms: Date.now(),
       last_scan_status: marketFeed.healthy ? "completed"
         : markets.some((market) => market.status === "live") ? "partial" : "unavailable",
@@ -506,6 +547,7 @@ export class TradingEngine extends DurableObject {
         : marketFeed.issues.map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
           .join("; ").slice(0, 180),
       last_healthy_scan_at_ms: lastHealthyScanAtMs,
+      last_healthy_scheduled_scan_at_ms: lastHealthyScheduledScanAtMs,
       healthy_market_count: marketFeed.healthy_market_count,
       expected_market_count: marketFeed.expected_market_count,
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
@@ -1021,19 +1063,22 @@ export class TradingEngine extends DurableObject {
     const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
     const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
       ? Math.max(0, nextAlarmAtMs - nowMs) : null;
-    const status = runtime.last_scan_status;
-    const scannerStatus = status === "error" ? "error"
-      : lastScanAgeMs === null ? "starting"
-        : lastScanAgeMs > (SCAN_INTERVAL_MS * 3) ? "stale"
-          : status === "partial" ? "partial"
-            : status === "unavailable" ? "unavailable"
-              : status === "completed" ? "healthy" : "unknown";
+    const scheduler = deriveSchedulerStatus({
+      lastScheduledAlarmAtMs: runtime.last_scheduled_alarm_at_ms,
+      lastScheduledScanStatus: runtime.last_scheduled_scan_status,
+      nowMs,
+      staleAfterMs: SCAN_INTERVAL_MS * 3
+    });
     return {
       enabled: !!settings.auto_paper_enabled,
       halted: !!settings.halted,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
-      scanner_status: scannerStatus,
+      scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
+      last_scheduled_alarm_age_ms: scheduler.ageMs,
+      last_scheduled_scan_status: runtime.last_scheduled_scan_status || "not_run",
+      last_scheduled_scan_error: runtime.last_scheduled_scan_error
+        ? String(runtime.last_scheduled_scan_error).slice(0, 180) : null,
       last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 180) : null,
       next_alarm_at_ms: Number.isFinite(nextAlarmAtMs) ? nextAlarmAtMs : null,
       next_alarm_in_ms: nextAlarmInMs,
