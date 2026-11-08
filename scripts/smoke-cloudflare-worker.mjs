@@ -53,6 +53,13 @@ try {
   assert.equal(health.mode, "paper_only");
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
+  assert.ok(Object.hasOwn(health, "worker_version"), "health must expose deployment version metadata");
+  assert.ok(
+    health.worker_version === null ||
+      (typeof health.worker_version.id === "string" &&
+       (health.worker_version.tag === null || typeof health.worker_version.tag === "string")),
+    "worker version metadata must be safely shaped or explicitly unavailable"
+  );
 
   const anonymousDashboard = await request("/api/dashboard");
   assert.equal(anonymousDashboard.status, 401, "dashboard must require authentication");

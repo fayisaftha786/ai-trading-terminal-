@@ -129,7 +129,22 @@ async function routeApi(request, env) {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith("/api/")) return addSecurityHeaders(await routeApi(request, env));
+    if (url.pathname.startsWith("/api/")) {
+      const response = await routeApi(request, env);
+      if (url.pathname === "/api/health" && request.method === "GET" && response.ok) {
+        const payload = await response.json();
+        const metadata = env.CF_VERSION_METADATA;
+        const workerVersion = metadata && typeof metadata.id === "string"
+          ? {
+              id: metadata.id,
+              tag: typeof metadata.tag === "string" ? metadata.tag : null,
+              timestamp: metadata.timestamp ?? null
+            }
+          : null;
+        return addSecurityHeaders(json({ ...payload, worker_version: workerVersion }));
+      }
+      return addSecurityHeaders(response);
+    }
     return addSecurityHeaders(await env.ASSETS.fetch(request));
   }
 };
