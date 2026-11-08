@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, shouldHaltPaperAutomation } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -142,6 +143,24 @@ export class TradingEngine extends DurableObject {
         if (typeof body.enabled !== "boolean") return jsonResponse({ error: "enabled_boolean_required" }, 400);
         const state = this.getState("settings");
         if (body.enabled && state.halted) return jsonResponse({ error: "paper_automation_halted_reset_required" }, 409);
+        if (body.enabled) {
+          const nowMs = Date.now();
+          const runtime = this.getState("runtime") || {};
+          const lastScanAtMs = Number(runtime.last_scan_at_ms);
+          const scanAgeMs = Number.isFinite(lastScanAtMs) ? nowMs - lastScanAtMs : Number.POSITIVE_INFINITY;
+          const marketFeed = assessMarketUniverse(
+            this.getMarkets(), PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
+          );
+          if (runtime.last_scan_status !== "completed" || scanAgeMs < 0 ||
+              scanAgeMs > (SCAN_INTERVAL_MS * 3) || !marketFeed.healthy) {
+            return jsonResponse({
+              error: "fresh_complete_market_scan_required",
+              healthy_market_count: marketFeed.healthy_market_count,
+              expected_market_count: marketFeed.expected_market_count,
+              issues: marketFeed.issues
+            }, 409);
+          }
+        }
         state.auto_paper_enabled = body.enabled;
         this.setState("settings", state);
         this.logEvent("paper_automation_setting", body.enabled ? "Automatic paper entries enabled by owner" : "Automatic paper entries disabled by owner");
@@ -356,26 +375,68 @@ export class TradingEngine extends DurableObject {
           nowMs: Date.now(),
           costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
         });
+      } else if (market.one_hour_audit_summary?.ok !== true) {
+        market.entry_gate = { eligible: false, reason: "one_hour_candle_audit_failed" };
+      } else if (market.six_hour_audit_summary?.ok !== true) {
+        market.entry_gate = { eligible: false, reason: "six_hour_candle_audit_failed" };
       } else {
-        market.entry_gate = { eligible: false, reason: "market_data_unavailable" };
+        market.entry_gate = assessCandidate({
+          market,
+          primary: market.primary || {},
+          higher: market.higher || {},
+          nowMs: Date.now(),
+          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
+        });
       }
       this.saveMarket(market, market.status === "live" ? "live" : "error");
     }
+    const marketFeed = assessMarketUniverse(
+      markets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
+    );
     const markBySymbol = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
     const portfolio = this.portfolio(markBySymbol, risk, Date.now());
+    const previousRuntime = this.getState("runtime") || {};
+    const consecutiveUnhealthyScans = advanceUnhealthyScanStreak(
+      Number(previousRuntime.consecutive_unhealthy_scheduled_scans || 0),
+      source,
+      marketFeed.healthy
+    );
+    const previousHealthyScanAtMs = previousRuntime.last_healthy_scan_at_ms ??
+      (previousRuntime.last_scan_status === "completed" ? previousRuntime.last_scan_at_ms : null);
+    const lastHealthyScanAtMs = marketFeed.healthy ? Date.now() : previousHealthyScanAtMs;
+    const watchdogDecision = shouldHaltPaperAutomation({
+      autoEnabled: !!state.auto_paper_enabled,
+      halted: !!state.halted,
+      consecutiveUnhealthyScans,
+      lastHealthyScanAtMs,
+      nowMs: Date.now(),
+      staleAfterMs: SCAN_INTERVAL_MS * 3,
+      failureThreshold: 3
+    });
+    if (watchdogDecision.halt) {
+      state.auto_paper_enabled = false;
+      state.halted = true;
+      this.setState("settings", state);
+      this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted by the market-data scheduler watchdog", {
+        reason: watchdogDecision.reason,
+        consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
+        last_healthy_scan_at_ms: previousHealthyScanAtMs
+      });
+    }
     const entryResults = [];
-    let entryStatus = "disabled";
-    if (state.auto_paper_enabled && !state.halted) {
-      // Fail closed for the complete configured market universe: a partial
-      // Coinbase outage must not silently permit new entries on only some symbols.
-      const unavailableMarkets = markets.filter((market) => market.status !== "live");
-      if (markets.length !== PRODUCTS.length || unavailableMarkets.length > 0) {
+    let entryStatus = state.halted ? "halted" : "disabled";
+    if (watchdogDecision.halt) {
+      entryResults.push({ reason: watchdogDecision.reason });
+    } else if (state.auto_paper_enabled && !state.halted) {
+      // Require the complete configured universe to have fresh quotes and clean,
+      // closed 1H/6H candles. A single degraded symbol blocks all new entries.
+      if (!marketFeed.healthy) {
         entryStatus = "blocked";
         entryResults.push({
           reason: "market_universe_data_incomplete",
-          unavailable_symbols: unavailableMarkets.map((market) => market.symbol)
+          unhealthy_markets: marketFeed.issues
         });
       } else {
         const reasons = this.entryBlockReasons(portfolio, risk, Date.now());
@@ -384,25 +445,21 @@ export class TradingEngine extends DurableObject {
           entryResults.push({ reason: reasons.join(",") });
         } else {
           const candidates = [];
-        for (const market of markets) {
-          if (market.status !== "live") continue;
-          const assessment = market.entry_gate || assessCandidate({
-            market, primary: market.primary || {}, higher: market.higher || {},
-            nowMs: Date.now(), costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
-          });
-          if (assessment.eligible) candidates.push({ market, assessment });
-          else entryResults.push({ symbol: market.symbol, reason: assessment.reason });
-        }
-        candidates.sort((a, b) => b.market.primary.score - a.market.primary.score);
-        if (candidates.length) {
-          const opened = this.openPaperTrade(candidates[0], portfolio, risk, Date.now());
-          if (opened.ok) {
-            entryStatus = "opened";
-            entryResults.push({ symbol: opened.trade.symbol, trade_id: opened.trade.id, notional_usd: opened.trade.notional_usd });
-          } else {
-            entryStatus = "blocked";
-            entryResults.push({ reason: opened.reason });
+          for (const market of markets) {
+            const assessment = market.entry_gate || { eligible: false, reason: "entry_gate_not_evaluated" };
+            if (assessment.eligible) candidates.push({ market, assessment });
+            else entryResults.push({ symbol: market.symbol, reason: assessment.reason });
           }
+          candidates.sort((a, b) => b.market.primary.score - a.market.primary.score);
+          if (candidates.length) {
+            const opened = this.openPaperTrade(candidates[0], portfolio, risk, Date.now());
+            if (opened.ok) {
+              entryStatus = "opened";
+              entryResults.push({ symbol: opened.trade.symbol, trade_id: opened.trade.id, notional_usd: opened.trade.notional_usd });
+            } else {
+              entryStatus = "blocked";
+              entryResults.push({ reason: opened.reason });
+            }
           } else {
             entryStatus = "no_qualified_signal";
           }
@@ -416,21 +473,27 @@ export class TradingEngine extends DurableObject {
       updatedPortfolio.open_positions, updatedPortfolio.drawdown_pct_from_peak
     );
     this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
-    const priorRuntime = this.getState("runtime") || {};
     const runtime = {
-      next_alarm_at_ms: priorRuntime.next_alarm_at_ms ?? null,
+      next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
       last_scan_at_ms: Date.now(),
-      last_scan_status: markets.every((market) => market.status === "live") ? "completed"
-        : markets.some((market) => market.status === "live") ? "partial" : "unavailable",
-      last_scan_error: markets.every((market) => market.status === "live") ? null
-        : markets.map((market) => market.status === "live" ? null : market.symbol + ": " + (market.error || "provider unavailable"))
-          .filter(Boolean).join("; ").slice(0, 180),
+      last_scan_status: marketFeed.healthy ? "completed"
+        : marketFeed.healthy_market_count > 0 ? "partial" : "unavailable",
+      last_scan_error: marketFeed.healthy ? null
+        : marketFeed.issues.map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
+          .join("; ").slice(0, 180),
+      last_healthy_scan_at_ms: lastHealthyScanAtMs,
+      healthy_market_count: marketFeed.healthy_market_count,
+      expected_market_count: marketFeed.expected_market_count,
+      consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
       last_entry_results: entryResults.slice(0, 10)
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
       source, cycle_key: cycleKey, successful_markets: markets.filter((market) => market.status === "live").length,
+      healthy_markets: marketFeed.healthy_market_count, expected_markets: marketFeed.expected_market_count,
+      market_feed_healthy: marketFeed.healthy,
+      consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
       total_markets: markets.length, paper_exits: exits.length, auto_paper_enabled: !!state.auto_paper_enabled,
       entry_status: entryStatus, entries: entryResults
     });
@@ -443,6 +506,7 @@ export class TradingEngine extends DurableObject {
         data_quality: market.data_quality || null, error: market.error || null
       })),
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
+      market_feed: marketFeed,
       portfolio: updatedPortfolio, live_trading_enabled: false, binance_testnet_enabled: false
     };
   }
