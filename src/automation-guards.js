@@ -35,7 +35,8 @@ export function assessMarketUniverse(markets, expectedSymbols, nowMs = Date.now(
       ["1h", market.one_hour_audit_summary],
       ["6h", market.six_hour_audit_summary]
     ]) {
-      if (audit?.ok !== true || Number(audit.valid_closed_bars) < 150) {
+      const validBars = Number(audit?.valid_closed_bars);
+      if (audit?.ok !== true || !Number.isFinite(validBars) || validBars < 150) {
         const details = Array.isArray(audit?.issues) && audit.issues.length
           ? ":" + audit.issues.slice(0, 2).join(",")
           : "";
