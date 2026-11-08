@@ -82,8 +82,10 @@ try {
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
   const scheduler = await initialScheduler.json();
-  assert.equal(scheduler.scanner_status, "starting", "scheduler watchdog must expose starting state before its first scan");
+  assert.equal(scheduler.scanner_status, "starting", "scheduler watchdog must expose starting state before its first scheduled alarm");
   assert.equal(scheduler.last_scan_age_ms, null, "scan age must be null before the first completed scan");
+  assert.equal(scheduler.last_scheduled_alarm_age_ms, null, "scheduled heartbeat age must be null before the first alarm");
+  assert.equal(scheduler.last_scheduled_scan_status, "not_run", "scheduled scan state must be explicit before first alarm");
   assert.ok(Number.isFinite(scheduler.next_alarm_in_ms), "scheduler watchdog must expose the next durable alarm countdown");
   assert.ok(scheduler.next_alarm_in_ms >= 0 && scheduler.next_alarm_in_ms <= 30000, "first alarm must be scheduled within 30 seconds");
   const researchHistory = await request("/api/research/history", { headers: auth });
@@ -105,8 +107,8 @@ try {
   const enableWithoutFreshScan = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
   });
-  assert.equal(enableWithoutFreshScan.status, 409, "auto-entry must require a recent complete market scan");
-  assert.equal((await enableWithoutFreshScan.json()).error, "fresh_complete_market_scan_required");
+  assert.equal(enableWithoutFreshScan.status, 409, "auto-entry must require a recent complete scheduled scan");
+  assert.equal((await enableWithoutFreshScan.json()).error, "fresh_complete_scheduled_scan_required");
 
   const stop = await request("/api/automation/kill-switch", { method: "POST", headers: auth });
   assert.equal(stop.status, 200);
