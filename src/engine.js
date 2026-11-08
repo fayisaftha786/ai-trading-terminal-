@@ -217,6 +217,8 @@ export class TradingEngine extends DurableObject {
   async alarm() {
     const invokedAtMs = Date.now();
     const startingRuntime = this.getState("runtime") || {};
+    const previousScheduledScanStatus = startingRuntime.last_scheduled_scan_status || "not_run";
+    const previousScheduledScanError = startingRuntime.last_scheduled_scan_error || null;
     startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
     startingRuntime.last_scheduled_scan_status = "running";
     startingRuntime.last_scheduled_scan_error = null;
@@ -235,6 +237,9 @@ export class TradingEngine extends DurableObject {
         runtime.last_scheduled_scan_error = feed?.healthy === true ? null
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
+      } else {
+        runtime.last_scheduled_scan_status = previousScheduledScanStatus;
+        runtime.last_scheduled_scan_error = previousScheduledScanError;
       }
       this.setState("runtime", runtime);
     } catch (error) {
