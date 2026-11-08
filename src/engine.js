@@ -367,14 +367,8 @@ export class TradingEngine extends DurableObject {
     const state = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
     for (const market of markets) {
-      if (market.status === "live") {
-        market.entry_gate = assessCandidate({
-          market,
-          primary: market.primary || {},
-          higher: market.higher || {},
-          nowMs: Date.now(),
-          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
-        });
+      if (market.status !== "live") {
+        market.entry_gate = { eligible: false, reason: "market_data_unavailable" };
       } else if (market.one_hour_audit_summary?.ok !== true) {
         market.entry_gate = { eligible: false, reason: "one_hour_candle_audit_failed" };
       } else if (market.six_hour_audit_summary?.ok !== true) {
@@ -416,9 +410,11 @@ export class TradingEngine extends DurableObject {
       failureThreshold: 3
     });
     if (watchdogDecision.halt) {
-      state.auto_paper_enabled = false;
-      state.halted = true;
-      this.setState("settings", state);
+      const haltState = this.getState("settings") || state;
+      haltState.auto_paper_enabled = false;
+      haltState.halted = true;
+      this.setState("settings", haltState);
+      Object.assign(state, haltState);
       this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted by the market-data scheduler watchdog", {
         reason: watchdogDecision.reason,
         consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
