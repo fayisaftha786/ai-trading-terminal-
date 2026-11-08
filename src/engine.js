@@ -411,8 +411,8 @@ export class TradingEngine extends DurableObject {
       return { stored: 0, status: "audit_rejected" };
     }
 
-    const previousLast = Number.isFinite(Number(previous.last_candle_ms))
-      ? Number(previous.last_candle_ms) : null;
+    const previousLast = previous.last_candle_ms == null ? null
+      : (Number.isFinite(Number(previous.last_candle_ms)) ? Number(previous.last_candle_ms) : null);
     const newRows = selectNewClosedCandles(audit.rows, previousLast, intervalMs, receivedAtMs);
     const gapCount = countMissingArchiveBars(previousLast, newRows, intervalMs);
     if (gapCount === null) {
@@ -442,8 +442,9 @@ export class TradingEngine extends DurableObject {
     }
 
     const latest = newRows.length ? newRows[newRows.length - 1].time : previousLast;
-    const first = Number.isFinite(Number(previous.first_candle_ms))
-      ? Number(previous.first_candle_ms) : (newRows[0]?.time ?? null);
+    const first = previous.first_candle_ms == null
+      ? (newRows[0]?.time ?? null)
+      : (Number.isFinite(Number(previous.first_candle_ms)) ? Number(previous.first_candle_ms) : (newRows[0]?.time ?? null));
     let barsCount = Math.max(0, Number(previous.bars_count) || 0) + inserted;
     const cumulativeGaps = Math.max(0, Number(previous.cumulative_missing_intervals) || 0) + gapCount;
     let retainedFirst = first;
