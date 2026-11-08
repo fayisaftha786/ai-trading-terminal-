@@ -501,7 +501,7 @@ export class TradingEngine extends DurableObject {
       next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
       last_scan_at_ms: Date.now(),
       last_scan_status: marketFeed.healthy ? "completed"
-        : marketFeed.healthy_market_count > 0 ? "partial" : "unavailable",
+        : markets.some((market) => market.status === "live") ? "partial" : "unavailable",
       last_scan_error: marketFeed.healthy ? null
         : marketFeed.issues.map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
           .join("; ").slice(0, 180),
