@@ -57,6 +57,27 @@ test("history summary flags misaligned archive boundaries", () => {
   assert.equal(summary.retained_missing_intervals, null);
 });
 
+test("empty SQL archive fields remain null instead of becoming epoch timestamps", () => {
+  const [summary] = buildResearchHistorySummary([{
+    product: "SOL-USD",
+    timeframe_seconds: 3600,
+    bars_count: 0,
+    first_candle_ms: null,
+    last_candle_ms: null,
+    cumulative_missing_intervals: 0,
+    last_quality_check_at_ms: null,
+    last_ingested_at_ms: null,
+    last_quality_status: "audit_rejected:missing_intervals"
+  }], 100 * HOUR);
+  assert.equal(summary.first_candle_ms, null);
+  assert.equal(summary.last_candle_ms, null);
+  assert.equal(summary.latest_closed_at_ms, null);
+  assert.equal(summary.last_quality_check_at_ms, null);
+  assert.equal(summary.last_ingested_at_ms, null);
+  assert.equal(summary.coverage_days, 0);
+  assert.equal(summary.last_quality_status, "audit_rejected:missing_intervals");
+});
+
 test("empty and invalid history inputs are safe", () => {
   assert.deepEqual(buildResearchHistorySummary([], 123), []);
   assert.deepEqual(buildResearchHistorySummary(null, 123), []);
