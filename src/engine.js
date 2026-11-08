@@ -201,6 +201,8 @@ export class TradingEngine extends DurableObject {
       this.sql.exec("DELETE FROM scan_cycles WHERE cycle_key NOT IN (SELECT cycle_key FROM scan_cycles ORDER BY started_at_ms DESC LIMIT 200)");
     }
     const nowMs = Date.now();
+    const configuredState = this.getState("settings") || {};
+    const risk = { ...DEFAULT_RISK, ...(configuredState.risk || {}) };
     const markets = [];
     for (const product of PRODUCTS) {
       try {
@@ -244,17 +246,24 @@ export class TradingEngine extends DurableObject {
           regime_1h: primary.regime,
           regime_6h: higher.regime
         };
+        market.entry_gate = assessCandidate({
+          market,
+          primary,
+          higher,
+          nowMs: Date.now(),
+          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
+        });
         this.saveMarket(market, "live");
         markets.push(market);
       } catch (error) {
         const failed = { symbol: product.symbol, product: product.product, status: "error", error: String(error?.message || error).slice(0, 180), fetched_at_ms: Date.now() };
+        failed.entry_gate = { eligible: false, reason: "market_data_unavailable" };
         this.saveMarket(failed, "error");
         markets.push(failed);
       }
     }
 
-    const state = this.getState("settings");
-    const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
+    const state = configuredState;
     const markBySymbol = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
@@ -280,7 +289,7 @@ export class TradingEngine extends DurableObject {
           const candidates = [];
         for (const market of markets) {
           if (market.status !== "live") continue;
-          const assessment = assessCandidate({
+          const assessment = market.entry_gate || assessCandidate({
             market, primary: market.primary || {}, higher: market.higher || {},
             nowMs: Date.now(), costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
           });
@@ -319,7 +328,8 @@ export class TradingEngine extends DurableObject {
       last_scan_error: markets.every((market) => market.status === "live") ? null
         : markets.map((market) => market.status === "live" ? null : market.symbol + ": " + (market.error || "provider unavailable"))
           .filter(Boolean).join("; ").slice(0, 180),
-      source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus
+      source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
+      last_entry_results: entryResults.slice(0, 10)
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
