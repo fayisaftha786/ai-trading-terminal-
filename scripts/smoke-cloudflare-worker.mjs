@@ -102,11 +102,11 @@ try {
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
   assert.equal(settingsAfterResearch.enabled, false, "research must not enable paper automation");
 
-  const enable = await request("/api/automation/paper-trading", {
+  const enableWithoutFreshScan = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
   });
-  assert.equal(enable.status, 200);
-  assert.equal((await enable.json()).enabled, true);
+  assert.equal(enableWithoutFreshScan.status, 409, "auto-entry must require a recent complete market scan");
+  assert.equal((await enableWithoutFreshScan.json()).error, "fresh_complete_market_scan_required");
 
   const stop = await request("/api/automation/kill-switch", { method: "POST", headers: auth });
   assert.equal(stop.status, 200);
