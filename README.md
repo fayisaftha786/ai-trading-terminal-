@@ -1,6 +1,6 @@
 # AI Trading Terminal v0.7.1 — No-Termux PAPER Edition
 
-AI Trading Terminal is an Android-friendly crypto market research and paper-trading project. The current published Android package is a **debug/test APK**. The delivered Cloudflare Worker is a **PAPER-only backend** and has not yet been deployed into the owner's Cloudflare account.
+AI Trading Terminal is an Android-friendly crypto market research and paper-trading project. The current published Android package is a **debug/test APK**. The Cloudflare Worker URL is responding as a **PAPER-only backend**; the public health check was successful on 2026-11-08. That confirms reachability and its declared safety mode, but does not prove which Git commit is currently deployed or that scheduled scans are healthy.
 
 ## Current release
 
@@ -30,7 +30,7 @@ This package is signed with an Android debug key for testing, not a production r
 - Automatic PAPER entries start **OFF**. The owner must sign in and explicitly enable them after validating live deployment, market freshness, local order-book retrieval age, candle integrity, persistence and alarm cadence.
 - Real-money exchange orders and Binance Testnet execution are hard-disabled in this Worker. It does not sign wallets or submit Solana swaps.
 
-**Deployment status:** Worker source, tests and local workerd smoke checks are in the repository. It is not yet deployed to the owner's Cloudflare account. Cloud mode in the APK therefore needs a deployed HTTPS Worker URL before it can show the cloud dashboard. See [Cloudflare Free Paper Automation](docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
+**Deployment status (2026-11-08):** The public Worker endpoint `https://ai-trading-terminal.fayisaftha786.workers.dev/api/health` responds with `status: ok`, `mode: paper_only`, `live_trading_enabled: false` and `binance_testnet_enabled: false`. The latest research-archive and Coinbase cooldown fixes are merged to `main` and passed GitHub validation, but their deployment to the production Worker is **not verified**. The repository's manual GitHub Actions deploy workflow is currently blocked because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are not configured as Actions secrets. Cloudflare Dashboard Git integration is a separate deployment route. See [Cloudflare Free Paper Automation](docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
 
 ## Market scan evidence
 
