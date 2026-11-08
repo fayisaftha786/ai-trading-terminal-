@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { getJson, parseRetryAfterMs } from "../src/coinbase.js";
+import { getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
 
 test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
@@ -51,4 +51,23 @@ test("Coinbase honors long Retry-After headers without retrying early or blockin
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+
+test("closed candle history refreshes only after the next bar has closed", () => {
+  const makeRows = (count, intervalMs) => Array.from({ length: count }, (_, index) => ({
+    time: index * intervalMs,
+    open: 100, high: 101, low: 99, close: 100, volume: 10
+  }));
+  const oneHour = makeRows(150, 3600000);
+  const oneHourNextClose = oneHour.at(-1).time + (2 * 3600000);
+  assert.equal(shouldRefreshCandleHistory(oneHour, 3600000, oneHourNextClose - 1), false);
+  assert.equal(shouldRefreshCandleHistory(oneHour, 3600000, oneHourNextClose), true);
+  assert.equal(shouldRefreshCandleHistory(oneHour.slice(0, 149), 3600000, oneHourNextClose), true);
+  assert.equal(shouldRefreshCandleHistory([{ ...oneHour.at(-1), time: 123 }], 3600000, oneHourNextClose), true);
+
+  const sixHour = makeRows(150, 21600000);
+  const sixHourNextClose = sixHour.at(-1).time + (2 * 21600000);
+  assert.equal(shouldRefreshCandleHistory(sixHour, 21600000, sixHourNextClose - 1), false);
+  assert.equal(shouldRefreshCandleHistory(sixHour, 21600000, sixHourNextClose), true);
 });
