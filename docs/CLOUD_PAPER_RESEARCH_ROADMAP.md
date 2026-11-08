@@ -51,7 +51,7 @@ Coverage is not immediately a 180-day backtest: on the initial deployment it beg
 - Signals are calculated only from already-closed bars. Entries and signal exits fill at the next 1H open; stops/targets are checked against subsequent OHLC bars, with stop-first resolution when both are touched.
 - Every strategy uses the same 10% notional allocation, fee/slippage assumptions, one-position-at-a-time rule and 72-bar time exit. Allocation is capped at 25%; leverage is not modeled.
 - The report includes net P&L, net return, win rate, profit factor, expectancy, maximum drawdown, average hold and exposure, plus a cost-adjusted buy-and-hold benchmark.
-- `runWalkForwardResearch` requires at least 300 clean 1H and 50 clean 6H bars, uses a 100-bar indicator warmup, three chronological non-overlapping evaluation folds and a final untouched holdout, and repeats the full sample under 1.0x, 1.5x and 2.0x fee/slippage assumptions.
+- `runWalkForwardResearch` requires at least 500 clean 1H and 50 clean 6H bars, reserves 300 1H bars for the 50-bar 6H indicator warmup, three chronological non-overlapping evaluation folds and a final untouched holdout, and repeats the full sample under 1.0x, 1.5x and 2.0x fee/slippage assumptions.
 - This module is not connected to order entry, paper automation or the dashboard. It does not select a winner, tune parameters, or approve a strategy. The first current archive (about 349 bars/timeframe) is only enough for exploratory slices, not robust evidence; a longer clean archive is still required.
 - The module is pure offline research code and is covered by deterministic tests.
 
