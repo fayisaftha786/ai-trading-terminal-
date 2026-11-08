@@ -305,8 +305,11 @@ export class TradingEngine extends DurableObject {
     const runtime = {
       next_alarm_at_ms: priorRuntime.next_alarm_at_ms ?? null,
       last_scan_at_ms: Date.now(),
-      last_scan_status: markets.some((market) => market.status === "live") ? "completed" : "unavailable",
-      last_scan_error: markets.every((market) => market.status !== "live") ? "All public market providers were unavailable" : null,
+      last_scan_status: markets.every((market) => market.status === "live") ? "completed"
+        : markets.some((market) => market.status === "live") ? "partial" : "unavailable",
+      last_scan_error: markets.every((market) => market.status === "live") ? null
+        : markets.map((market) => market.status === "live" ? null : market.symbol + ": " + (market.error || "provider unavailable"))
+          .filter(Boolean).join("; ").slice(0, 180),
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus
     };
     this.setState("runtime", runtime);
