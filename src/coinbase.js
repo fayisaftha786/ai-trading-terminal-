@@ -5,8 +5,11 @@ const MIN_PUBLIC_REQUEST_GAP_MS = 350;
 const MAX_RETRY_ATTEMPTS = 3;
 // Avoid sleeping through most of a scheduled scan when a provider asks for a long cooldown.
 const MAX_INLINE_COOLDOWN_WAIT_MS = 30000;
-let lastPublicRequestAt = 0;
-let publicCooldownUntilMs = 0;
+const DEFAULT_REQUEST_STATE = { lastPublicRequestAt: 0, publicCooldownUntilMs: 0 };
+
+export function createCoinbaseRequestState() {
+  return { lastPublicRequestAt: 0, publicCooldownUntilMs: 0 };
+}
 
 export function parseRetryAfterMs(value, nowMs = Date.now()) {
   if (value == null || value === "") return null;
@@ -36,11 +39,14 @@ export function shouldRefreshCandleHistory(rows, intervalMs, nowMs = Date.now(),
   return nowMs >= lastTime + (2 * intervalMs);
 }
 
-export async function getJson(path) {
+export async function getJson(path, requestState = DEFAULT_REQUEST_STATE) {
+  const state = requestState && typeof requestState === "object" ? requestState : DEFAULT_REQUEST_STATE;
   for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
     const now = Date.now();
-    const pacingWait = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (now - lastPublicRequestAt));
-    const cooldownWait = Math.max(0, publicCooldownUntilMs - now);
+    const lastRequestAt = Number(state.lastPublicRequestAt) || 0;
+    const cooldownUntil = Number(state.publicCooldownUntilMs) || 0;
+    const pacingWait = Math.max(0, MIN_PUBLIC_REQUEST_GAP_MS - (now - lastRequestAt));
+    const cooldownWait = Math.max(0, cooldownUntil - now);
     if (cooldownWait > MAX_INLINE_COOLDOWN_WAIT_MS) {
       const error = new Error("Coinbase public API cooldown active; request deferred");
       error.status = 429;
@@ -49,7 +55,7 @@ export async function getJson(path) {
     }
     const waitMs = Math.max(pacingWait, cooldownWait);
     if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-    lastPublicRequestAt = Date.now();
+    state.lastPublicRequestAt = Date.now();
     let response;
     try {
       response = await fetch(BASE_URL + path, {
@@ -63,20 +69,24 @@ export async function getJson(path) {
     } catch (cause) {
       if (attempt === MAX_RETRY_ATTEMPTS - 1) throw cause;
       const backoffMs = Math.min(8000, 1000 * (2 ** attempt)) + Math.floor(Math.random() * 250);
-      publicCooldownUntilMs = Math.max(publicCooldownUntilMs, Date.now() + backoffMs);
+      state.publicCooldownUntilMs = Math.max(Number(state.publicCooldownUntilMs) || 0, Date.now() + backoffMs);
       continue;
     }
     if (response.ok) return response.json();
     const status = response.status;
     const retryable = status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
-    if (retryable && attempt < MAX_RETRY_ATTEMPTS - 1) {
+    if (retryable) {
+      const canRetry = attempt < MAX_RETRY_ATTEMPTS - 1;
       const retryAfter = parseRetryAfterMs(response.headers.get("retry-after"));
       const backoffMs = retryAfter ?? (Math.min(8000, 1000 * (2 ** attempt)) + Math.floor(Math.random() * 250));
-      publicCooldownUntilMs = Math.max(publicCooldownUntilMs, Date.now() + backoffMs);
-      if (retryAfter !== null && retryAfter > MAX_INLINE_COOLDOWN_WAIT_MS) {
-        const error = new Error("Coinbase public API rate limited; retry deferred by Retry-After");
-        error.status = 429;
-        error.retryAfterMs = retryAfter;
+      // Preserve cooldown even when the final permitted attempt is rate-limited.
+      state.publicCooldownUntilMs = Math.max(Number(state.publicCooldownUntilMs) || 0, Date.now() + backoffMs);
+      if (backoffMs > MAX_INLINE_COOLDOWN_WAIT_MS || !canRetry) {
+        const error = new Error(backoffMs > MAX_INLINE_COOLDOWN_WAIT_MS
+          ? "Coinbase public API rate limit; retry deferred by provider cooldown"
+          : "Coinbase public API retry attempts exhausted");
+        error.status = status;
+        error.retryAfterMs = backoffMs;
         throw error;
       }
       continue;
@@ -115,12 +125,12 @@ function convertCandles(raw) {
   }).filter(Boolean);
 }
 
-export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now(), cachedCandles = {}) {
+export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now(), cachedCandles = {}, requestState = DEFAULT_REQUEST_STATE) {
   const encoded = encodeURIComponent(product);
   // Public endpoint pacing: keep one shared request stream below Coinbase's documented rate.
-  const ticker = await getJson("/products/" + encoded + "/ticker");
-  const stats = await getJson("/products/" + encoded + "/stats");
-  const book = await getJson("/products/" + encoded + "/book?level=2");
+  const ticker = await getJson("/products/" + encoded + "/ticker", requestState);
+  const stats = await getJson("/products/" + encoded + "/stats", requestState);
+  const book = await getJson("/products/" + encoded + "/book?level=2", requestState);
   // Coinbase Exchange L2 REST snapshots expose sequence/bids/asks, not a reliable
   // exchange event timestamp. Record when this response was received locally.
   const bookRetrievedAtMs = Date.now();
@@ -135,9 +145,9 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   const useCachedSixHour = !!cachedSixHourAudit?.ok &&
     !shouldRefreshCandleHistory(cachedSixHour, 21600000, nowMs, 150);
   const oneHourRaw = useCachedOneHour ? null
-    : await getJson("/products/" + encoded + "/candles?granularity=3600");
+    : await getJson("/products/" + encoded + "/candles?granularity=3600", requestState);
   const sixHourRaw = useCachedSixHour ? null
-    : await getJson("/products/" + encoded + "/candles?granularity=21600");
+    : await getJson("/products/" + encoded + "/candles?granularity=21600", requestState);
   const bid = Number(ticker.bid);
   const ask = Number(ticker.ask);
   const last = Number(ticker.price);
