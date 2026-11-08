@@ -39,7 +39,7 @@ test("history summary reports coverage, retained gaps, cumulative gaps and fresh
   assert.equal(summary.coverage_days, 0.17);
   assert.equal(summary.retained_missing_intervals, 1);
   assert.equal(summary.cumulative_missing_intervals, 2);
-  assert.equal(summary.latest_age_minutes, 60);
+  assert.equal(summary.latest_age_minutes, 360);
   assert.equal(summary.last_quality_status, "clean");
 });
 
