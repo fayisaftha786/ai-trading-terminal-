@@ -253,12 +253,22 @@ export class TradingEngine extends DurableObject {
     const entryResults = [];
     let entryStatus = "disabled";
     if (state.auto_paper_enabled && !state.halted) {
-      const reasons = this.entryBlockReasons(portfolio, risk, Date.now());
-      if (reasons.length) {
+      // Fail closed for the complete configured market universe: a partial
+      // Coinbase outage must not silently permit new entries on only some symbols.
+      const unavailableMarkets = markets.filter((market) => market.status !== "live");
+      if (markets.length !== PRODUCTS.length || unavailableMarkets.length > 0) {
         entryStatus = "blocked";
-        entryResults.push({ reason: reasons.join(",") });
+        entryResults.push({
+          reason: "market_universe_data_incomplete",
+          unavailable_symbols: unavailableMarkets.map((market) => market.symbol)
+        });
       } else {
-        const candidates = [];
+        const reasons = this.entryBlockReasons(portfolio, risk, Date.now());
+        if (reasons.length) {
+          entryStatus = "blocked";
+          entryResults.push({ reason: reasons.join(",") });
+        } else {
+          const candidates = [];
         for (const market of markets) {
           if (market.status !== "live") continue;
           const assessment = assessCandidate({
@@ -278,8 +288,9 @@ export class TradingEngine extends DurableObject {
             entryStatus = "blocked";
             entryResults.push({ reason: opened.reason });
           }
-        } else {
-          entryStatus = "no_qualified_signal";
+          } else {
+            entryStatus = "no_qualified_signal";
+          }
         }
       }
     }
