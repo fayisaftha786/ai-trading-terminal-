@@ -25,8 +25,10 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
     const intervalSeconds = Number(record.timeframe_seconds);
     const intervalMs = intervalSeconds * 1000;
     const bars = Math.max(0, Number(record.bars_count) || 0);
-    const first = Number.isFinite(Number(record.first_candle_ms)) ? Number(record.first_candle_ms) : null;
-    const last = Number.isFinite(Number(record.last_candle_ms)) ? Number(record.last_candle_ms) : null;
+    const firstValue = record.first_candle_ms;
+    const lastValue = record.last_candle_ms;
+    const first = firstValue == null ? null : (Number.isFinite(Number(firstValue)) ? Number(firstValue) : null);
+    const last = lastValue == null ? null : (Number.isFinite(Number(lastValue)) ? Number(lastValue) : null);
     const aligned = first === null || last === null || (last >= first && (last - first) % intervalMs === 0);
     const expected = aligned && first !== null && last !== null
       ? Math.floor((last - first) / intervalMs) + 1 : null;
@@ -50,10 +52,10 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
       retained_missing_intervals: retainedMissing,
       cumulative_missing_intervals: Math.max(0, Number(record.cumulative_missing_intervals) || 0),
       last_quality_status: aligned ? quality : "archive_integrity_error",
-      last_quality_check_at_ms: Number.isFinite(Number(record.last_quality_check_at_ms))
-        ? Number(record.last_quality_check_at_ms) : null,
-      last_ingested_at_ms: Number.isFinite(Number(record.last_ingested_at_ms))
-        ? Number(record.last_ingested_at_ms) : null
+      last_quality_check_at_ms: record.last_quality_check_at_ms == null ? null
+        : (Number.isFinite(Number(record.last_quality_check_at_ms)) ? Number(record.last_quality_check_at_ms) : null),
+      last_ingested_at_ms: record.last_ingested_at_ms == null ? null
+        : (Number.isFinite(Number(record.last_ingested_at_ms)) ? Number(record.last_ingested_at_ms) : null)
     };
   }).sort((a, b) => a.product.localeCompare(b.product) || a.timeframe_seconds - b.timeframe_seconds);
 }
