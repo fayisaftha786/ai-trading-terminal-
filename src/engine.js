@@ -275,11 +275,38 @@ export class TradingEngine extends DurableObject {
     for (const archive of candleArchives) {
       const checkedAt = archive.received_at_ms || Date.now();
       if (archive.provider_error) {
-        this.markResearchHistoryUnavailable(archive.product, 3600, checkedAt);
-        this.markResearchHistoryUnavailable(archive.product, 21600, checkedAt);
-      } else {
-        this.archiveClosedCandles(archive.product, 3600, archive.one_hour, checkedAt);
-        this.archiveClosedCandles(archive.product, 21600, archive.six_hour, checkedAt);
+        for (const timeframeSeconds of [3600, 21600]) {
+          try {
+            this.markResearchHistoryUnavailable(archive.product, timeframeSeconds, checkedAt);
+          } catch (error) {
+            this.logEvent("research_archive_error", "Research archive status update failed", {
+              product: archive.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 160)
+            });
+          }
+        }
+        continue;
+      }
+      for (const [timeframeSeconds, audit] of [
+        [3600, archive.one_hour],
+        [21600, archive.six_hour]
+      ]) {
+        try {
+          const result = this.archiveClosedCandles(archive.product, timeframeSeconds, audit, checkedAt);
+          if (result?.status && result.status !== "clean") {
+            this.logEvent("research_archive_quality", "Research candles were not archived", {
+              product: archive.product, timeframe_seconds: timeframeSeconds,
+              status: result.status, stored: result.stored || 0
+            });
+          }
+        } catch (error) {
+          // Archive maintenance is isolated from price/exit monitoring. A storage
+          // issue must be visible, but must not abort the complete scheduled scan.
+          this.logEvent("research_archive_error", "Research candle archive write failed", {
+            product: archive.product, timeframe_seconds: timeframeSeconds,
+            error: String(error?.message || error).slice(0, 160)
+          });
+        }
       }
     }
 
@@ -430,7 +457,9 @@ export class TradingEngine extends DurableObject {
     }
 
     let inserted = 0;
-    const batchSize = 40;
+    // Keep each multi-row insert below conservative Durable Object SQLite bind limits.
+    // Each candle row uses 11 parameters, so 8 rows use 88 bind variables.
+    const batchSize = 8;
     for (let offset = 0; offset < newRows.length; offset += batchSize) {
       const batch = newRows.slice(offset, offset + batchSize);
       const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
