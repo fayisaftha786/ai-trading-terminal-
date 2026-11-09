@@ -47,6 +47,8 @@ export function assessMarketUniverse(
     ];
     if (typeof selectedProvider !== "string" || !selectedProvider) {
       marketIssues.push("market_data_provider_missing");
+    } else if (!["coinbase_exchange", "bitstamp_spot"].includes(selectedProvider)) {
+      marketIssues.push("market_data_provider_unsupported");
     } else if (declaredProviders.some((provider) => provider !== selectedProvider)) {
       marketIssues.push("market_data_provider_mismatch");
     }
@@ -421,4 +423,25 @@ export function summarizeCurrentProviderFailures(markets) {
     }
     return failures;
   }).slice(0, 6);
+}
+
+
+/**
+ * Do not let a scheduled alarm reuse an in-flight manual scan as its own
+ * scheduled result. Wait for all currently active scans, then synchronously
+ * start the scheduled scan through the provided callback.
+ */
+export async function runAfterActiveScan(getActiveScan, startScheduledScan) {
+  if (typeof getActiveScan !== "function" || typeof startScheduledScan !== "function") {
+    throw new TypeError("scan callbacks are required");
+  }
+  while (true) {
+    const activeScan = getActiveScan();
+    if (!activeScan) return startScheduledScan();
+    try {
+      await activeScan;
+    } catch {
+      // The scheduled scan must still run after a failed manual scan.
+    }
+  }
 }

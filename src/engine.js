@@ -1,18 +1,24 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, fetchBitstampResearchHistory, fetchProductSnapshot } from "./coinbase.js";
+import { evaluateMicroScalpResearch } from "./micro-scalp.js";
+import {
+  coinbaseAdvancedErrorStatus,
+  coinbaseAdvancedStatus,
+  preflightCoinbaseAdvanced,
+  previewCoinbaseAdvancedLimitBuy,
+  submitCoinbaseAdvancedLimitBuy,
+  reconcileCoinbaseAdvancedOrder,
+  cancelCoinbaseAdvancedOrder
+} from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
-import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
+import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
+import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 
-const SCAN_INTERVAL_MS = 15 * 60 * 1000;
+const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
-const DEFAULT_RISK = {
-  risk_per_trade_pct: 0.25, max_daily_loss_pct: 1.5, max_weekly_loss_pct: 4,
-  max_total_exposure_pct: 20, max_open_positions: 3, stop_loss_pct: 1,
-  take_profit_pct: 3, fee_bps_per_side: 15, slippage_bps: 10,
-  max_total_drawdown_pct: 5, daily_profit_lock_pct: 1, soft_loss_guard_fraction: 0.75
-};
+const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -24,8 +30,10 @@ function jsonResponse(data, status = 200) {
 export class TradingEngine extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
+    this.researchBackfillPromise = null;
     const schemaStatements = [
       "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL)",
@@ -46,12 +54,18 @@ export class TradingEngine extends DurableObject {
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
-      JSON.stringify({ initial_capital_usd: 100, risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, peak_equity_usd: 100 })
+      JSON.stringify({ initial_capital_usd: 10, risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
+    const currentSettings = this.getState("settings");
+    const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
+    const migratedSettings = migratePaperAutomationSettings(currentSettings, historicalTradeCount);
+    if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
+      this.setState("settings", migratedSettings);
+    }
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "runtime",
-      JSON.stringify({ last_scan_at_ms: null, last_scan_status: "not_started", last_scan_error: null })
+      JSON.stringify({ last_scan_at_ms: null, last_scan_status: "not_started", last_scan_error: null, healthy_scheduled_scan_streak: 0 })
     );
   }
 
@@ -184,6 +198,21 @@ export class TradingEngine extends DurableObject {
           last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 160) : null,
           last_scheduled_scan_error: runtime.last_scheduled_scan_error
             ? String(runtime.last_scheduled_scan_error).slice(0, 160) : null,
+          last_scheduled_scan_at_ms: Number.isFinite(Number(runtime.last_scheduled_scan_at_ms)) &&
+            Number(runtime.last_scheduled_scan_at_ms) > 0
+            ? Number(runtime.last_scheduled_scan_at_ms) : null,
+          last_scheduled_scan_age_ms: Number.isFinite(Number(runtime.last_scheduled_scan_at_ms)) &&
+            Number(runtime.last_scheduled_scan_at_ms) > 0
+            ? nowMs - Number(runtime.last_scheduled_scan_at_ms) : null,
+          last_scheduled_scan_healthy_market_count:
+            Number(runtime.last_scheduled_scan_healthy_market_count) || 0,
+          last_scheduled_scan_expected_market_count:
+            Number(runtime.last_scheduled_scan_expected_market_count) || PRODUCTS.length,
+          last_scheduled_scan_issues: (Array.isArray(runtime.last_scheduled_scan_issues)
+            ? runtime.last_scheduled_scan_issues : []).slice(0, 9).map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 160) : "unknown"
+            })),
           // These counts describe the last completed scan, not the live age of
           // the persisted quotes. Current snapshot health is reported separately below.
           last_scan_healthy_market_count: Number(runtime.healthy_market_count) || 0,
@@ -228,6 +257,7 @@ export class TradingEngine extends DurableObject {
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
+       schedule_seconds: SCAN_INTERVAL_MS / 1000,
           live_trading_enabled: false, binance_testnet_enabled: false,
           market_data_status: currentMarketStatus,
           scheduler: {
@@ -236,12 +266,188 @@ export class TradingEngine extends DurableObject {
             last_alarm_age_ms: scheduler.ageMs,
             last_scheduled_scan_status: scanStatus,
             last_scheduled_scan_error: diagnostics.last_scheduled_scan_error,
+            last_scheduled_scan_at_ms: diagnostics.last_scheduled_scan_at_ms,
+            last_scheduled_scan_age_ms: diagnostics.last_scheduled_scan_age_ms,
             last_healthy_scan_at_ms: lastHealthyAtMs,
             last_healthy_scan_age_ms: lastHealthyAtMs === null ? null : Math.max(0, nowMs - lastHealthyAtMs),
             next_alarm_at_ms: nextAlarmAtMs
           },
           scan_diagnostics: diagnostics
         });
+      }
+      // Coinbase Advanced account preflight and order preview are deliberately
+      // separated from execution. There is no /api/live/execute route in this build.
+      if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        return jsonResponse({
+          error: "live_order_executor_not_implemented_or_approved",
+          live_trading_enabled: false,
+          order_submission_available: false,
+          automatic_live_entries_enabled: false
+        }, 423);
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        const executionStatus = coinbaseAdvancedStatus(this.env);
+        if (!executionStatus.order_submission_available) {
+          return jsonResponse({
+            status: "blocked",
+            blockers: [...executionStatus.blockers, "guarded_live_execution_switch_or_open_order_limit_not_configured"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 423);
+        }
+        let rawBody;
+        try { rawBody = await request.text(); } catch {
+          return jsonResponse({ status: "blocked", blockers: ["invalid_request_body"] }, 400);
+        }
+        if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+          return jsonResponse({ status: "blocked", blockers: ["request_too_large"] }, 413);
+        }
+        let body;
+        try { body = JSON.parse(rawBody); } catch {
+          return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400);
+        }
+        const clientOrderId = body?.client_order_id;
+        if (body?.confirm_real_order !== true ||
+            typeof clientOrderId !== "string" ||
+            !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId)) {
+          return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_and_client_order_id_required"] }, 400);
+        }
+        const records = this.getState("coinbase_live_orders") || [];
+        const prior = records.find((item) => item.client_order_id === clientOrderId);
+        if (prior) return jsonResponse({ status: "duplicate_or_existing_order", order: prior }, 409);
+        const active = records.filter((item) => ["SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED", "PARTIALLY_FILLED", "CANCEL_QUEUED"].includes(item.status));
+        const status = coinbaseAdvancedStatus(this.env);
+        const utcDayStart = new Date();
+        utcDayStart.setUTCHours(0, 0, 0, 0);
+        const ordersToday = records.filter((item) => Number(item.created_at_ms) >= utcDayStart.getTime()).length;
+        if (!status.order_submission_available || active.length >= status.max_open_orders ||
+            !status.max_daily_orders || ordersToday >= status.max_daily_orders) {
+          return jsonResponse({
+            status: "blocked",
+            blockers: [...status.blockers,
+              ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : []),
+              ...(!status.max_daily_orders || ordersToday >= status.max_daily_orders ? ["maximum_daily_order_count_reached"] : [])],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 423);
+        }
+        const record = {
+          client_order_id: clientOrderId,
+          product_id: String(body.product_id || "").toUpperCase(),
+          side: "BUY",
+          status: "SUBMITTING",
+          created_at_ms: Date.now(),
+          updated_at_ms: Date.now(),
+          exchange_order_id: null
+        };
+        records.unshift(record);
+        this.setState("coinbase_live_orders", records.slice(0, 100));
+        try {
+          const result = await submitCoinbaseAdvancedLimitBuy(this.env, {
+            productId: body.product_id,
+            quoteSize: body.quote_size,
+            limitPrice: body.limit_price,
+            commissionTotal: body.commission_total,
+            previewId: body.preview_id,
+            clientOrderId
+          });
+          Object.assign(record, result, { updated_at_ms: Date.now() });
+          const current = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", current.map((item) => item.client_order_id === clientOrderId ? record : item).slice(0, 100));
+          this.logEvent("coinbase_live_order_submit", "Coinbase live LIMIT order submission result", {
+            client_order_id: clientOrderId, status: record.status, product_id: record.product_id,
+            exchange_order_id: record.exchange_order_id || null
+          });
+          return jsonResponse({ ...result, client_order_id: clientOrderId }, result.status === "blocked" ? 423 : 200);
+        } catch (error) {
+          record.status = error?.ambiguousSubmission === true ? "UNKNOWN" : "REJECTED";
+          record.error_code = typeof error?.code === "string" ? error.code : "coinbase_live_order_submission_failed";
+          record.updated_at_ms = Date.now();
+          const current = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", current.map((item) => item.client_order_id === clientOrderId ? record : item).slice(0, 100));
+          this.logEvent("coinbase_live_order_submit_error", "Coinbase live order submission failed or became ambiguous", {
+            client_order_id: clientOrderId, status: record.status, error_code: record.error_code
+          });
+          return jsonResponse({ status: record.status, decision: "RECONCILE_BEFORE_RETRY", client_order_id: clientOrderId, error_code: record.error_code }, 502);
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/orders") {
+        const records = this.getState("coinbase_live_orders") || [];
+        return jsonResponse({ orders: records.slice(0, 100), count: records.length });
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/reconcile") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
+        const records = this.getState("coinbase_live_orders") || [];
+        const record = records.find((item) => item.client_order_id === body?.client_order_id);
+        if (!record) return jsonResponse({ status: "blocked", blockers: ["local_order_not_found"] }, 404);
+        try {
+          const result = await reconcileCoinbaseAdvancedOrder(this.env, {
+            productId: record.product_id,
+            clientOrderId: record.client_order_id,
+            exchangeOrderId: record.exchange_order_id || undefined,
+            createdAtMs: record.created_at_ms
+          });
+          Object.assign(record, result.found ? result.order : {}, {
+            status: result.status,
+            last_reconciled_at_ms: Date.now(),
+            updated_at_ms: Date.now()
+          });
+          const latest = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", latest.map((item) => item.client_order_id === record.client_order_id ? record : item).slice(0, 100));
+          return jsonResponse({ ...result, client_order_id: record.client_order_id });
+        } catch (error) {
+          return jsonResponse({ status: "UNKNOWN", found: false, blockers: [typeof error?.code === "string" ? error.code : "order_reconciliation_failed"] }, 502);
+        }
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/cancel") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
+        const records = this.getState("coinbase_live_orders") || [];
+        const record = records.find((item) => item.client_order_id === body?.client_order_id);
+        if (!record || !record.exchange_order_id) return jsonResponse({ status: "blocked", blockers: ["known_exchange_order_id_required"] }, 409);
+        const result = await cancelCoinbaseAdvancedOrder(this.env, { exchangeOrderId: record.exchange_order_id });
+        record.status = result.status;
+        record.updated_at_ms = Date.now();
+        this.setState("coinbase_live_orders", records.slice(0, 100));
+        return jsonResponse(result);
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/status") {
+        return jsonResponse(coinbaseAdvancedStatus(this.env));
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/preflight") {
+        const result = await preflightCoinbaseAdvanced(this.env);
+        return jsonResponse(result);
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/order-preview") {
+        let rawBody;
+        try { rawBody = await request.text(); } catch {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_request_body"], order_submission_available: false }, 400);
+        }
+        if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["request_too_large"], order_submission_available: false }, 413);
+        }
+        let body;
+        try { body = JSON.parse(rawBody); } catch {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_json"], order_submission_available: false }, 400);
+        }
+        try {
+          const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
+            productId: body.product_id,
+            quoteSize: body.quote_size,
+            limitPrice: body.limit_price
+          });
+          return jsonResponse(result);
+        } catch (error) {
+          const code = typeof error?.code === "string" ? error.code : "coinbase_advanced_preview_failed";
+          this.logEvent("coinbase_advanced_preview_error", "Coinbase Advanced order preview failed", { code });
+          return jsonResponse({
+            status: "blocked", decision: "NO_ORDER", blockers: [code],
+            order_submission_available: false, live_trading_enabled: false
+          }, coinbaseAdvancedErrorStatus(error));
+        }
       }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
       if (request.method === "GET" && url.pathname === "/api/markets") return jsonResponse({ markets: this.getMarkets() });
@@ -263,6 +469,30 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/research/tournament") {
         return jsonResponse(this.researchTournament());
       }
+      if (request.method === "POST" && url.pathname === "/api/research/backfill") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request_body" }, 400); }
+        const selected = PRODUCTS.find((item) => item.symbol === body?.symbol);
+        if (!selected) return jsonResponse({ error: "configured_market_symbol_required" }, 400);
+        if (this.scanPromise || this.researchBackfillPromise) {
+          return jsonResponse({ error: "scan_or_research_backfill_in_progress" }, 409);
+        }
+        const task = this.backfillBitstampResearchHistory(selected);
+        this.researchBackfillPromise = task.finally(() => { this.researchBackfillPromise = null; });
+        try {
+          return jsonResponse(await this.researchBackfillPromise);
+        } catch (error) {
+          this.logEvent("research_backfill_error", "Historical research backfill failed", {
+            symbol: selected.symbol,
+            error_code: typeof error?.code === "string" ? error.code.slice(0, 80) : "research_backfill_failed"
+          });
+          return jsonResponse({
+            error: "research_backfill_failed",
+            detail: String(error?.message || error).slice(0, 180),
+            code: typeof error?.code === "string" ? error.code.slice(0, 80) : null
+          }, Number(error?.status) >= 400 && Number(error?.status) < 500 ? Number(error.status) : 502);
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
       }
@@ -274,6 +504,7 @@ export class TradingEngine extends DurableObject {
         const body = await request.json();
         if (typeof body.enabled !== "boolean") return jsonResponse({ error: "enabled_boolean_required" }, 400);
         const state = this.getState("settings");
+        if (body.enabled && state.capital_setup_required) return jsonResponse({ error: "paper_capital_setup_review_required" }, 409);
         if (body.enabled && state.halted) return jsonResponse({ error: "paper_automation_halted_reset_required" }, 409);
         if (body.enabled) {
           const nowMs = Date.now();
@@ -301,14 +532,51 @@ export class TradingEngine extends DurableObject {
           }
         }
         state.auto_paper_enabled = body.enabled;
+        state.auto_paper_resume_after_watchdog = body.enabled;
         this.setState("settings", state);
         this.logEvent("paper_automation_setting", body.enabled ? "Automatic paper entries enabled by owner" : "Automatic paper entries disabled by owner");
         return jsonResponse({ enabled: state.auto_paper_enabled, halted: state.halted, mode: "paper_only" });
       }
+      if (request.method === "POST" && url.pathname === "/api/automation/capital-review") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_json" }, 400); }
+        const settings = this.getState("settings") || {};
+        const tradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count);
+        const openPositions = this.getOpenTrades().length;
+        const review = reviewLegacyPaperCapital(settings, {
+          action: body?.action,
+          confirmed: body?.confirmed,
+          tradeCount,
+          openPositions
+        });
+        if (!review.ok) {
+          const status = review.reason === "capital_review_action_invalid" ? 400 : 409;
+          return jsonResponse({ error: review.reason }, status);
+        }
+        this.setState("settings", review.settings);
+        this.logEvent(
+          "paper_capital_review",
+          "Existing virtual starting capital accepted; historical trades preserved and auto-entry remains OFF",
+          {
+            initial_capital_usd: review.settings.initial_capital_usd,
+            historical_trade_count: tradeCount,
+            paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version
+          }
+        );
+        return jsonResponse({
+          status: "reviewed",
+          initial_capital_usd: review.settings.initial_capital_usd,
+          historical_trades_preserved: true,
+          auto_paper_enabled: false,
+          halted: !!review.settings.halted
+        });
+      }
       if (request.method === "POST" && url.pathname === "/api/automation/kill-switch") {
         const state = this.getState("settings");
         state.auto_paper_enabled = false;
+        state.auto_paper_resume_after_watchdog = false;
         state.halted = true;
+        state.halt_reason = "owner_emergency_stop";
         this.setState("settings", state);
         this.logEvent("emergency_stop", "Paper auto-entry halted; scheduled monitoring continues");
         return jsonResponse({ stopped: true, auto_paper_enabled: false, halted: true, exit_monitoring_continues: true });
@@ -317,7 +585,9 @@ export class TradingEngine extends DurableObject {
         if (this.getOpenTrades().length > 0) return jsonResponse({ error: "open_paper_positions_must_be_closed_before_reset" }, 409);
         const state = this.getState("settings");
         state.halted = false;
+        state.halt_reason = null;
         state.auto_paper_enabled = false;
+        state.auto_paper_resume_after_watchdog = false;
         this.setState("settings", state);
         this.logEvent("emergency_stop_reset", "Paper entry halt reset; auto-entry remains OFF");
         return jsonResponse({ halted: false, auto_paper_enabled: false });
@@ -367,7 +637,10 @@ export class TradingEngine extends DurableObject {
     const priorRuntime = this.getState("runtime") || {};
     const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
-      const result = await this.runCycle("scheduled", cycleKey);
+      const result = await runAfterActiveScan(
+        () => this.scanPromise || this.researchBackfillPromise,
+        () => this.runCycle("scheduled", cycleKey)
+      );
       const runtime = this.getState("runtime") || {};
       runtime.last_scheduled_alarm_at_ms = invokedAtMs;
       if (!result?.skipped) {
@@ -375,10 +648,25 @@ export class TradingEngine extends DurableObject {
         runtime.last_scheduled_scan_status = feed?.healthy === true ? "completed"
           : feed ? (Number(feed.healthy_market_count || 0) > 0 ? "partial" : "unavailable")
             : "error";
+        runtime.last_scheduled_scan_at_ms = Number(runtime.last_scan_at_ms) > 0
+          ? Number(runtime.last_scan_at_ms) : Date.now();
+        runtime.last_scheduled_scan_healthy_market_count =
+          Number(feed?.healthy_market_count) || 0;
+        runtime.last_scheduled_scan_expected_market_count =
+          Number(feed?.expected_market_count) || PRODUCTS.length;
+        runtime.last_scheduled_scan_issues = (Array.isArray(feed?.issues) ? feed.issues : [])
+          .slice(0, 9)
+          .map((issue) => ({
+            symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+            reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 160) : "unknown"
+          }));
         runtime.last_scheduled_scan_error = feed?.healthy === true ? null
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
-      } else {
+      } else if (runtime.last_scheduled_scan_status === "running") {
+        // A duplicate alarm can arrive while another scheduled run is active.
+        // Preserve the completed run's status if it finished while this alarm
+        // waited; otherwise restore the status from before this duplicate alarm.
         runtime.last_scheduled_scan_status = previousScheduledScanStatus;
         runtime.last_scheduled_scan_error = previousScheduledScanError;
       }
@@ -391,9 +679,14 @@ export class TradingEngine extends DurableObject {
         (runtime.source === "scheduled" && runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
       runtime.last_scheduled_alarm_at_ms = invokedAtMs;
       runtime.last_scheduled_scan_status = "error";
+      runtime.last_scheduled_scan_at_ms = nowMs;
+      runtime.last_scheduled_scan_healthy_market_count = 0;
+      runtime.last_scheduled_scan_expected_market_count = PRODUCTS.length;
+      runtime.last_scheduled_scan_issues = [{ symbol: null, reason: "scheduled_scan_failed" }];
       runtime.last_scheduled_scan_error = String(error?.message || error).slice(0, 180);
       runtime.consecutive_unhealthy_scheduled_scans =
         Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
+      runtime.healthy_scheduled_scan_streak = 0;
       runtime.last_scan_status = "error";
       runtime.last_scan_error = runtime.last_scheduled_scan_error;
       runtime.last_scan_at_ms = nowMs;
@@ -407,8 +700,10 @@ export class TradingEngine extends DurableObject {
         failureThreshold: 3
       });
       if (watchdogDecision.halt) {
+        settings.auto_paper_resume_after_watchdog = settings.auto_paper_enabled === true;
         settings.auto_paper_enabled = false;
         settings.halted = true;
+        settings.halt_reason = "market_data_watchdog";
         this.setState("settings", settings);
         this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted after scheduled scan failures", {
           reason: watchdogDecision.reason,
@@ -431,6 +726,9 @@ export class TradingEngine extends DurableObject {
   }
 
   async runCycle(source, cycleKey = null) {
+    if (this.researchBackfillPromise) {
+      await this.researchBackfillPromise.catch(() => null);
+    }
     if (this.scanPromise) return this.scanPromise;
     this.scanPromise = this.performCycle(source, cycleKey).finally(() => { this.scanPromise = null; });
     return this.scanPromise;
@@ -470,7 +768,31 @@ export class TradingEngine extends DurableObject {
             error: String(error?.message || error).slice(0, 160)
           });
         }
+        for (const [timeframeSeconds, key, label] of [
+          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
+        ]) {
+          try {
+            cachedCandles[key] = this.loadResearchCandleCache(product.product, timeframeSeconds);
+          } catch (error) {
+            this.logEvent("research_cache_read_error", label + " research cache read failed; fetching fresh candles", {
+              product: product.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 160)
+            });
+          }
+        }
         cachedCandles.bitstamp = {};
+        for (const [timeframeSeconds, key, label] of [
+          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
+        ]) {
+          try {
+            cachedCandles.bitstamp[key] = this.loadResearchCandleCache(product.product, timeframeSeconds, "bitstamp_spot");
+          } catch (error) {
+            this.logEvent("research_cache_read_error", "Bitstamp " + label + " fallback cache read failed", {
+              product: product.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 160)
+            });
+          }
+        }
         try {
           cachedCandles.bitstamp.one_hour = this.loadResearchCandleCache(
             product.product, 3600, "bitstamp_spot"
@@ -495,6 +817,8 @@ export class TradingEngine extends DurableObject {
         candleArchives.push({
           product: product.product,
           exchange: snapshot.market_data_provider || "coinbase_exchange",
+          one_minute: snapshot.one_minute_audit,
+          five_minute: snapshot.five_minute_audit,
           one_hour: snapshot.one_hour_audit,
           six_hour: snapshot.six_hour_audit,
           received_at_ms: Date.now()
@@ -504,6 +828,24 @@ export class TradingEngine extends DurableObject {
         const strategyResearch = evaluateResearchCandidates(
           snapshot.one_hour_audit, snapshot.six_hour_audit, 6 * 60 * 60 * 1000
         );
+        const microScalpResearch = evaluateMicroScalpResearch({
+          oneMinuteAudit: snapshot.one_minute_audit,
+          fiveMinuteAudit: snapshot.five_minute_audit,
+          market: {
+            status: snapshot.status,
+            market_data_provider: snapshot.market_data_provider,
+            quote_received_at_ms: snapshot.quote_received_at_ms,
+            ticker_time: snapshot.ticker_time,
+            book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
+            bid: snapshot.bid, ask: snapshot.ask, last: snapshot.last,
+            spread_bps: snapshot.spread_bps,
+            quote_volume_usd: snapshot.quote_volume_usd,
+            bid_depth_quote: snapshot.bid_depth_quote,
+            ask_depth_quote: snapshot.ask_depth_quote,
+            data_quality: snapshot.data_quality
+          },
+          primary, higher, nowMs: Date.now()
+        });
         // Store compact evidence only; never include hundreds of raw candles in each dashboard payload.
         const market = {
           symbol: snapshot.symbol,
@@ -542,6 +884,7 @@ export class TradingEngine extends DurableObject {
           primary,
           higher,
           strategy_research: strategyResearch,
+          micro_scalp_research: microScalpResearch,
           signal: primary.signal,
           score: primary.score,
           regime_1h: primary.regime,
@@ -575,7 +918,7 @@ export class TradingEngine extends DurableObject {
     for (const archive of candleArchives) {
       const checkedAt = archive.received_at_ms || Date.now();
       if (archive.provider_error) {
-        for (const timeframeSeconds of [3600, 21600]) {
+        for (const timeframeSeconds of [60, 300, 3600, 21600]) {
           try {
             this.markResearchHistoryUnavailable(archive.product, timeframeSeconds, checkedAt);
           } catch (error) {
@@ -588,6 +931,8 @@ export class TradingEngine extends DurableObject {
         continue;
       }
       for (const [timeframeSeconds, audit] of [
+        [60, archive.one_minute],
+        [300, archive.five_minute],
         [3600, archive.one_hour],
         [21600, archive.six_hour]
       ]) {
@@ -655,6 +1000,9 @@ export class TradingEngine extends DurableObject {
         ? previousRuntime.last_scan_at_ms : null);
     const lastHealthyScheduledScanAtMs = source === "scheduled" && marketFeed.healthy
       ? Date.now() : previousHealthyScheduledScanAtMs;
+    const healthyScheduledScanStreak = source === "scheduled"
+      ? (marketFeed.healthy ? Math.max(0, Number(previousRuntime.healthy_scheduled_scan_streak) || 0) + 1 : 0)
+      : Math.max(0, Number(previousRuntime.healthy_scheduled_scan_streak) || 0);
     const watchdogDecision = shouldHaltPaperAutomation({
       autoEnabled: !!state.auto_paper_enabled,
       halted: !!state.halted,
@@ -666,14 +1014,35 @@ export class TradingEngine extends DurableObject {
     });
     if (watchdogDecision.halt) {
       const haltState = this.getState("settings") || state;
+      haltState.auto_paper_resume_after_watchdog = haltState.auto_paper_enabled === true;
       haltState.auto_paper_enabled = false;
       haltState.halted = true;
+      haltState.halt_reason = "market_data_watchdog";
       this.setState("settings", haltState);
       Object.assign(state, haltState);
       this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted by the market-data scheduler watchdog", {
         reason: watchdogDecision.reason,
         consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
         last_healthy_scan_at_ms: previousHealthyScanAtMs
+      });
+    }
+    const latestSettings = this.getState("settings") || state;
+    if (shouldAutoResumeWatchdog({
+      halted: latestSettings.halted,
+      haltReason: latestSettings.halt_reason,
+      healthyScheduledScanStreak
+    })) {
+      latestSettings.halted = false;
+      latestSettings.halt_reason = null;
+      latestSettings.auto_paper_enabled = shouldResumePaperAutomationAfterWatchdog({
+        resumeAllowed: latestSettings.auto_paper_resume_after_watchdog,
+        capitalSetupRequired: latestSettings.capital_setup_required
+      });
+      latestSettings.auto_paper_resume_after_watchdog = false;
+      this.setState("settings", latestSettings);
+      Object.assign(state, latestSettings);
+      this.logEvent("market_data_watchdog_recovered", "Paper auto-entry resumed after two complete healthy scheduled scans", {
+        healthy_scheduled_scan_streak: healthyScheduledScanStreak
       });
     }
     const entryResults = [];
@@ -737,6 +1106,7 @@ export class TradingEngine extends DurableObject {
           .join("; ").slice(0, 180),
       last_healthy_scan_at_ms: lastHealthyScanAtMs,
       last_healthy_scheduled_scan_at_ms: lastHealthyScheduledScanAtMs,
+      healthy_scheduled_scan_streak: healthyScheduledScanStreak,
       healthy_market_count: marketFeed.healthy_market_count,
       expected_market_count: marketFeed.expected_market_count,
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
@@ -797,7 +1167,9 @@ export class TradingEngine extends DurableObject {
 
   archiveClosedCandles(product, timeframeSeconds, audit, receivedAtMs) {
     const intervalMs = timeframeSeconds * 1000;
-    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    const retentionBars = timeframeSeconds === 60 ? 4320
+      : timeframeSeconds === 300 ? 2000
+        : timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
     const previous = this.sql.exec(
       "SELECT * FROM research_history_state WHERE product=? AND timeframe_seconds=?",
       product, timeframeSeconds
@@ -888,7 +1260,9 @@ export class TradingEngine extends DurableObject {
 
   archiveProviderCandles(exchange, product, timeframeSeconds, audit, receivedAtMs) {
     if (exchange !== "bitstamp_spot") return { stored: 0, status: "unsupported_provider" };
-    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    const retentionBars = timeframeSeconds === 60 ? 4320
+      : timeframeSeconds === 300 ? 2000
+        : timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
     if (!retentionBars || !audit?.ok || !Array.isArray(audit.rows)) {
       return { stored: 0, status: "audit_rejected" };
     }
@@ -944,6 +1318,115 @@ export class TradingEngine extends DurableObject {
     };
   }
 
+  archiveProviderHistoryBackfill(exchange, product, timeframeSeconds, audit, receivedAtMs) {
+    const retentionBars = timeframeSeconds === 3600 ? 4320
+      : timeframeSeconds === 21600 ? 1440 : 0;
+    if (exchange !== "bitstamp_spot" || !retentionBars ||
+        audit?.ok !== true || !Array.isArray(audit.rows) || audit.rows.length < 150) {
+      return { stored: 0, status: "audit_rejected" };
+    }
+
+    const intervalMs = timeframeSeconds * 1000;
+    const rows = audit.rows.slice(-retentionBars);
+    let inserted = 0;
+    // Durable Object SQLite has a conservative bind-variable ceiling. 8 OHLCV
+    // rows x 11 fields stay below 100 variables per statement.
+    const batchSize = 8;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize);
+      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
+      const values = batch.flatMap((row) => [
+        exchange, product, timeframeSeconds, row.time,
+        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
+      ]);
+      inserted += this.sql.exec(
+        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
+        "VALUES " + valuesSql + " RETURNING candle_open_ms",
+        ...values
+      ).toArray().length;
+    }
+
+    const latest = rows.at(-1)?.time;
+    const cutoff = latest - ((retentionBars - 1) * intervalMs);
+    this.sql.exec(
+      "DELETE FROM research_candles WHERE exchange=? AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
+      exchange, product, timeframeSeconds, cutoff
+    );
+    const stats = this.sql.exec(
+      "SELECT COUNT(*) AS bars_count,MIN(candle_open_ms) AS first_candle_ms," +
+      "MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
+      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
+      exchange, product, timeframeSeconds
+    ).toArray()[0] || {};
+    const barsCount = Math.max(0, Number(stats.bars_count) || 0);
+    const first = stats.first_candle_ms == null ? null : Number(stats.first_candle_ms);
+    const last = stats.last_candle_ms == null ? null : Number(stats.last_candle_ms);
+    const expected = Number.isFinite(first) && Number.isFinite(last) && last >= first
+      ? Math.floor((last - first) / intervalMs) + 1 : 0;
+    const missing = Math.max(0, expected - barsCount);
+    return {
+      stored: inserted,
+      bars_count: barsCount,
+      first_candle_ms: Number.isFinite(first) ? first : null,
+      last_candle_ms: Number.isFinite(last) ? last : null,
+      missing_intervals: missing,
+      status: missing === 0 && barsCount >= rows.length ? "clean" : "archive_integrity_failed"
+    };
+  }
+
+  async backfillBitstampResearchHistory(selectedProduct) {
+    const history = await fetchBitstampResearchHistory({
+      product: selectedProduct.product,
+      nowMs: Date.now(),
+      oneHourBars: 3500,
+      sixHourBars: 600
+    });
+    const receivedAtMs = Date.now();
+    const oneHour = this.archiveProviderHistoryBackfill(
+      history.provider, history.product, 3600, history.one_hour, receivedAtMs
+    );
+    if (oneHour.status !== "clean") {
+      const error = new Error("Bitstamp 1H research archive failed post-insert integrity checks");
+      error.code = "research_backfill_archive_integrity_failed";
+      error.status = 409;
+      throw error;
+    }
+    const sixHour = this.archiveProviderHistoryBackfill(
+      history.provider, history.product, 21600, history.six_hour, receivedAtMs
+    );
+    if (sixHour.status !== "clean") {
+      const error = new Error("Bitstamp 6H research archive failed post-insert integrity checks");
+      error.code = "research_backfill_archive_integrity_failed";
+      error.status = 409;
+      throw error;
+    }
+
+    this.logEvent("research_backfill_completed", "Bitstamp historical candles added to offline research archive", {
+      symbol: selectedProduct.symbol,
+      provider: history.provider,
+      one_hour_bars: oneHour.bars_count,
+      six_hour_bars: sixHour.bars_count,
+      no_trading_side_effects: true
+    });
+    return {
+      mode: "offline_research_only",
+      no_trading_side_effects: true,
+      symbol: selectedProduct.symbol,
+      provider: history.provider,
+      one_hour: {
+        stored: oneHour.stored,
+        bars_count: oneHour.bars_count,
+        missing_intervals: oneHour.missing_intervals
+      },
+      six_hour: {
+        stored: sixHour.stored,
+        bars_count: sixHour.bars_count,
+        missing_intervals: sixHour.missing_intervals
+      },
+      requests: history.requests
+    };
+  }
+
   researchTournament() {
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
@@ -955,8 +1438,11 @@ export class TradingEngine extends DurableObject {
         "ORDER BY candle_open_ms DESC LIMIT ?",
         product, timeframeSeconds, limit
       ).toArray().reverse();
-      const candles1h = loadBars(3600, 1000);
-      const candles6h = loadBars(21600, 1000);
+      // Retention is 4,320 1H bars / 1,440 6H bars. Load enough history
+      // to meet the stricter four-fold walk-forward gate when the archive has
+      // accumulated at least ~125 days of clean provider-consistent candles.
+      const candles1h = loadBars(3600, 3500);
+      const candles6h = loadBars(21600, 1200);
       const options = {
         initialEquity,
         allocationPct: 0.1,
@@ -964,10 +1450,12 @@ export class TradingEngine extends DurableObject {
         slippageBps: risk.slippage_bps
       };
       const exploratory = runStrategyTournament({
-        candles1h, candles6h, options,
+        candles1h, candles6h,
+        options: { ...options, includeMonteCarlo: true },
         startIndex: 100
       });
       const walkForward = runWalkForwardResearch({ candles1h, candles6h, options });
+      const recursiveWarmup = runRecursiveWarmupAnalysis({ candles1h, candles6h });
       const compactStrategies = (strategies) => Object.fromEntries(
         Object.entries(strategies || {}).map(([name, result]) => {
           const { trades = [], ...summary } = result;
@@ -996,6 +1484,7 @@ export class TradingEngine extends DurableObject {
         symbol,
         product,
         history: { bars_1h: candles1h.length, bars_6h: candles6h.length },
+        recursive_warmup: recursiveWarmup,
         exploratory: compactExploratory,
         walk_forward: compactWalkForward
       };
@@ -1318,10 +1807,11 @@ export class TradingEngine extends DurableObject {
     if (portfolio.open_positions >= risk.max_open_positions) reasons.push("max_open_positions");
     const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
     reasons.push(...protection.block_reasons);
+    if (this.getState("settings")?.capital_setup_required) reasons.push("paper_capital_setup_review_required");
     if (portfolio.drawdown_pct_from_peak >= risk.max_total_drawdown_pct) {
       reasons.push("max_total_drawdown");
       const state = this.getState("settings");
-      state.auto_paper_enabled = false; state.halted = true; this.setState("settings", state);
+      state.auto_paper_enabled = false; state.auto_paper_resume_after_watchdog = false; state.halted = true; state.halt_reason = "max_total_drawdown"; this.setState("settings", state);
       this.logEvent("drawdown_circuit_breaker", "Paper automation halted by total drawdown limit");
     }
     if (!Number.isFinite(portfolio.daily_equity_pnl_usd) || !Number.isFinite(portfolio.weekly_equity_pnl_usd)) {
@@ -1331,8 +1821,12 @@ export class TradingEngine extends DurableObject {
       if (portfolio.weekly_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_weekly_loss_pct / 100)) reasons.push("weekly_loss_limit");
     }
     const dayStart = new Date(nowMs); dayStart.setUTCHours(0, 0, 0, 0);
-    const entriesToday = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()).toArray()[0]?.count || 0);
-    if (entriesToday >= 3) reasons.push("daily_entry_cap");
+    const completedCyclesToday = countCompletedPaperCyclesInWindow(
+      this.sql, dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000
+    );
+    if (!getDailyCycleAllowance(completedCyclesToday, PAPER_AUTOMATION_PROFILE.max_cycles_per_day).allowed) {
+      reasons.push("daily_cycle_cap");
+    }
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     if (portfolio.exposure_usd >= maxExposure) reasons.push("max_exposure");
     return [...new Set(reasons)];
@@ -1363,27 +1857,38 @@ export class TradingEngine extends DurableObject {
 
     const entryPrice = market.ask * (1 + risk.slippage_bps / 10000);
     const feeRate = risk.fee_bps_per_side / 10000;
-    const roundTripCostRate = (2 * (risk.fee_bps_per_side + risk.slippage_bps) + assessment.spread_bps) / 10000;
+    const roundTripCostBps = 2 * (risk.fee_bps_per_side + risk.slippage_bps) + assessment.spread_bps;
+    const roundTripCostRate = roundTripCostBps / 10000;
+    const dynamicTarget = calculateDynamicTakeProfit({
+      atrPct: market.primary?.atr_pct,
+      roundTripCostBps
+    });
+    if (!dynamicTarget.ok) return { ok: false, reason: dynamicTarget.reason };
     const effectiveStopRate = risk.stop_loss_pct / 100 + roundTripCostRate;
     const effectiveRiskPct = risk.risk_per_trade_pct * adaptiveRisk.multiplier;
     const riskBudget = portfolio.equity_usd * effectiveRiskPct / 100;
     const riskLimitedNotional = riskBudget / effectiveStopRate;
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     const remainingExposure = Math.max(0, maxExposure - portfolio.exposure_usd);
-    const notional = Math.min(riskLimitedNotional, remainingExposure);
+    const positionCap = Number.isFinite(Number(risk.max_position_notional_usd)) && Number(risk.max_position_notional_usd) > 0
+      ? Number(risk.max_position_notional_usd) : PAPER_AUTOMATION_PROFILE.max_position_notional_usd;
+    const notional = Math.min(riskLimitedNotional, remainingExposure, positionCap);
     if (!Number.isFinite(notional) || notional < 2) return { ok: false, reason: "risk_or_exposure_budget_too_small" };
     const quantity = notional / entryPrice;
     const entryFee = notional * feeRate;
     const trade = {
       symbol: market.symbol, status: "OPEN", entry_price: entryPrice, quantity, notional_usd: notional,
       stop_loss: entryPrice * (1 - risk.stop_loss_pct / 100),
-      take_profit: entryPrice * (1 + risk.take_profit_pct / 100),
+      take_profit: entryPrice * (1 + dynamicTarget.target_pct / 100),
       fees_usd: entryFee, pnl_usd: null, opened_at_ms: nowMs,
       metadata_json: JSON.stringify({
         strategy_version: "cloud-paper-v1", timeframe: "1h", confirmation_timeframe: "6h",
         market_data_provider: market.market_data_provider || "coinbase_exchange",
         score: market.primary.score, regime_1h: market.primary.regime, regime_6h: market.higher.regime,
-        spread_bps: assessment.spread_bps, round_trip_cost_bps: assessment.round_trip_cost_bps,
+        spread_bps: assessment.spread_bps, round_trip_cost_bps: roundTripCostBps,
+        dynamic_take_profit_pct: dynamicTarget.target_pct,
+        dynamic_take_profit_bps: dynamicTarget.target_bps,
+        estimated_net_edge_bps: dynamicTarget.estimated_net_edge_bps,
         fee_bps_per_side: risk.fee_bps_per_side, slippage_bps: risk.slippage_bps,
         configured_risk_per_trade_pct: risk.risk_per_trade_pct,
         adaptive_risk_multiplier: adaptiveRisk.multiplier,
@@ -1484,6 +1989,12 @@ export class TradingEngine extends DurableObject {
     const lastScanAgeMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
       ? Math.max(0, nowMs - lastScanAtMs) : null;
     const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
+    const dayStart = new Date(nowMs);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const cyclesCompleted = countCompletedPaperCyclesInWindow(
+      this.sql, dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000
+    );
+    const cycleAllowance = getDailyCycleAllowance(cyclesCompleted, PAPER_AUTOMATION_PROFILE.max_cycles_per_day);
     const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
       ? Math.max(0, nextAlarmAtMs - nowMs) : null;
     const scheduler = deriveSchedulerStatus({
@@ -1495,6 +2006,15 @@ export class TradingEngine extends DurableObject {
     return {
       enabled: !!settings.auto_paper_enabled,
       halted: !!settings.halted,
+      halt_reason: settings.halt_reason || null,
+      capital_setup_required: !!settings.capital_setup_required,
+      capital_setup_required_reason: settings.capital_setup_required_reason || null,
+      continuous_monitoring: true,
+      automatic_watchdog_recovery: true,
+      daily_cycle_limit: cycleAllowance.limit,
+      daily_cycles_used: cycleAllowance.used,
+      daily_cycles_basis: "completed_buy_sell_round_trips_by_sell_close_time_utc",
+      daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
@@ -1507,6 +2027,7 @@ export class TradingEngine extends DurableObject {
       next_alarm_in_ms: nextAlarmInMs,
       runtime,
       engine: "durable_object_alarm",
+      live_trading_enabled: false,
       mode: "paper_only"
     };
   }

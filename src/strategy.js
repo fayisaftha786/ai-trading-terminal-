@@ -233,6 +233,157 @@ export function auditCandles(input, intervalMs, nowMs = Date.now(), minimumBars 
   };
 }
 
+/**
+ * Classify the current market regime using only validated closed OHLCV bars.
+ * This is an explanatory research label, not a trade signal or probability.
+ */
+export function classifyMarketRegime(audit, intervalMs = 3600000) {
+  if (!audit?.ok || !Array.isArray(audit.rows) || audit.rows.length < 80 ||
+      !Number.isFinite(intervalMs) || intervalMs <= 0) {
+    return {
+      status: "unavailable",
+      regime: "UNCLASSIFIED",
+      direction: "UNKNOWN",
+      reason: "insufficient_or_invalid_closed_candles"
+    };
+  }
+
+  const rows = audit.rows;
+  const closes = rows.map((row) => Number(row.close));
+  const highs = rows.map((row) => Number(row.high));
+  const lows = rows.map((row) => Number(row.low));
+  const volumes = rows.map((row) => Number(row.volume));
+  if (![...closes, ...highs, ...lows, ...volumes].every(Number.isFinite) ||
+      closes.some((value) => value <= 0) ||
+      rows.some((row, index) => index > 0 &&
+        Number(row.time) - Number(rows[index - 1].time) !== intervalMs)) {
+    return {
+      status: "unavailable",
+      regime: "UNCLASSIFIED",
+      direction: "UNKNOWN",
+      reason: "market_regime_input_integrity_failed"
+    };
+  }
+
+  const period = 14;
+  const latestClose = closes.at(-1);
+  const latestDirectional = atrAdx(rows, period);
+  if (!latestDirectional) {
+    return {
+      status: "unavailable",
+      regime: "UNCLASSIFIED",
+      direction: "UNKNOWN",
+      reason: "market_regime_indicator_warmup"
+    };
+  }
+
+  const atrPctSamples = [];
+  const firstAtrIndex = Math.max(period, rows.length - 121);
+  for (let end = firstAtrIndex; end < rows.length; end += 1) {
+    let rangeSum = 0;
+    for (let index = end - period + 1; index <= end; index += 1) {
+      const current = rows[index];
+      const previousClose = Number(rows[index - 1].close);
+      rangeSum += Math.max(
+        Number(current.high) - Number(current.low),
+        Math.abs(Number(current.high) - previousClose),
+        Math.abs(Number(current.low) - previousClose)
+      );
+    }
+    const averageAtr = rangeSum / period;
+    const close = Number(rows[end].close);
+    if (close > 0 && Number.isFinite(averageAtr)) {
+      atrPctSamples.push((averageAtr / close) * 100);
+    }
+  }
+  const currentAtrPct = (latestDirectional.atr / latestClose) * 100;
+  const sortedAtr = atrPctSamples.slice().sort((a, b) => a - b);
+  const medianAtrPct = sortedAtr.length
+    ? sortedAtr[Math.floor((sortedAtr.length - 1) / 2)] : currentAtrPct;
+  const atrPercentile = sortedAtr.length
+    ? sortedAtr.filter((value) => value <= currentAtrPct).length / sortedAtr.length * 100
+    : null;
+  const atrExpansionRatio = medianAtrPct > 0 ? currentAtrPct / medianAtrPct : null;
+
+  const fast = ema(closes, 20);
+  const slow = ema(closes, 50);
+  const emaSlopePct = fast.length >= 6 && fast.at(-6) > 0
+    ? (fast.at(-1) / fast.at(-6) - 1) * 100 : 0;
+  const trendUp = fast.at(-1) > slow.at(-1) && latestClose > slow.at(-1) && emaSlopePct > 0;
+  const trendDown = fast.at(-1) < slow.at(-1) && latestClose < slow.at(-1) && emaSlopePct < 0;
+
+  const lookback = 24;
+  const recentCloses = closes.slice(-lookback - 1);
+  const pathLength = recentCloses.slice(1).reduce((sum, value, index) =>
+    sum + Math.abs(value - recentCloses[index]), 0
+  );
+  const directionalMove = Math.abs(recentCloses.at(-1) - recentCloses[0]);
+  const efficiencyRatio = pathLength > 0 ? directionalMove / pathLength : 0;
+  const rangeHigh = Math.max(...highs.slice(-lookback));
+  const rangeLow = Math.min(...lows.slice(-lookback));
+  const rangeWidthPct = latestClose > 0
+    ? (rangeHigh - rangeLow) / latestClose * 100 : null;
+
+  const recentVolume = volumes.slice(-20).reduce((sum, value) => sum + value, 0) / 20;
+  const priorVolume = volumes.slice(-40, -20).reduce((sum, value) => sum + value, 0) / 20;
+  const volumeRatio = priorVolume > 0 ? recentVolume / priorVolume : null;
+  const adx = latestDirectional.adx;
+  const plusDi = latestDirectional.plusDi;
+  const minusDi = latestDirectional.minusDi;
+
+  const highVolatility = (Number.isFinite(atrPercentile) && atrPercentile >= 90) ||
+    (Number.isFinite(atrExpansionRatio) && atrExpansionRatio >= 1.8);
+  let regime = "TRANSITION";
+  let direction = "NEUTRAL";
+  if (trendUp) direction = "UP";
+  else if (trendDown) direction = "DOWN";
+
+  if (highVolatility) {
+    regime = "HIGH_VOLATILITY";
+  } else if (adx >= 20 && efficiencyRatio >= 0.35 && trendUp && plusDi > minusDi) {
+    regime = "TRENDING_UP";
+  } else if (adx >= 20 && efficiencyRatio >= 0.35 && trendDown && minusDi > plusDi) {
+    regime = "TRENDING_DOWN";
+  } else if (adx < 16 && efficiencyRatio < 0.25) {
+    regime = "CHOPPY";
+  } else if (adx < 20 && efficiencyRatio < 0.35) {
+    regime = "RANGING";
+  }
+
+  const evidence = [];
+  if (highVolatility) evidence.push("atr_expansion_or_90th_percentile");
+  if (regime === "TRENDING_UP" || regime === "TRENDING_DOWN") {
+    evidence.push("adx_directional_strength", "ema_alignment", "directional_efficiency");
+  }
+  if (regime === "RANGING") evidence.push("low_adx_low_directional_efficiency");
+  if (regime === "CHOPPY") evidence.push("very_low_adx_and_efficiency");
+  if (volumeRatio !== null && volumeRatio >= 1.5) evidence.push("volume_expansion");
+  if (volumeRatio !== null && volumeRatio <= 0.65) evidence.push("volume_contraction");
+
+  return {
+    status: "classified",
+    regime,
+    direction,
+    adx14: Number(adx.toFixed(3)),
+    plus_di14: Number(plusDi.toFixed(3)),
+    minus_di14: Number(minusDi.toFixed(3)),
+    atr_pct: Number(currentAtrPct.toFixed(4)),
+    atr_percentile_lookback: Number.isFinite(atrPercentile)
+      ? Number(atrPercentile.toFixed(2)) : null,
+    atr_expansion_ratio: Number.isFinite(atrExpansionRatio)
+      ? Number(atrExpansionRatio.toFixed(4)) : null,
+    ema20_slope_pct: Number(emaSlopePct.toFixed(5)),
+    directional_efficiency_24: Number(efficiencyRatio.toFixed(4)),
+    range_width_pct_24: Number.isFinite(rangeWidthPct)
+      ? Number(rangeWidthPct.toFixed(4)) : null,
+    relative_volume_20: volumeRatio === null ? null : Number(volumeRatio.toFixed(4)),
+    evidence,
+    last_closed_candle_ms: Number(rows.at(-1).time),
+    method: "rule_based_closed_ohlcv_regime_v1",
+    caveat: "Regime labels are descriptive heuristics, not forecasts, confidence probabilities or entry authorization."
+  };
+}
+
 export function analyzeTimeframe(audit) {
   if (!audit?.ok) {
     return {

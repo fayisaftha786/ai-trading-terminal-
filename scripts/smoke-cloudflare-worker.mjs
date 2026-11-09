@@ -61,11 +61,17 @@ try {
   assert.equal(health.mode, "paper_only");
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
+  assert.equal(health.schedule_minutes, 1.5, "PAPER market/exit monitoring must use the 90-second cadence");
+  assert.equal(health.schedule_seconds, 90, "health must expose the exact 90-second scan interval");
   assert.equal(health.market_data_status, "unavailable", "no current snapshots must not be reported as healthy");
   assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
   assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
   assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
   assert.equal(health.scan_diagnostics.last_scan_expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_healthy_market_count, 0);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_at_ms, null);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_age_ms, null);
   assert.equal(health.scan_diagnostics.current_market_feed.status, "unavailable");
   assert.equal(health.scan_diagnostics.current_market_feed.healthy_market_count, 0);
   assert.equal(health.scan_diagnostics.current_market_feed.expected_market_count, 3);
@@ -81,6 +87,8 @@ try {
   assert.equal(health.scheduler.status, "starting", "scheduler must be explicit before its first alarm");
   assert.equal(health.scheduler.last_alarm_age_ms, null, "alarm age must be null before the first alarm");
   assert.equal(health.scheduler.last_scheduled_scan_status, "not_run");
+  assert.equal(health.scheduler.last_scheduled_scan_at_ms, null);
+  assert.equal(health.scheduler.last_scheduled_scan_age_ms, null);
   assert.equal(health.scheduler.last_healthy_scan_age_ms, null);
   assert.ok(Object.hasOwn(health, "worker_version"), "health must expose deployment version metadata");
   assert.ok(
@@ -125,14 +133,48 @@ try {
   assert.equal(dashboardResponse.status, 200, "owner dashboard must load");
   const dashboard = await dashboardResponse.json();
   assert.equal(dashboard.mode, "paper_only");
-  assert.equal(dashboard.settings.auto_paper_enabled, false, "paper automation must default OFF");
+  assert.equal(dashboard.settings.auto_paper_enabled, false, "automatic PAPER entries must start OFF until the owner explicitly opts in");
+  assert.equal(dashboard.settings.paper_initial_capital_usd, 10, "fresh paper profile must use ten dollars");
+  assert.equal(dashboard.settings.risk.max_open_positions, 1, "only one sequential paper position is allowed");
+  assert.equal(dashboard.settings.risk.max_position_notional_usd, 8, "position notional must leave a two-dollar reserve");
+  assert.equal(dashboard.settings.risk.max_daily_loss_pct, 1, "daily hard loss guard must be one percent");
   assert.equal(dashboard.live_trading_enabled, false);
   assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
+
+
+  const liveStatusResponse = await request("/api/live/status", { headers: auth });
+  assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
+  const liveStatus = await liveStatusResponse.json();
+  assert.equal(liveStatus.mode, "live_setup_locked");
+  assert.equal(liveStatus.order_submission_available, false);
+  assert.equal(liveStatus.live_trading_enabled, false);
+  assert.equal(liveStatus.automatic_live_entries_enabled, false);
+  assert.equal(liveStatus.credentials_configured, false, "local smoke must not rely on exchange credentials");
+
+  const livePreflightResponse = await request("/api/live/preflight", {
+    method: "POST", headers: auth, body: "{}"
+  });
+  assert.equal(livePreflightResponse.status, 200);
+  const livePreflight = await livePreflightResponse.json();
+  assert.equal(livePreflight.status, "not_configured");
+  assert.equal(livePreflight.order_submission_available, false);
+
+  const blockedLiveExecute = await request("/api/live/execute", {
+    method: "POST", headers: auth, body: JSON.stringify({ product_id: "BTC-USD", quote_size: "10" })
+  });
+  assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
+  assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
 
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
   const scheduler = await initialScheduler.json();
   assert.equal(scheduler.scanner_status, "starting", "scheduler watchdog must expose starting state before its first scheduled alarm");
+  assert.equal(scheduler.continuous_monitoring, true);
+  assert.equal(scheduler.automatic_watchdog_recovery, true);
+  assert.equal(scheduler.daily_cycle_limit, 5);
+  assert.equal(scheduler.daily_cycles_used, 0);
+  assert.equal(scheduler.daily_cycles_remaining, 5);
+  assert.equal(scheduler.live_trading_enabled, false);
   assert.equal(scheduler.last_scan_age_ms, null, "scan age must be null before the first completed scan");
   assert.equal(scheduler.last_scheduled_alarm_age_ms, null, "scheduled heartbeat age must be null before the first alarm");
   assert.equal(scheduler.last_scheduled_scan_status, "not_run", "scheduled scan state must be explicit before first alarm");
@@ -152,7 +194,14 @@ try {
   assert.equal(tournament.assets.length, 3);
   assert.ok(tournament.assets.every((asset) => asset.exploratory.ok === false));
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
-  assert.equal(settingsAfterResearch.enabled, false, "research must not enable paper automation");
+  assert.equal(settingsAfterResearch.enabled, false, "read-only research must not enable PAPER automation by itself");
+
+  const unnecessaryCapitalReview = await request("/api/automation/capital-review", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ action: "keep_existing_capital", confirmed: true })
+  });
+  assert.equal(unnecessaryCapitalReview.status, 409, "a fresh ledger must not accept a legacy capital review");
+  assert.equal((await unnecessaryCapitalReview.json()).error, "capital_review_not_required");
 
   const enableWithoutFreshScan = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
@@ -185,6 +234,13 @@ try {
   assert.match(staticHtml, /last_scan_error/);
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
+  assert.match(staticHtml, /Coinbase Advanced · read-only preflight/);
+  assert.match(staticHtml, /Automatic PAPER entries start OFF/);
+  assert.match(staticHtml, /id="capitalReview"/);
+  assert.match(staticHtml, /Live order submission is disabled in this build/);
+  assert.doesNotMatch(staticHtml, /Confirm guarded real order/);
+  assert.match(staticHtml, /Preview LIMIT order only/);
+  assert.match(staticHtml, /Live order submission unavailable/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
 

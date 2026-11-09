@@ -2,7 +2,7 @@
 
 ## Purpose and safety boundary
 
-This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that repeats approximately every 15 minutes. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF.
+This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 forces legacy v1 auto-entry settings OFF during migration. A new/empty ledger targets USD 10 virtual capital. If a legacy ledger has trades and a different starting balance, it stays locked until the owner reviews it; the review can preserve the existing starting balance and all history, requires all open positions to be closed, and keeps auto-entry OFF.
 
 This is not unattended real-money trading. Production/live exchange orders are not implemented here. Binance Testnet order execution is not part of this Worker. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
 
@@ -10,17 +10,17 @@ This is not unattended real-money trading. Production/live exchange orders are n
 
 - Cloudflare Worker: same-origin API gateway, password login, signed short-lived session token and static dashboard.
 - Durable Object TradingEngine: serialized single-owner paper ledger in SQLite, risk gates, market snapshots, events and emergency stop state.
-- Durable Object alarm: repeats a public market scan every 15 minutes, monitors paper stops/targets and schedules its next alarm.
+- Durable Object alarm: the current hardening branch runs the public market scan and simulated stop/target monitor every 90 seconds. This is still a scheduled simulation, not a real-time exchange stop.
 - Coinbase is the primary USD spot market-data provider. Bitstamp's public USD spot API is a secondary whole-market fallback for BTC/USD, ETH/USD and SOL/USD: ticker, grouped order-book snapshot, native 1H candles (`step=3600`) and native 6H candles (`step=21600`). If the primary snapshot is unavailable or incomplete, the Worker retries that symbol as a complete Bitstamp snapshot; it never combines a Coinbase ticker/book with Bitstamp candles. Each selected market records `market_data_provider` and the provider for ticker, book, 1H and 6H so source mixing fails the market-universe gate.
 - No D1 database, KV namespace, paid container, load balancer, VPS or paid service is required by this design.
 
-The Durable Object alarm is initialized on the first /api/health or authenticated API request. The dashboard probes health during its initial load. If the object is not invoked, its alarm does not start.
+The Durable Object alarm is initialized on the first /api/health or authenticated API request. The dashboard probes health during its initial load. If the object is not invoked, its alarm does not start. Each next alarm is scheduled about 90 seconds after the current cycle completes; this is not a guaranteed fixed-rate 90-second market-data feed.
 
 ## Free-plan limits and honest expectations
 
 - Cloudflare Workers Free currently documents 100,000 Worker requests/day and 10 ms CPU per normal Worker HTTP/Cron invocation. Durable Objects have a separate default 30-second CPU allowance per request and alarm handlers have a 15-minute wall-time limit. The Worker only routes/authenticates; heavier market analysis runs inside the Durable Object.
 - Durable Objects Free currently documents 100,000 requests/day, 13,000 GB-seconds/day, 5 million SQL rows read/day, 100,000 rows written/day, and 5 GB total SQLite storage. If a Free quota is exceeded, further operations of that type fail with an error rather than automatically moving to Paid. Quotas are not an unlimited 24/7 compute guarantee.
-- Each instrument normally uses two live snapshot requests per scan from the selected provider: ticker and Level-2 book. The ticker's own 24-hour base-volume field is used for quote-volume estimation; `/stats` is requested only if that field is absent or malformed. Validated 1-hour and 6-hour candles are read from that provider's own Durable Object archive and refreshed only when the next candle has closed, or when the cache is missing/invalid. Each provider's requests are paced at least 350 ms apart. A fallback attempt adds requests only for the affected market. Bitstamp fallback requires a `SPOT` ticker and a fresh exchange-timestamped book. If a secondary endpoint is incomplete, current valid bid/ask marks can still be retained for PAPER exits, but new entries stay blocked. A 15-minute cycle is 96 cycles/day when all alarms execute, plus dashboard requests.
+- Each instrument normally uses two live snapshot requests per scan from the selected provider: ticker and Level-2 book. The ticker's own 24-hour base-volume field is used for quote-volume estimation; `/stats` is requested only if that field is absent or malformed. Validated 1-hour and 6-hour candles are read from that provider's own Durable Object archive and refreshed only when the next candle has closed, or when the cache is missing/invalid. Each provider's requests are paced at least 350 ms apart. A fallback attempt adds requests only for the affected market. Bitstamp fallback requires a `SPOT` ticker and a fresh exchange-timestamped book. If a secondary endpoint is incomplete, current valid bid/ask marks can still be retained for PAPER exits, but new entries stay blocked. A 90-second cycle is 960 alarms/day when all alarms execute. At the normal baseline of two public snapshot requests per market, that is about 5,760 venue REST requests/day across three markets before occasional candle refreshes and secondary-provider failover. The worker paces requests at least 350 ms apart (under 2.9 requests/second); Coinbase Exchange documents a 10 requests/second public REST limit per IP with bursts up to 15. Cloudflare request/CPU quotas and retry behaviour still need live monitoring.
 - Alarms are at-least-once; the code stores the next alarm timestamp and a bounded 200-cycle idempotency ledger so a retried alarm does not create a second scan/trade cycle. A unique open-position index and per-symbol cooldown provide additional duplicate guards. Alarm scheduling is not an exchange-grade real-time guarantee.
 - The user must verify both public-provider routes from the deployed Cloudflare region before trusting signals. Coinbase is primary; Bitstamp is a backup, not a blended data source. New entries fail closed when the locally received ticker observation or exchange event timestamp is stale/future, the selected provider's product is not spot, candle history is incomplete or too old, ticker/book/candle providers do not match, the order book is unavailable, spread is too wide, or either side's top-10 depth is below USD 5,000.
 - Coinbase Exchange Level-2 REST book snapshots provide a sequence and bid/ask levels but no reliable exchange event timestamp; for Coinbase the Worker therefore enforces local response-retrieval age (maximum 15 seconds). Bitstamp grouped order-book responses include an exchange timestamp; the Worker checks both local retrieval age and exchange timestamp age (maximum 15 seconds). Missing, future or stale time evidence fails closed. Both providers must also meet the USD 5,000 minimum top-10 depth on each side.
@@ -28,7 +28,7 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - Strategy signal is a deterministic, uncalibrated rule score, not an ML model or probability.
 - Paper fills approximate an ask-plus-slippage entry and bid-minus-slippage exit. They do not model queue position, partial fills, exchange fees actually charged to your account, outages, market impact or latency.
 - A PAPER position records the exact USD spot provider used at entry. Open-position marks, simulated stops/targets and manual closes accept quotes only from that same provider; if a market switches between Coinbase and Bitstamp, that position is temporarily unmarked until its entry provider returns. Legacy positions opened before provider provenance was recorded are treated as Coinbase entries. This prevents simulated P&L from silently switching venues mid-trade.
-- The 15-minute scheduler can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
+- The 90-second scheduler still can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
 - No profit is promised. Paper results are not proof of live profitability.
 
 ## Authentication abuse protection
@@ -43,23 +43,22 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - PAPER auto-entry can only be enabled after a recent complete scan verifies all configured BTC/USD, ETH/USD and SOL/USD markets, a recently received two-sided ticker observation, a valid non-future selected-provider ticker timestamp, a locally retrieved same-provider Level-2 order-book snapshot no older than 15 seconds with at least USD 5,000 of top-10 depth on both bid and ask sides, and at least 150 clean closed candles on both 1H and 6H for every market from that same provider. The latest closed candle must also be within the explicit freshness window (90 minutes for 1H and 7 hours for 6H). The Coinbase primary or Bitstamp fallback must supply a complete, internally consistent snapshot for each market. These same checks are part of the full-market health gate, not just the later trade-candidate check. It also requires at least one recent successful scheduled alarm scan; a manual **Scan now** cannot stand in for scheduler proof.
 - One market with a stale ticker observation, a failed required provider request, an unavailable/stale order book, or a candle-integrity/freshness failure blocks the complete market universe from opening new positions. A recently received valid bid/ask snapshot is kept separately from the last-trade timestamp, so a quiet last-trade timestamp or an optional book/candle failure does not discard an otherwise fresh bid for PAPER exit monitoring. If the ticker request itself fails, no new bid is fabricated and the position remains unmarked until a fresh quote is retrieved.
 - Three consecutive unhealthy scheduled scans latch-stop new PAPER entries. A gap of more than 45 minutes since the last healthy scheduled scan also latches the stop when the engine next runs. Manual scans do not reset the scheduled failure streak, refresh the scheduled heartbeat, or hide a stopped scheduler. The dashboard reports the scheduled-alarm heartbeat separately from the last scan. The public `/api/health` endpoint now separates scheduler heartbeat, last completed scan results and current persisted market-snapshot health. `scheduler.status=healthy` means an alarm heartbeat is recent; it does **not** mean an old quote/book remains fresh. `market_data_status` and `scan_diagnostics.current_market_feed` are recalculated from the current snapshots on every health request; prior scan counts are exposed as `last_scan_healthy_market_count`. The dashboard separately labels “Last scan markets” and “Current snapshots”. Provider diagnostics include selected venue, failover state, quote/book/candle ages and refresh errors. Old runtime records with only human-readable error strings still reconstruct issue/provider summaries; credentials and raw provider payloads are not exposed.
-- A watchdog latch is not cleared automatically when Coinbase recovers. Close open paper positions, use **Reset stop lock**, run a fresh complete scan, then explicitly enable PAPER again. This avoids surprise re-entry after an extended data outage.
+- The market-data watchdog clears its latch only after two consecutive complete healthy scheduled scans. It resumes automatic PAPER entries only when the owner had explicitly enabled auto-entry before the watchdog halt and that permission remains persisted. If auto-entry was OFF before the halt, recovery leaves it OFF; the owner must then pass the fresh complete scheduled-scan gate and explicitly enable it. Owner emergency stops and total-drawdown halts do not auto-resume; they require explicit owner review.
 - The provider's final retry response also retains its Retry-After cooldown in the running Worker isolate so subsequent symbols do not immediately repeat requests while the provider is still rate-limiting the Worker. This cooldown is in-memory; a Worker isolate restart clears it.
 
 ## Default risk controls
 
-- PAPER starting equity: USD 100 of virtual funds only.
-- Risk budget per entry: 0.25% of paper equity.
-- Maximum total exposure: 20%.
-- Maximum open positions: 3.
-- Maximum entries per UTC day: 3.
+- New/empty PAPER profile starting equity: USD 10 of virtual funds only; USD 2 remains reserved and the position notional ceiling is USD 8.
+- Risk budget per entry: 1% of current paper equity, reduced further by adaptive risk when drawdown/loss streaks rise.
+- Maximum total exposure: 80%; maximum open positions: 1.
+- Maximum completed BUY→SELL round trips per UTC day: 5; this is a ceiling, not a target.
 - Per-symbol cooldown: 4 hours.
-- Stop distance: 1%; take-profit distance: 3%.
-- Estimated fee: 15 bps per side; estimated slippage: 10 bps.
-- Daily loss stop: 1.5%; weekly loss stop: 4%; peak-to-trough stop: 5%.
-- Only one eligible entry per scan.
+- Stop-loss distance: 1%; take-profit is dynamically selected from estimated round-trip costs and 1H ATR, with unsafe targets rejected.
+- Estimated fee: 60 bps per side; estimated slippage: 10 bps per side. The fee is a conservative placeholder, not the owner’s verified Coinbase tier.
+- Daily loss stop: 1%; weekly loss stop: 4%; peak-to-trough stop: 5%; soft daily/weekly lock begins at 75% of those limits.
+- A legacy ledger with recorded trades and a starting balance other than USD 10 is never silently rebased. After all open positions are closed, the owner may explicitly review and preserve the existing virtual starting balance and historical trades. This review keeps automatic PAPER entries OFF.
 
-These are initial conservative assumptions for a simulation; review them after measured paper data. The 15 bps fee assumption is not a statement of your actual Coinbase fee tier.
+All limits are simulation controls, not guarantees or promises of return.
 
 ## Temporary preview deployment (optional)
 
@@ -88,8 +87,8 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
    Save/deploy the Worker after adding both secrets. Do not reuse your GitHub or email password, and never send either value here. `ADMIN_USERNAME` defaults to `admin`; it can be overridden as a non-secret variable.
 7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `worker_version.id`, `worker_version.tag` (the Git commit SHA when deployed with the command above), and a version timestamp. Compare the tag with the repository `main` SHA before treating the new deployment as current.
 8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, local order-book response retrieval age under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
-9. Confirm the scan timestamp advances after the first alarm and again roughly every 15 minutes. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
-10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real trading and Binance Testnet remain disabled.
+9. Confirm the scan timestamp advances after the first alarm and again roughly every 90 seconds. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
+10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real-money order submission is disabled in this build; Coinbase account preflight and order preview do not place an order. Binance Testnet remains disabled.
 11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
 
 ### GitHub Actions deploy workflow (separate from Cloudflare Git integration)
@@ -130,3 +129,18 @@ GitHub Actions runs JavaScript syntax checks, strategy-unit tests, a Wrangler dr
 The local smoke test runs Wrangler in local workerd mode and checks SQLite Durable Object initialization, unauthenticated API rejection, owner login, dashboard reads, explicit PAPER enable, emergency stop, reset and static asset serving. It uses disposable local test credentials and makes no cloud deployment.
 
 Official secondary-provider reference: [Bitstamp Public API v2](https://www.bitstamp.net/api/) — public spot ticker, grouped order-book, OHLC fields and published request limits.
+
+
+## Research-quality upgrades (PAPER and offline only)
+
+The research dashboard compares three exploratory strategy families. A single backtest or parameter search is not a promotion gate. The hardening branch adds:
+
+- Chronological walk-forward evaluation with at least 3,000 clean 1H bars and 500 clean 6H bars, an initial higher-timeframe warmup, and four non-overlapping test folds of at least 28 days each (three sequential validation folds plus an untouched final holdout).
+- Explicit out-of-sample trade counts per strategy. Fewer than 30 aggregate test-fold trades is labelled as an insufficient research sample, not a validated strategy.
+- A 500-path deterministic trade-order shuffle and moving-block bootstrap on exploratory trade returns. It reports drawdown under reordered trade sequences, return percentiles and the fraction of resampled paths that lose money. This is a sensitivity diagnostic, not a probability forecast, and it cannot model every future regime change.
+- Intrabar stop/target conflict counts, next-bar-open entries, adverse stop-first collision resolution, fees and slippage. The drawdown mark includes estimated exit slippage and fees.
+- Dashboard status that distinguishes exploratory performance from the untouched holdout, 2x cost stress and Monte Carlo tails.
+
+The current research history archive retains up to 4,320 1H bars and 1,440 6H bars per asset/provider. The new walk-forward gate therefore needs roughly 125 days of clean 6H/1H history to become available. It will correctly report insufficient history until the archive has accumulated enough data. This does not delay ordinary 1H/6H signal monitoring; it delays only the stronger research-validation claim.
+
+External research references: [Freqtrade look-ahead analysis](https://www.freqtrade.io/en/stable/lookahead-analysis/), [Freqtrade recursive indicator analysis](https://www.freqtrade.io/en/stable/recursive-analysis/), [Hummingbot V2 architecture](https://hummingbot.org/strategies/v2-strategies/), [Jesse optimization and held-out testing](https://docs.jesse.trade/docs/research/optimize), and [Probability of Backtest Overfitting (Bailey et al.)](https://doi.org/10.21314/jcf.2016.322).

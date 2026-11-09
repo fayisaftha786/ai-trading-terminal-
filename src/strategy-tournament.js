@@ -5,7 +5,11 @@ const DEFAULTS = Object.freeze({
   allocationPct: 0.1,
   feeBpsPerSide: 15,
   slippageBps: 10,
-  maxBarsInTrade: 72
+  maxBarsInTrade: 72,
+  monteCarloIterations: 500,
+  monteCarloBlockLength: 3,
+  monteCarloSeed: 20261109,
+  minimumMonteCarloTrades: 30
 });
 
 function hasPresentNumericValue(value) {
@@ -42,7 +46,8 @@ function normalizeBars(input, intervalMs) {
       close: Number(raw.close),
       volume: Number(raw.volume)
     };
-    if (row.open <= 0 || row.high < Math.max(row.open, row.close, row.low) ||
+    if ([row.open, row.high, row.low, row.close].some((price) => price <= 0) ||
+        row.high < Math.max(row.open, row.close, row.low) ||
         row.low > Math.min(row.open, row.close, row.high) || row.volume < 0) {
       issues.add("invalid_ohlcv");
       continue;
@@ -180,6 +185,129 @@ function strategySignal(name, bar, feature, index) {
   return null;
 }
 
+/**
+ * Compare final indicator values and strategy signals across different startup
+ * history lengths. This is a Freqtrade-style recursive-indicator sensitivity
+ * diagnostic; it never authorizes a PAPER entry.
+ */
+export function runRecursiveWarmupAnalysis({
+  candles1h,
+  candles6h,
+  tolerancePct = 0.05,
+  rsiTolerancePoints = 1
+}) {
+  const oneHourInput = normalizeBars(candles1h, HOUR_MS);
+  const sixHourInput = normalizeBars(candles6h, SIX_HOUR_MS);
+  if (oneHourInput.issues.length || sixHourInput.issues.length) {
+    return {
+      status: "invalid_history",
+      issues_1h: oneHourInput.issues,
+      issues_6h: sixHourInput.issues
+    };
+  }
+
+  const oneHour = oneHourInput.rows;
+  const sixHour = sixHourInput.rows;
+  const configurations = [
+    { one_hour_bars: 150, six_hour_bars: 50 },
+    { one_hour_bars: 160, six_hour_bars: 80 },
+    { one_hour_bars: 300, six_hour_bars: 100 },
+    { one_hour_bars: 600, six_hour_bars: 150 },
+    { one_hour_bars: 1000, six_hour_bars: 220 },
+    { one_hour_bars: 3500, six_hour_bars: 650 }
+  ].filter((config) =>
+    oneHour.length >= config.one_hour_bars &&
+    sixHour.length >= config.six_hour_bars
+  );
+
+  if (configurations.length < 2) {
+    return {
+      status: "insufficient_warmup_history",
+      available_1h_bars: oneHour.length,
+      available_6h_bars: sixHour.length,
+      configurations_tested: configurations.length,
+      configurations_required: 2
+    };
+  }
+
+  const strategyNames = ["trend_continuation", "range_mean_reversion", "breakout_continuation"];
+  const samples = configurations.map((config) => {
+    const bars1h = oneHour.slice(-config.one_hour_bars);
+    const bars6h = sixHour.slice(-config.six_hour_bars);
+    const lastFeature = features(bars1h, bars6h).at(-1);
+    return {
+      ...config,
+      indicators: {
+        ema20: lastFeature.ema20,
+        ema50: lastFeature.ema50,
+        rsi14: lastFeature.rsi14,
+        atr14: lastFeature.atr14
+      },
+      signals: Object.fromEntries(strategyNames.map((name) => [
+        name,
+        Boolean(strategySignal(name, bars1h.at(-1), lastFeature, bars1h.length - 1))
+      ]))
+    };
+  });
+
+  const reference = samples.at(-1);
+  const deviations = samples.slice(0, -1).map((sample) => {
+    const priceDeviations = ["ema20", "ema50", "atr14"].map((key) => {
+      const base = Number(reference.indicators[key]);
+      const value = Number(sample.indicators[key]);
+      return Number.isFinite(base) && Math.abs(base) > 1e-12 && Number.isFinite(value)
+        ? Math.abs((value / base) - 1) * 100 : Number.POSITIVE_INFINITY;
+    });
+    const rsiDeviation = Number.isFinite(reference.indicators.rsi14) &&
+      Number.isFinite(sample.indicators.rsi14)
+      ? Math.abs(sample.indicators.rsi14 - reference.indicators.rsi14)
+      : Number.POSITIVE_INFINITY;
+    return {
+      one_hour_bars: sample.one_hour_bars,
+      six_hour_bars: sample.six_hour_bars,
+      max_price_indicator_deviation_pct: Math.max(...priceDeviations),
+      rsi_deviation_points: rsiDeviation,
+      signal_mismatches: strategyNames.filter((name) =>
+        sample.signals[name] !== reference.signals[name]
+      )
+    };
+  });
+
+  const maxPriceDeviation = Math.max(...deviations.map((row) =>
+    row.max_price_indicator_deviation_pct
+  ));
+  const maxRsiDeviation = Math.max(...deviations.map((row) =>
+    row.rsi_deviation_points
+  ));
+  const signalMismatches = deviations.reduce((sum, row) =>
+    sum + row.signal_mismatches.length, 0
+  );
+  const stable = maxPriceDeviation <= tolerancePct &&
+    maxRsiDeviation <= rsiTolerancePoints &&
+    signalMismatches === 0;
+
+  return {
+    status: "research_only",
+    stable,
+    signal_consistency: signalMismatches === 0,
+    reference_window: {
+      one_hour_bars: reference.one_hour_bars,
+      six_hour_bars: reference.six_hour_bars
+    },
+    configurations_tested: samples.length,
+    max_price_indicator_deviation_pct: Number(maxPriceDeviation.toFixed(6)),
+    max_rsi_deviation_points: Number(maxRsiDeviation.toFixed(6)),
+    signal_mismatches: signalMismatches,
+    tolerances: {
+      price_indicator_deviation_pct: tolerancePct,
+      rsi_deviation_points: rsiTolerancePoints
+    },
+    comparisons: deviations,
+    reference_signals: reference.signals,
+    caveat: "Startup-window stability is a sensitivity check, not proof of strategy profitability or absence of all look-ahead bias."
+  };
+}
+
 function metrics(trades, equityCurve, initialEquity, finalEquity) {
   const wins = trades.filter((trade) => trade.netPnl > 0);
   const losses = trades.filter((trade) => trade.netPnl < 0);
@@ -191,6 +319,9 @@ function metrics(trades, equityCurve, initialEquity, finalEquity) {
     peak = Math.max(peak, value);
     if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - value) / peak * 100);
   }
+  const intrabarConflicts = trades.filter((trade) =>
+    trade.same_bar_stop_target_conflict_resolved_stop_first
+  ).length;
   return {
     trade_count: trades.length,
     win_rate_pct: trades.length ? Number((wins.length / trades.length * 100).toFixed(2)) : null,
@@ -200,7 +331,125 @@ function metrics(trades, equityCurve, initialEquity, finalEquity) {
     expectancy_per_trade: trades.length ? Number((trades.reduce((sum, trade) => sum + trade.netPnl, 0) / trades.length).toFixed(6)) : null,
     max_drawdown_pct: Number(maxDrawdownPct.toFixed(4)),
     average_hold_bars: trades.length ? Number(mean(trades.map((trade) => trade.holdBars)).toFixed(2)) : null,
+    intrabar_stop_target_conflicts: intrabarConflicts,
+    intrabar_stop_target_conflict_rate_pct: trades.length
+      ? Number((intrabarConflicts / trades.length * 100).toFixed(2)) : 0,
     exposure_pct: equityCurve.length ? Number((equityCurve.filter((value, index) => index > 0 && value !== equityCurve[index - 1]).length / equityCurve.length * 100).toFixed(2)) : 0
+  };
+}
+
+function seededRandom(seed) {
+  let state = Number.isSafeInteger(seed) ? (seed >>> 0) : 20261109;
+  return () => {
+    state = (state + 0x6D2B79F5) >>> 0;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function percentile(values, quantile) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const position = (sorted.length - 1) * quantile;
+  const lower = Math.floor(position);
+  const upper = Math.ceil(position);
+  if (lower === upper) return sorted[lower];
+  return sorted[lower] + (sorted[upper] - sorted[lower]) * (position - lower);
+}
+
+function evaluateReturnPath(returns, initialEquity) {
+  let equity = initialEquity;
+  let peak = initialEquity;
+  let maxDrawdownPct = 0;
+  for (const returnPct of returns) {
+    equity *= Math.max(0, 1 + (returnPct / 100));
+    peak = Math.max(peak, equity);
+    if (peak > 0) maxDrawdownPct = Math.max(maxDrawdownPct, (peak - equity) / peak * 100);
+  }
+  return {
+    net_return_pct: (equity / initialEquity - 1) * 100,
+    max_drawdown_pct: maxDrawdownPct
+  };
+}
+
+/**
+ * Deterministic order-shuffle and moving-block bootstrap stress.
+ * The result is a research diagnostic, never an execution or promotion signal.
+ */
+export function runTradeOrderMonteCarlo(tradeReturnsPct, options = {}) {
+  const returns = Array.isArray(tradeReturnsPct) ? tradeReturnsPct.slice() : [];
+  const initialEquity = Number(options.initialEquity ?? DEFAULTS.initialEquity);
+  const iterations = Number(options.iterations ?? DEFAULTS.monteCarloIterations);
+  const blockLength = Number(options.blockLength ?? DEFAULTS.monteCarloBlockLength);
+  const minimumTrades = Number(options.minimumTrades ?? DEFAULTS.minimumMonteCarloTrades);
+  const seed = Number(options.seed ?? DEFAULTS.monteCarloSeed);
+
+  if (!Number.isFinite(initialEquity) || initialEquity <= 0 ||
+      !Number.isSafeInteger(iterations) || iterations < 100 || iterations > 2000 ||
+      !Number.isSafeInteger(blockLength) || blockLength < 1 || blockLength > 10 ||
+      !Number.isSafeInteger(minimumTrades) || minimumTrades < 10 ||
+      !Number.isSafeInteger(seed) || !returns.every((value) => Number.isFinite(value) && value > -100)) {
+    return { status: "invalid_inputs", sample_size: returns.length };
+  }
+
+  if (returns.length < minimumTrades) {
+    return {
+      status: "insufficient_trade_sample",
+      sample_size: returns.length,
+      minimum_required_trades: minimumTrades,
+      iterations: 0
+    };
+  }
+
+  const random = seededRandom(seed);
+  const shuffledDrawdowns = [];
+  const bootstrappedReturns = [];
+  const bootstrappedDrawdowns = [];
+  let bootstrapLosses = 0;
+
+  for (let iteration = 0; iteration < iterations; iteration += 1) {
+    const shuffled = returns.slice();
+    for (let index = shuffled.length - 1; index > 0; index -= 1) {
+      const swapIndex = Math.floor(random() * (index + 1));
+      [shuffled[index], shuffled[swapIndex]] = [shuffled[swapIndex], shuffled[index]];
+    }
+    shuffledDrawdowns.push(evaluateReturnPath(shuffled, initialEquity).max_drawdown_pct);
+
+    const bootstrapped = [];
+    while (bootstrapped.length < returns.length) {
+      const maxStart = Math.max(0, returns.length - blockLength);
+      const blockStart = Math.floor(random() * (maxStart + 1));
+      for (let offset = 0; offset < blockLength && bootstrapped.length < returns.length; offset += 1) {
+        bootstrapped.push(returns[blockStart + offset]);
+      }
+    }
+    const result = evaluateReturnPath(bootstrapped, initialEquity);
+    bootstrappedReturns.push(result.net_return_pct);
+    bootstrappedDrawdowns.push(result.max_drawdown_pct);
+    if (result.net_return_pct < 0) bootstrapLosses += 1;
+  }
+
+  return {
+    status: "research_only",
+    method: "trade_order_shuffle_and_moving_block_bootstrap",
+    sample_size: returns.length,
+    iterations,
+    block_length: blockLength,
+    trade_order_shuffle: {
+      median_max_drawdown_pct: Number(percentile(shuffledDrawdowns, 0.5).toFixed(4)),
+      p95_max_drawdown_pct: Number(percentile(shuffledDrawdowns, 0.95).toFixed(4))
+    },
+    moving_block_bootstrap: {
+      p05_net_return_pct: Number(percentile(bootstrappedReturns, 0.05).toFixed(4)),
+      median_net_return_pct: Number(percentile(bootstrappedReturns, 0.5).toFixed(4)),
+      p95_net_return_pct: Number(percentile(bootstrappedReturns, 0.95).toFixed(4)),
+      probability_of_loss_pct: Number((bootstrapLosses / iterations * 100).toFixed(2)),
+      median_max_drawdown_pct: Number(percentile(bootstrappedDrawdowns, 0.5).toFixed(4)),
+      p95_max_drawdown_pct: Number(percentile(bootstrappedDrawdowns, 0.95).toFixed(4))
+    },
+    caveat: "Resamples observed paper/backtest trade returns; regime changes and dependence beyond the chosen block length may not be captured."
   };
 }
 
@@ -241,6 +490,9 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
       exit_price: Number(fillPrice.toFixed(8)),
       quantity: Number(position.quantity.toFixed(8)),
       netPnl: Number(net.toFixed(8)),
+      net_return_on_entry_equity_pct: Number((net / position.entryEquity * 100).toFixed(8)),
+      entry_notional_usd: Number(position.notional.toFixed(8)),
+      entry_equity_usd: Number(position.entryEquity.toFixed(8)),
       fees: Number((position.entryFee + exitFee).toFixed(8)),
       holdBars: index - position.entryIndex + 1,
       exit_reason: reason,
@@ -283,15 +535,19 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
           : entryFill + featureRows[i].atr14 * signal.targetAtr;
         if (Number.isFinite(stop) && stop > 0 && Number.isFinite(target) && target > entryFill) {
           position = {
-            entryFill, quantity, entryFee, stop, target,
+            entryFill, quantity, entryFee, stop, target, notional,
+            entryEquity: equity,
             signalTime: bar.time, entryTime: next.time, entryIndex: i + 1, reason: signal.reason
           };
         }
       }
     }
     const markedPosition = position && position.entryIndex <= i ? position : null;
+    const estimatedExitFill = markedPosition ? bar.close * (1 - slipRate) : null;
+    const estimatedExitFee = markedPosition ? estimatedExitFill * markedPosition.quantity * feeRate : 0;
     const mark = markedPosition
-      ? equity + (bar.close - markedPosition.entryFill) * markedPosition.quantity - markedPosition.entryFee
+      ? equity + (estimatedExitFill - markedPosition.entryFill) * markedPosition.quantity -
+        markedPosition.entryFee - estimatedExitFee
       : equity;
     curve.push(mark);
     exposure.push(heldDuringBar);
@@ -355,9 +611,25 @@ export function runStrategyTournament({
   if (finish - start < 20) return { ok: false, reason: "evaluation_window_too_short" };
   const featureRows = features(oneHour, sixHour);
   const strategies = ["trend_continuation", "range_mean_reversion", "breakout_continuation"];
-  const results = Object.fromEntries(strategies.map((name) => [
-    name, simulate(name, oneHour, featureRows, settings, start, finish)
-  ]));
+  const results = Object.fromEntries(strategies.map((name) => {
+    const result = simulate(name, oneHour, featureRows, settings, start, finish);
+    if (options.includeMonteCarlo === true) {
+      const strategySeed = settings.monteCarloSeed +
+        name.split("").reduce((sum, character) => sum + character.charCodeAt(0), 0) +
+        result.trades.length;
+      result.monte_carlo = runTradeOrderMonteCarlo(
+        result.trades.map((trade) => trade.net_return_on_entry_equity_pct),
+        {
+          initialEquity: settings.initialEquity,
+          iterations: settings.monteCarloIterations,
+          blockLength: settings.monteCarloBlockLength,
+          minimumTrades: settings.minimumMonteCarloTrades,
+          seed: strategySeed
+        }
+      );
+    }
+    return [name, result];
+  }));
   return {
     ok: true,
     mode: "offline_research_only",
@@ -394,16 +666,38 @@ export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
   }
   const oneHour = oneHourInput.rows;
   const sixHour = sixHourInput.rows;
-  if (oneHour.length < 500 || sixHour.length < 50) {
-    return { ok: false, reason: "need_at_least_500_clean_1h_and_50_clean_6h_bars",
-      bars_1h: oneHour.length, bars_6h: sixHour.length };
+  const minimumOneHourBars = 3000;
+  const minimumSixHourBars = 500;
+  const initialWarmupBars = 300;
+  const minimumFoldBars = 672; // 28 days of non-overlapping hourly test data.
+  if (oneHour.length < minimumOneHourBars || sixHour.length < minimumSixHourBars) {
+    return {
+      ok: false,
+      reason: "need_at_least_3000_clean_1h_and_500_clean_6h_bars_for_four_28d_folds",
+      bars_1h: oneHour.length,
+      bars_6h: sixHour.length,
+      required_bars_1h: minimumOneHourBars,
+      required_bars_6h: minimumSixHourBars
+    };
   }
-  // 50 closed 6H bars are about 300 hours of higher-timeframe warmup.
-  // Reserve at least 50 subsequent 1H bars for each of three folds and holdout.
-  const firstEvaluation = 300;
+
+  // Require 50 completed 6H bars before the first evaluation bar. If the two
+  // archives begin at different times, move the test window forward instead
+  // of silently evaluating with an incomplete higher-timeframe warmup.
+  const sixHourWarmupEndMs = sixHour[49].time + SIX_HOUR_MS;
+  let firstEvaluation = initialWarmupBars;
+  while (firstEvaluation < oneHour.length &&
+      oneHour[firstEvaluation].time < sixHourWarmupEndMs) firstEvaluation += 1;
   const available = oneHour.length - firstEvaluation;
   const foldSize = Math.floor(available / 4);
-  if (foldSize < 50) return { ok: false, reason: "walk_forward_folds_too_short" };
+  if (foldSize < minimumFoldBars) {
+    return {
+      ok: false,
+      reason: "walk_forward_folds_require_at_least_28_days_each",
+      fold_bars: foldSize,
+      required_fold_bars: minimumFoldBars
+    };
+  }
   const folds = [];
   for (let index = 0; index < 4; index += 1) {
     const start = firstEvaluation + index * foldSize;
@@ -432,13 +726,28 @@ export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
       startIndex: firstEvaluation, endIndex: oneHour.length
     })
   }));
+  const strategySamples = Object.fromEntries(
+    ["trend_continuation", "range_mean_reversion", "breakout_continuation"].map((name) => {
+      const oosTrades = folds.reduce((sum, fold) => sum + Number(fold.results?.[name]?.trade_count || 0), 0);
+      const testFolds = folds.filter((fold) => fold.ok).length;
+      return [name, {
+        non_overlapping_test_folds: testFolds,
+        out_of_sample_trade_count: oosTrades,
+        minimum_trade_sample: 30,
+        sample_status: oosTrades >= 30 ? "minimum_sample_met_research_only" : "insufficient_out_of_sample_trades"
+      }];
+    })
+  );
   return {
     ok: folds.every((fold) => fold.ok) && stress.every((item) => item.result.ok),
     mode: "offline_research_only",
     validation: "chronological_non_overlapping_folds_no_random_shuffle",
     warmup_bars: firstEvaluation,
+    fold_bars: foldSize,
+    approximate_test_days_per_fold: Number((foldSize / 24).toFixed(1)),
+    strategy_samples: strategySamples,
     folds,
     cost_stress: stress,
-    warning: "Exploratory backtest only. No strategy is approved for automatic paper entries or live execution."
+    warning: "Exploratory screening only. Every strategy remains research-only; passing these checks does not authorize automatic PAPER entries or live execution."
   };
 }

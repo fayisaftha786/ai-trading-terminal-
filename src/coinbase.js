@@ -273,8 +273,12 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     bookError = providerErrorCode(error);
   }
 
+  const cachedOneMinute = Array.isArray(cachedCandles.one_minute) ? cachedCandles.one_minute : [];
+  const cachedFiveMinute = Array.isArray(cachedCandles.five_minute) ? cachedCandles.five_minute : [];
   const cachedOneHour = Array.isArray(cachedCandles.one_hour) ? cachedCandles.one_hour : [];
   const cachedSixHour = Array.isArray(cachedCandles.six_hour) ? cachedCandles.six_hour : [];
+  const cachedOneMinuteAudit = cachedOneMinute.length ? auditCandles(cachedOneMinute, 60000, nowMs, 150) : null;
+  const cachedFiveMinuteAudit = cachedFiveMinute.length ? auditCandles(cachedFiveMinute, 300000, nowMs, 150) : null;
   const cachedOneHourAudit = cachedOneHour.length
     ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
   const cachedSixHourAudit = cachedSixHour.length
@@ -282,6 +286,16 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
 
   // Keep provider requests sequential: getJson shares one pacing/cooldown
   // state, and parallel timeframe refreshes could bypass the 350ms request gap.
+  const oneMinuteResult = await loadCandleHistory({
+    product, timeframeSeconds: 60, intervalMs: 60000,
+    cachedRows: cachedOneMinute, cachedAudit: cachedOneMinuteAudit,
+    requestState, nowMs, maxStaleMs: 180000
+  });
+  const fiveMinuteResult = await loadCandleHistory({
+    product, timeframeSeconds: 300, intervalMs: 300000,
+    cachedRows: cachedFiveMinute, cachedAudit: cachedFiveMinuteAudit,
+    requestState, nowMs, maxStaleMs: 420000
+  });
   const oneHourResult = await loadCandleHistory({
     product, timeframeSeconds: 3600, intervalMs: 3600000,
     cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
@@ -293,6 +307,8 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     requestState, nowMs, maxStaleMs: 25200000
   });
 
+  const oneMinuteAudit = oneMinuteResult.audit;
+  const fiveMinuteAudit = fiveMinuteResult.audit;
   const oneHourAudit = oneHourResult.audit;
   const sixHourAudit = sixHourResult.audit;
   const bidDepth = book ? parseBookSide(book.bids) : null;
@@ -320,12 +336,16 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     quote_volume_usd: Number.isFinite(quoteVolume) && quoteVolume >= 0 ? quoteVolume : null,
     bid_depth_quote: bidDepth,
     ask_depth_quote: askDepth,
+    one_minute_audit: oneMinuteAudit,
+    five_minute_audit: fiveMinuteAudit,
     one_hour_audit: oneHourAudit,
     six_hour_audit: sixHourAudit,
     data_quality: {
       market_data_provider: "coinbase_exchange",
       ticker_provider: "coinbase_exchange",
       book_provider: "coinbase_exchange",
+      one_minute_provider: "coinbase_exchange",
+      five_minute_provider: "coinbase_exchange",
       one_hour_provider: "coinbase_exchange",
       six_hour_provider: "coinbase_exchange",
       ticker_status: "available",
@@ -335,6 +355,8 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
       quote_volume_source: volumeSource,
       book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
       book_error: bookError,
+      one_minute: { ok: oneMinuteAudit.ok, issues: oneMinuteAudit.issues, bars: oneMinuteAudit.valid_closed_bars },
+      five_minute: { ok: fiveMinuteAudit.ok, issues: fiveMinuteAudit.issues, bars: fiveMinuteAudit.valid_closed_bars },
       one_hour: {
         ok: oneHourAudit.ok,
         issues: oneHourAudit.issues,
@@ -345,6 +367,12 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
         issues: sixHourAudit.issues,
         bars: sixHourAudit.valid_closed_bars
       },
+      one_minute_source: oneMinuteResult.source,
+      five_minute_source: fiveMinuteResult.source,
+      one_minute_refresh_status: oneMinuteResult.refresh_status,
+      five_minute_refresh_status: fiveMinuteResult.refresh_status,
+      one_minute_refresh_error: oneMinuteResult.refresh_error,
+      five_minute_refresh_error: fiveMinuteResult.refresh_error,
       one_hour_source: oneHourResult.source,
       six_hour_source: sixHourResult.source,
       one_hour_refresh_status: oneHourResult.refresh_status,
@@ -452,6 +480,122 @@ function convertBitstampCandles(payload) {
     close: Number(row?.close),
     volume: Number(row?.volume)
   }));
+}
+
+/**
+ * Fetch a bounded historical research window from the explicitly verified
+ * Bitstamp USD SPOT market. Uses the documented 1,000-candle maximum and pages
+ * backwards with the `end` timestamp. This function is research-only: it does
+ * not supply the live ticker, order book, or PAPER entry/exit path.
+ */
+export async function fetchBitstampResearchHistory({
+  product,
+  nowMs = Date.now(),
+  oneHourBars = 3500,
+  sixHourBars = 600,
+  requestState = DEFAULT_REQUEST_STATE
+} = {}) {
+  const pair = BITSTAMP_PAIRS[product];
+  if (!pair || !Number.isFinite(nowMs) || nowMs <= 0 ||
+      !Number.isSafeInteger(oneHourBars) || oneHourBars < 150 || oneHourBars > 4320 ||
+      !Number.isSafeInteger(sixHourBars) || sixHourBars < 150 || sixHourBars > 1440) {
+    const error = new Error("invalid Bitstamp research backfill request");
+    error.code = "invalid_research_backfill_request";
+    error.status = 400;
+    throw error;
+  }
+
+  const state = bitstampRequestState(requestState);
+  const markets = await getBitstampJson("/markets/", state);
+  const market = Array.isArray(markets)
+    ? markets.find((row) => String(row?.market_symbol || "").toLowerCase() === pair)
+    : null;
+  const expectedPair = product.toUpperCase().replace("-", "/");
+  if (!market || String(market.market_type || "").toUpperCase() !== "SPOT" ||
+      String(market.counter_currency || "").toUpperCase() !== "USD" ||
+      String(market.trading || "").toLowerCase() !== "enabled") {
+    const error = new Error("Bitstamp historical market is not an enabled USD SPOT pair");
+    error.code = "research_backfill_market_not_enabled_spot";
+    error.status = 409;
+    throw error;
+  }
+
+  async function fetchHistory(timeframeSeconds, targetBars) {
+    const intervalMs = timeframeSeconds * 1000;
+    const collected = new Map();
+    let endSeconds = Math.floor(nowMs / 1000);
+    let requests = 0;
+    const maximumRequests = Math.ceil(targetBars / 1000) + 2;
+
+    while (collected.size < targetBars && requests < maximumRequests) {
+      const pageLimit = Math.min(1000, targetBars - collected.size);
+      const payload = await getBitstampJson(
+        "/ohlc/" + pair + "/?step=" + timeframeSeconds +
+          "&limit=" + pageLimit + "&end=" + endSeconds +
+          "&exclude_current_candle=true",
+        state
+      );
+      requests += 1;
+      const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\\s+/g, "");
+      if (responsePair !== expectedPair) {
+        const error = new Error("Bitstamp historical OHLC response pair mismatch");
+        error.code = "research_backfill_pair_mismatch";
+        error.status = 502;
+        throw error;
+      }
+
+      const rows = convertBitstampCandles(payload);
+      if (!rows.length) break;
+      let oldestSeconds = Number.POSITIVE_INFINITY;
+      for (const row of rows) {
+        if (!Number.isFinite(row.time) || row.time + intervalMs > nowMs) continue;
+        const timestampSeconds = Math.floor(row.time / 1000);
+        oldestSeconds = Math.min(oldestSeconds, timestampSeconds);
+        if (!collected.has(row.time)) collected.set(row.time, row);
+      }
+      if (!Number.isFinite(oldestSeconds)) break;
+      if (oldestSeconds >= endSeconds) {
+        const error = new Error("Bitstamp historical OHLC pagination did not move backwards");
+        error.code = "research_backfill_pagination_stalled";
+        error.status = 502;
+        throw error;
+      }
+      endSeconds = oldestSeconds - 1;
+    }
+
+    const orderedRows = [...collected.values()].sort((a, b) => a.time - b.time);
+    const audit = auditCandles(orderedRows, intervalMs, nowMs, targetBars);
+    if (!audit.ok || audit.valid_closed_bars < targetBars) {
+      const error = new Error(
+        "Bitstamp historical " + timeframeSeconds + "s candle history failed integrity or sample-size checks"
+      );
+      error.code = "research_backfill_candle_integrity_failed";
+      error.status = 422;
+      error.issues = audit.issues;
+      error.valid_closed_bars = audit.valid_closed_bars;
+      error.expected_bars = targetBars;
+      throw error;
+    }
+    return { audit, requests };
+  }
+
+  const oneHour = await fetchHistory(3600, oneHourBars);
+  const sixHour = await fetchHistory(21600, sixHourBars);
+  return {
+    product,
+    symbol: product.replace("-", "/"),
+    provider: "bitstamp_spot",
+    market_type: "SPOT",
+    quote_currency: "USD",
+    fetched_at_ms: Date.now(),
+    one_hour: oneHour.audit,
+    six_hour: sixHour.audit,
+    requests: {
+      markets: 1,
+      one_hour: oneHour.requests,
+      six_hour: sixHour.requests
+    }
+  };
 }
 
 async function loadBitstampCandleHistory({
@@ -574,13 +718,27 @@ async function fetchBitstampProductSnapshot(
   }
 
   const bitstampCache = cachedCandles?.bitstamp || {};
+  const cachedOneMinute = Array.isArray(bitstampCache.one_minute) ? bitstampCache.one_minute : [];
+  const cachedFiveMinute = Array.isArray(bitstampCache.five_minute) ? bitstampCache.five_minute : [];
   const cachedOneHour = Array.isArray(bitstampCache.one_hour) ? bitstampCache.one_hour : [];
   const cachedSixHour = Array.isArray(bitstampCache.six_hour) ? bitstampCache.six_hour : [];
+  const cachedOneMinuteAudit = cachedOneMinute.length ? auditCandles(cachedOneMinute, 60000, nowMs, 150) : null;
+  const cachedFiveMinuteAudit = cachedFiveMinute.length ? auditCandles(cachedFiveMinute, 300000, nowMs, 150) : null;
   const cachedOneHourAudit = cachedOneHour.length
     ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
   const cachedSixHourAudit = cachedSixHour.length
     ? auditCandles(cachedSixHour, 21600 * 1000, nowMs, 150) : null;
 
+  const oneMinuteResult = await loadBitstampCandleHistory({
+    symbol, pair, timeframeSeconds: 60, intervalMs: 60000,
+    cachedRows: cachedOneMinute, cachedAudit: cachedOneMinuteAudit,
+    requestState: bitstampState, nowMs, maxStaleMs: 180000
+  });
+  const fiveMinuteResult = await loadBitstampCandleHistory({
+    symbol, pair, timeframeSeconds: 300, intervalMs: 300000,
+    cachedRows: cachedFiveMinute, cachedAudit: cachedFiveMinuteAudit,
+    requestState: bitstampState, nowMs, maxStaleMs: 420000
+  });
   const oneHourResult = await loadBitstampCandleHistory({
     symbol, pair, timeframeSeconds: 3600, intervalMs: 3600000,
     cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
@@ -616,12 +774,16 @@ async function fetchBitstampProductSnapshot(
     quote_volume_usd: Number.isFinite(quoteVolume) && quoteVolume >= 0 ? quoteVolume : null,
     bid_depth_quote: bidDepth,
     ask_depth_quote: askDepth,
+    one_minute_audit: oneMinuteResult.audit,
+    five_minute_audit: fiveMinuteResult.audit,
     one_hour_audit: oneHourResult.audit,
     six_hour_audit: sixHourResult.audit,
     data_quality: {
       market_data_provider: "bitstamp_spot",
       ticker_provider: "bitstamp_spot",
       book_provider: "bitstamp_spot",
+      one_minute_provider: "bitstamp_spot",
+      five_minute_provider: "bitstamp_spot",
       one_hour_provider: "bitstamp_spot",
       six_hour_provider: "bitstamp_spot",
       ticker_status: "available",
@@ -632,6 +794,8 @@ async function fetchBitstampProductSnapshot(
       quote_volume_source: "bitstamp_ticker_24h_base_volume_times_last_price",
       book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
       book_error: bookError,
+      one_minute: { ok: oneMinuteResult.audit.ok, issues: oneMinuteResult.audit.issues, bars: oneMinuteResult.audit.valid_closed_bars },
+      five_minute: { ok: fiveMinuteResult.audit.ok, issues: fiveMinuteResult.audit.issues, bars: fiveMinuteResult.audit.valid_closed_bars },
       one_hour: {
         ok: oneHourResult.audit.ok,
         issues: oneHourResult.audit.issues,
@@ -642,6 +806,12 @@ async function fetchBitstampProductSnapshot(
         issues: sixHourResult.audit.issues,
         bars: sixHourResult.audit.valid_closed_bars
       },
+      one_minute_source: oneMinuteResult.source,
+      five_minute_source: fiveMinuteResult.source,
+      one_minute_refresh_status: oneMinuteResult.refresh_status,
+      five_minute_refresh_status: fiveMinuteResult.refresh_status,
+      one_minute_refresh_error: oneMinuteResult.refresh_error,
+      five_minute_refresh_error: fiveMinuteResult.refresh_error,
       one_hour_source: oneHourResult.source,
       six_hour_source: sixHourResult.source,
       one_hour_refresh_status: oneHourResult.refresh_status,

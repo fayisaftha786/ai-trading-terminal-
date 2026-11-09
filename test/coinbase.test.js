@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCoinbaseRequestState, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
+import { createCoinbaseRequestState, fetchBitstampResearchHistory, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
 
 test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
@@ -165,9 +165,13 @@ test("snapshot uses ticker 24h volume and does not spend an extra request on sta
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
     assert.equal(snapshot.six_hour_audit.ok, true);
+    assert.equal(snapshot.one_minute_audit.ok, false, "unmocked lower-timeframe data is rejected, not fabricated");
+    assert.equal(snapshot.five_minute_audit.ok, false, "unmocked lower-timeframe data is rejected, not fabricated");
+    assert.equal(snapshot.data_quality.one_minute_provider, "coinbase_exchange");
+    assert.equal(snapshot.data_quality.five_minute_provider, "coinbase_exchange");
     assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.equal(calls.some((path) => path.endsWith("/stats")), false);
-    assert.equal(calls.length, 4, "ticker, book and two sequential candle refreshes are sufficient");
+    assert.equal(calls.length, 6, "ticker, book and four sequential timeframe refreshes are used");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -374,7 +378,7 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     assert.ok(calls.every((call) => !call.includes("BTC") && !call.includes("ETH")));
     assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 3,
       "the primary feed should honour its configured three-attempt retry policy");
-    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 6);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -528,8 +532,8 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
     assert.equal(snapshot.six_hour_audit.ok, true);
-    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 4);
-    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 6);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 6);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -616,6 +620,147 @@ test("Bitstamp fallback rejects a stale exchange-side order-book timestamp", asy
     assert.equal(snapshot.data_quality.book_error, "provider_timestamp_invalid_or_stale");
     assert.ok(Number.isFinite(snapshot.book_event_time_ms));
     assert.ok(snapshot.book_age_ms <= 15000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("Bitstamp research backfill pages OHLC history, validates spot metadata and contiguous closed bars", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const oneInterval = 3600000;
+  const sixInterval = 21600000;
+  const lastOne = Math.floor(now / oneInterval) * oneInterval - oneInterval;
+  const lastSix = Math.floor(now / sixInterval) * sixInterval - sixInterval;
+  const oneRows = makeBitstampRows(oneInterval, lastOne, 1001);
+  const sixRows = makeBitstampRows(sixInterval, lastSix, 160);
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    calls.push(path);
+    if (path === "/api/v2/markets/") {
+      return jsonResponse([{
+        market_symbol: "solusd",
+        base_currency: "SOL",
+        counter_currency: "USD",
+        market_type: "SPOT",
+        trading: "Enabled"
+      }]);
+    }
+    if (path.startsWith("/api/v2/ohlc/solusd/")) {
+      const query = parsed.searchParams;
+      const interval = Number(query.get("step"));
+      const rows = interval === 3600 ? oneRows : sixRows;
+      const limit = Number(query.get("limit"));
+      const end = Number(query.get("end"));
+      const page = rows
+        .filter((row) => Number(row.timestamp) <= end)
+        .slice(-limit);
+      return jsonResponse({ data: { pair: "SOL/USD", ohlc: page } });
+    }
+    return jsonResponse({ error: "unexpected endpoint" }, 404);
+  };
+
+  try {
+    const result = await fetchBitstampResearchHistory({
+      product: "SOL-USD",
+      nowMs: now,
+      oneHourBars: 1001,
+      sixHourBars: 160,
+      requestState: createCoinbaseRequestState()
+    });
+    assert.equal(result.provider, "bitstamp_spot");
+    assert.equal(result.market_type, "SPOT");
+    assert.equal(result.quote_currency, "USD");
+    assert.equal(result.one_hour.ok, true);
+    assert.equal(result.one_hour.valid_closed_bars, 1001);
+    assert.equal(result.six_hour.ok, true);
+    assert.equal(result.six_hour.valid_closed_bars, 160);
+    assert.equal(result.requests.markets, 1);
+    assert.equal(result.requests.one_hour, 2, "1,001 hourly bars must be paged across two requests");
+    assert.equal(result.requests.six_hour, 1);
+    assert.equal(calls.length, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Bitstamp research backfill rejects disabled or non-SPOT instruments", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse([{
+    market_symbol: "solusd",
+    base_currency: "SOL",
+    counter_currency: "USD",
+    market_type: "PERPETUAL",
+    trading: "Enabled"
+  }]);
+  try {
+    await assert.rejects(
+      fetchBitstampResearchHistory({
+        product: "SOL-USD",
+        oneHourBars: 150,
+        sixHourBars: 150,
+        requestState: createCoinbaseRequestState()
+      }),
+      (error) => error.code === "research_backfill_market_not_enabled_spot"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Bitstamp research backfill rejects gaps rather than persisting incomplete lookback windows", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const oneInterval = 3600000;
+  const sixInterval = 21600000;
+  const lastOne = Math.floor(now / oneInterval) * oneInterval - oneInterval;
+  const lastSix = Math.floor(now / sixInterval) * sixInterval - sixInterval;
+  const oneRows = makeBitstampRows(oneInterval, lastOne, 160);
+  oneRows.splice(80, 1);
+  const sixRows = makeBitstampRows(sixInterval, lastSix, 160);
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    if (path === "/api/v2/markets/") {
+      return jsonResponse([{
+        market_symbol: "solusd",
+        base_currency: "SOL",
+        counter_currency: "USD",
+        market_type: "SPOT",
+        trading: "Enabled"
+      }]);
+    }
+    if (path.startsWith("/api/v2/ohlc/solusd/")) {
+      const interval = Number(parsed.searchParams.get("step"));
+      const rows = interval === 3600 ? oneRows : sixRows;
+      const limit = Number(parsed.searchParams.get("limit"));
+      const end = Number(parsed.searchParams.get("end"));
+      return jsonResponse({
+        data: {
+          pair: "SOL/USD",
+          ohlc: rows.filter((row) => Number(row.timestamp) <= end).slice(-limit)
+        }
+      });
+    }
+    return jsonResponse({ error: "unexpected endpoint" }, 404);
+  };
+
+  try {
+    await assert.rejects(
+      fetchBitstampResearchHistory({
+        product: "SOL-USD",
+        nowMs: now,
+        oneHourBars: 150,
+        sixHourBars: 150,
+        requestState: createCoinbaseRequestState()
+      }),
+      (error) => error.code === "research_backfill_candle_integrity_failed"
+    );
   } finally {
     globalThis.fetch = originalFetch;
   }
