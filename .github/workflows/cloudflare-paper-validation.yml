@@ -8,6 +8,8 @@ on:
       - "test/**"
       - "scripts/**"
       - "public/**"
+      - "docs/**"
+      - "README.md"
       - "wrangler.jsonc"
       - "package.json"
       - ".github/workflows/cloudflare-paper-validation.yml"
