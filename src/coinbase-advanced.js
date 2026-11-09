@@ -530,8 +530,9 @@ export async function previewCoinbaseAdvancedLimitBuy(
     best_ask: preview.best_ask || null, slippage: preview.slippage || null,
     preview_id: preview.preview_id, available_balance: available,
     balance_currency: balanceCurrency, quote_currency: product.quote_currency_id,
+    permissions: preflight.permissions,
     checked_at_ms: Date.now(),
-    order_submission_available: config.orderExecutionEnabled && config.maxOpenOrders > 0 && config.maxDailyOrders > 0,
+    order_submission_available: config.orderExecutionEnabled && config.maxOpenOrders > 0 && config.maxDailyOrders > 0 && preflight.permissions?.can_trade === true,
     live_trading_enabled: false, automatic_live_entries_enabled: false,
     warning: "Preview only. No order has been submitted. A separate explicit confirmation is required."
   };
