@@ -93,16 +93,34 @@ export function calculateDynamicTakeProfit({ atrPct, roundTripCostBps }) {
   };
 }
 
-export function getDailyCycleAllowance(entriesToday, limit = PAPER_AUTOMATION_PROFILE.max_cycles_per_day) {
+export function getDailyCycleAllowance(completedCyclesToday, limit = PAPER_AUTOMATION_PROFILE.max_cycles_per_day) {
   const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 0;
-  const used = Number.isSafeInteger(Number(entriesToday)) && Number(entriesToday) >= 0
-    ? Number(entriesToday) : 0;
+  const validCount = Number.isSafeInteger(Number(completedCyclesToday)) && Number(completedCyclesToday) >= 0;
+  // Unknown ledger counts must never be interpreted as zero available cycles.
+  const used = validCount ? Number(completedCyclesToday) : safeLimit;
   return {
     limit: safeLimit,
     used,
     remaining: Math.max(0, safeLimit - used),
-    allowed: safeLimit > 0 && used < safeLimit
+    allowed: safeLimit > 0 && validCount && used < safeLimit
   };
+}
+
+export function countCompletedPaperCyclesInWindow(sql, startMs, endMs) {
+  if (!sql || typeof sql.exec !== "function" ||
+      !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+    throw new Error("paper_cycle_count_window_invalid");
+  }
+  const rows = sql.exec(
+    "SELECT COUNT(*) AS count FROM trades WHERE status='CLOSED' AND closed_at_ms>=? AND closed_at_ms<?",
+    startMs,
+    endMs
+  ).toArray();
+  const count = Number(rows[0]?.count);
+  if (!Number.isSafeInteger(count) || count < 0) {
+    throw new Error("paper_cycle_count_unavailable");
+  }
+  return count;
 }
 
 export function shouldAutoResumeWatchdog({ halted, haltReason, healthyScheduledScanStreak }) {
