@@ -264,18 +264,18 @@ export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now
   const cachedSixHourAudit = cachedSixHour.length
     ? auditCandles(cachedSixHour, 21600 * 1000, nowMs, 150) : null;
 
-  const [oneHourResult, sixHourResult] = await Promise.all([
-    loadCandleHistory({
-      product, timeframeSeconds: 3600, intervalMs: 3600000,
-      cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
-      requestState, nowMs, maxStaleMs: 5400000
-    }),
-    loadCandleHistory({
-      product, timeframeSeconds: 21600, intervalMs: 21600 * 1000,
-      cachedRows: cachedSixHour, cachedAudit: cachedSixHourAudit,
-      requestState, nowMs, maxStaleMs: 25200000
-    })
-  ]);
+  // Keep provider requests sequential: getJson shares one pacing/cooldown
+  // state, and parallel timeframe refreshes could bypass the 350ms request gap.
+  const oneHourResult = await loadCandleHistory({
+    product, timeframeSeconds: 3600, intervalMs: 3600000,
+    cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
+    requestState, nowMs, maxStaleMs: 5400000
+  });
+  const sixHourResult = await loadCandleHistory({
+    product, timeframeSeconds: 21600, intervalMs: 21600 * 1000,
+    cachedRows: cachedSixHour, cachedAudit: cachedSixHourAudit,
+    requestState, nowMs, maxStaleMs: 25200000
+  });
 
   const oneHourAudit = oneHourResult.audit;
   const sixHourAudit = sixHourResult.audit;
