@@ -1,0 +1,78 @@
+name: Production PAPER Worker watchdog
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-paper-worker-watchdog
+  cancel-in-progress: false
+
+jobs:
+  health:
+    name: Verify production Worker and scheduled PAPER heartbeat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Check public health and scheduler heartbeat
+        shell: bash
+        env:
+          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
+        run: |
+          set -euo pipefail
+          response=""
+          for attempt in 1 2 3; do
+            response="$(curl --fail --silent --show-error --max-time 15 "$WORKER_HEALTH_URL" 2>/dev/null || true)"
+            if [ -n "$response" ]; then break; fi
+            echo "Health request attempt $attempt/3 failed; retrying."
+            sleep 5
+          done
+          test -n "$response" || { echo "::error::Production Worker health endpoint is unreachable."; exit 1; }
+          printf '%s' "$response" | node -e '
+            let raw = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", chunk => { raw += chunk; });
+            process.stdin.on("end", () => {
+              try {
+                const health = JSON.parse(raw);
+                const scheduler = health.scheduler || {};
+                const maxAgeMs = 45 * 60 * 1000;
+                const validAge = value => Number.isFinite(value) && value >= 0 && value <= maxAgeMs;
+                const checks = {
+                  statusOk: health.status === "ok",
+                  paperOnly: health.mode === "paper_only",
+                  liveTradingDisabled: health.live_trading_enabled === false,
+                  binanceTestnetDisabled: health.binance_testnet_enabled === false,
+                  workerVersionIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
+                  deployedCommitTagPresent: /^[0-9a-f]{40}$/.test(health.worker_version?.tag || ""),
+                  schedulerHeartbeatFresh: validAge(scheduler.last_alarm_age_ms),
+                  schedulerNotStale: ["healthy", "running"].includes(scheduler.status),
+                  lastScheduledScanHealthy: ["completed", "running"].includes(scheduler.last_scheduled_scan_status),
+                  lastHealthyScanFresh: validAge(scheduler.last_healthy_scan_age_ms)
+                };
+                console.log(JSON.stringify({
+                  checks,
+                  worker_version: health.worker_version,
+                  scheduler: {
+                    status: scheduler.status ?? null,
+                    last_scheduled_scan_status: scheduler.last_scheduled_scan_status ?? null,
+                    last_alarm_age_ms: scheduler.last_alarm_age_ms ?? null,
+                    last_healthy_scan_age_ms: scheduler.last_healthy_scan_age_ms ?? null
+                  }
+                }, null, 2));
+                if (!Object.values(checks).every(Boolean)) {
+                  console.error("Production PAPER watchdog checks failed.");
+                  process.exitCode = 1;
+                } else {
+                  console.log("Production PAPER Worker and scheduled heartbeat verified.");
+                }
+              } catch (error) {
+                console.error("Invalid production health JSON:", error.message);
+                process.exitCode = 1;
+              }
+            });
+          '
