@@ -116,3 +116,44 @@ market-data path and a separate fill simulator that accounts for queue position,
 partial fills, spread, market impact, latency, and stop/target ordering. Require
 chronological out-of-sample validation and forward paper observation; never promote
 based on a small profitable sample alone.
+
+## Coinbase Advanced live-readiness adapter (locked)
+
+The Cloudflare Worker now has a separate Coinbase Advanced Trade v3 adapter for
+authenticated account preflight and exchange-side order preview. It uses CDP
+ECDSA P-256 / ES256 JWT authentication and exact method + host + request-path
+binding. The private key is read only from Worker environment secrets; it is not
+stored in Durable Object SQLite, returned to the browser, or written to logs.
+
+Required Cloudflare configuration (set only in the Cloudflare Worker secrets/vars UI):
+
+- `COINBASE_ADVANCED_API_KEY`: CDP API key name.
+- `COINBASE_ADVANCED_API_SECRET`: CDP ECDSA P-256 PEM private key.
+- `COINBASE_ADVANCED_ALLOWED_PRODUCTS`: explicit comma-separated product IDs
+  that the account owner has checked are available to their own account.
+- `COINBASE_ADVANCED_MAX_ORDER_QUOTE`: explicit maximum quote-currency amount
+  permitted for a preview request.
+
+The preflight verifies `can_view=true`, `can_trade=true`, and
+`can_transfer=false`; account pagination; available quote-currency balances;
+and SPOT product status, tradability, increments and size limits. The order
+preview is BUY / LIMIT GTC / post-only and displays the exchange previewed
+commission, bid/ask, slippage, warnings and errors. No product IDs or amounts
+are assumed until configured and confirmed by the account API.
+
+**Hard boundary:** this build does not call `POST /api/v3/brokerage/orders`
+and contains no live order-submission route. `POST /api/live/execute` returns
+HTTP 423. Auto-live entries and transfers remain disabled. An order preview is
+not an order, reservation, fill, or execution guarantee.
+
+Before implementing submission, the system still needs a verified account-
+specific product and jurisdiction check, a stable/approved API-key network
+allowlist strategy, a real-time Advanced Trade WebSocket market-data path,
+private user-order stream reconciliation, durable order-intent/idempotency
+journal, cancel/replace and unknown-submission recovery, exchange-native
+protective exit design, and independent operator kill-switch tests. The
+existing 15-minute production scanner is demonstrably too slow for these
+requirements; even the 90-second PR cadence is not a real-time feed.
+
+Do not paste Coinbase keys into chat, GitHub, screenshots, or the dashboard.
+Use Cloudflare secret storage only. Do not enable transfer permission.
