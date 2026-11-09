@@ -21,6 +21,59 @@ function jsonResponse(data, status = 200) {
   });
 }
 
+function parseScanIssueSummaries(...summaries) {
+  const parsed = [];
+  const seen = new Set();
+  for (const summary of summaries) {
+    if (typeof summary !== "string" || !summary.trim()) continue;
+    for (const part of summary.split(";")) {
+      const value = part.trim();
+      const separator = value.indexOf(":");
+      if (separator <= 0) continue;
+      const symbol = value.slice(0, separator).trim();
+      const reason = value.slice(separator + 1).trim();
+      if (!symbol || !reason) continue;
+      const key = symbol + "|" + reason;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parsed.push({ symbol, reason });
+    }
+  }
+  return parsed;
+}
+
+function normalizeScanIssueRows(runtime) {
+  const stored = Array.isArray(runtime.market_feed_issues)
+    ? runtime.market_feed_issues.filter((issue) =>
+        issue && typeof issue.reason === "string"
+      ).slice(0, 12)
+    : [];
+  if (stored.length) return stored;
+  return parseScanIssueSummaries(
+    runtime.last_scan_error,
+    runtime.last_scheduled_scan_error
+  ).slice(0, 12);
+}
+
+function normalizeProviderFailureRows(runtime, issues) {
+  const stored = Array.isArray(runtime.provider_failures)
+    ? runtime.provider_failures.filter((failure) =>
+        failure && typeof failure.symbol === "string" && typeof failure.reason === "string"
+      ).slice(0, 3)
+    : [];
+  if (stored.length) return stored;
+
+  return issues.filter((issue) => /provider_unavailable/.test(issue.reason || ""))
+    .slice(0, 3)
+    .map((issue) => ({
+      symbol: issue.symbol,
+      reason: String(issue.reason).slice(0, 80),
+      primary_error_code: null,
+      backup_error_code: null,
+      inferred_from_scan_summary: true
+    }));
+}
+
 export class TradingEngine extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -167,6 +220,8 @@ export class TradingEngine extends DurableObject {
         const allowedScanStatuses = new Set(["running", "completed", "partial", "unavailable", "error"]);
         const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
           ? runtime.last_scheduled_scan_status : "not_run";
+        const diagnosticIssues = normalizeScanIssueRows(runtime);
+        const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
         const diagnostics = {
           last_scan_status: runtime.last_scan_status || "not_started",
           last_scan_age_ms: Number.isFinite(Number(runtime.last_scan_at_ms)) && Number(runtime.last_scan_at_ms) > 0
@@ -183,11 +238,33 @@ export class TradingEngine extends DurableObject {
               symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
               reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
             })),
-          provider_failures: (Array.isArray(runtime.provider_failures) ? runtime.provider_failures : [])
+          issues: diagnosticIssues
+            .slice(0, 6)
+            .map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
+            })),
+          provider_failures: diagnosticProviderFailures
             .slice(0, 3)
             .map((failure) => ({
               symbol: typeof failure?.symbol === "string" ? failure.symbol.slice(0, 24) : null,
-              reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 80) : "unknown"
+              reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 80) : "unknown",
+              primary_error_code: typeof failure?.primary_error_code === "string"
+                ? failure.primary_error_code.slice(0, 80) : null,
+              backup_error_code: typeof failure?.backup_error_code === "string"
+                ? failure.backup_error_code.slice(0, 80) : null,
+              inferred_from_scan_summary: failure?.inferred_from_scan_summary === true
+            })),
+          market_data_providers: (Array.isArray(runtime.market_data_providers) ? runtime.market_data_providers : [])
+            .slice(0, 3)
+            .map((item) => ({
+              symbol: typeof item?.symbol === "string" ? item.symbol.slice(0, 24) : null,
+              status: typeof item?.status === "string" ? item.status.slice(0, 24) : "unknown",
+              provider: typeof item?.provider === "string" ? item.provider.slice(0, 40) : null,
+              failover_used: item?.failover_used === true,
+              failover_reason: typeof item?.failover_reason === "string"
+                ? item.failover_reason.slice(0, 80) : null,
+              entry_ready: item?.entry_ready === true
             }))
         };
         return jsonResponse({
@@ -503,14 +580,18 @@ export class TradingEngine extends DurableObject {
       } catch (error) {
         candleArchives.push({ product: product.product, provider_error: true, error: String(error?.message || error).slice(0, 120), received_at_ms: Date.now() });
         const status = Number(error?.status);
-        const errorCode = status === 429 ? "provider_rate_limited"
-          : Number.isFinite(status) && status >= 500 ? "provider_server_error"
-            : Number.isFinite(status) && status >= 400 ? "provider_http_error"
-              : error?.name === "TimeoutError" || error?.name === "AbortError"
-                ? "provider_timeout" : "provider_network_error";
+        const errorCode = error?.code === "all_market_data_providers_unavailable"
+          ? "all_market_data_providers_unavailable"
+          : status === 429 ? "provider_rate_limited"
+            : Number.isFinite(status) && status >= 500 ? "provider_server_error"
+              : Number.isFinite(status) && status >= 400 ? "provider_http_error"
+                : error?.name === "TimeoutError" || error?.name === "AbortError"
+                  ? "provider_timeout" : "provider_network_error";
         const failed = {
           symbol: product.symbol, product: product.product, status: "error",
           error_code: errorCode,
+          primary_error_code: error?.primary_error_code || null,
+          backup_error_code: error?.backup_error_code || null,
           error: String(error?.message || error).slice(0, 180),
           fetched_at_ms: Date.now()
         };
