@@ -4,7 +4,6 @@ export { TradingEngine };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
-const loginAttempts = new Map();
 
 function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -42,6 +41,13 @@ function equalBytes(left, right) {
 
 async function sha256(value) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
+}
+
+async function keyedFingerprint(value, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value)));
 }
 
 async function sign(payload, secret) {
@@ -91,20 +97,41 @@ async function login(request, env) {
   const username = String(body.username || "");
   const password = String(body.password || "");
   if (username.length > 128 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
-  const key = request.headers.get("cf-connecting-ip") || "unknown";
-  const now = Date.now();
-  const recent = (loginAttempts.get(key) || []).filter((stamp) => now - stamp < 10 * 60 * 1000);
-  if (recent.length >= 8) return json({ error: "too_many_login_attempts" }, 429);
-  recent.push(now);
-  loginAttempts.set(key, recent);
-  if (loginAttempts.size > 1000) {
-    const oldestKey = loginAttempts.keys().next().value;
-    if (oldestKey !== undefined && oldestKey !== key) loginAttempts.delete(oldestKey);
+  const sourceIp = request.headers.get("cf-connecting-ip") || "unknown";
+  const ipHash = toBase64Url(await keyedFingerprint(sourceIp, env.SESSION_SECRET));
+  const engineId = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
+  const engine = env.TRADING_ENGINE.get(engineId);
+  const rateLimitUrl = "https://internal.local/internal/auth/login-attempts";
+  let rateLimitResponse;
+  try {
+    rateLimitResponse = await engine.fetch(new Request(rateLimitUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "reserve", ip_hash: ipHash })
+    }));
+  } catch {
+    return json({ error: "login_rate_limit_unavailable" }, 503);
   }
+  if (rateLimitResponse.status === 429) return json({ error: "too_many_login_attempts" }, 429);
+  if (!rateLimitResponse.ok) return json({ error: "login_rate_limit_unavailable" }, 503);
+
+  const now = Date.now();
   const usernameMatch = equalBytes(await sha256(username), await sha256(expectedUsername));
   const passwordMatch = equalBytes(await sha256(password), await sha256(env.ADMIN_PASSWORD));
   if (!usernameMatch || !passwordMatch) return json({ error: "invalid_credentials" }, 401);
-  loginAttempts.delete(key);
+
+  // A correct login resets only this source's failed-attempt history.
+  let clearResponse;
+  try {
+    clearResponse = await engine.fetch(new Request(rateLimitUrl, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "clear", ip_hash: ipHash })
+    }));
+  } catch {
+    return json({ error: "login_rate_limit_unavailable" }, 503);
+  }
+  if (!clearResponse.ok) return json({ error: "login_rate_limit_unavailable" }, 503);
   const token = await sign({ sub: "owner", exp: Math.floor(now / 1000) + (8 * 60 * 60) }, env.SESSION_SECRET);
   return json({ access_token: token, token_type: "Bearer", expires_in: 28800 });
 }

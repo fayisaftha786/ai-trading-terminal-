@@ -42,7 +42,7 @@ A HOLD result is intentional when the configured strategy filters do not align. 
 
 - No profit or positive return is guaranteed. A working bot can still lose money in simulation and live markets.
 - The Cloudflare Worker is PAPER-only. The dashboard must remain in PAPER mode.
-- The Worker uses public endpoints and does not need exchange credentials. Never place passwords, session secrets, exchange API keys, wallet seeds, recovery codes or Cloudflare tokens in source control or chat.
+- The Worker uses public endpoints and does not need exchange credentials. Failed-login throttling is stored in the Durable Object SQLite ledger under a keyed HMAC-SHA-256 source-IP fingerprint; raw IP addresses are not stored by this limiter. Eight attempts are allowed per source in a rolling ten-minute window, and a successful login clears that source's counter. If the limiter is unavailable, login fails closed. Never place passwords, session secrets, exchange API keys, wallet seeds, recovery codes or Cloudflare tokens in source control or chat.
 - Cloudflare account creation, acceptance of Cloudflare legal terms, secrets configuration and live deployment remain owner-controlled.
 - Cloudflare Free has documented request, CPU, storage and SQL quotas. It is not an unlimited 24/7 compute guarantee. Stop automation if quota or data-quality gates fail; do not upgrade to a paid plan under a ₹0 budget.
 - A 15-minute simulated exit monitor is not an exchange-native stop-loss. Fast price gaps, service outages or missed alarms can produce a much worse simulated exit than the trigger level.

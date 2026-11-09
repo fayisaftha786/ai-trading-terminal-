@@ -33,6 +33,8 @@ export class TradingEngine extends DurableObject {
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN'",
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms)",
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}')",
+      "CREATE TABLE IF NOT EXISTS auth_login_attempts(id INTEGER PRIMARY KEY AUTOINCREMENT,ip_hash TEXT NOT NULL,attempted_at_ms INTEGER NOT NULL)",
+      "CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_ip_time ON auth_login_attempts(ip_hash,attempted_at_ms)",
       "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL)",
       "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS research_candles(exchange TEXT NOT NULL,product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,candle_open_ms INTEGER NOT NULL,open REAL NOT NULL,high REAL NOT NULL,low REAL NOT NULL,close REAL NOT NULL,volume REAL NOT NULL,received_at_ms INTEGER NOT NULL,schema_version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(exchange,product,timeframe_seconds,candle_open_ms))",
@@ -105,6 +107,43 @@ export class TradingEngine extends DurableObject {
     await this.ensureAlarm();
     const url = new URL(request.url);
     try {
+      // Internal-only: reached through the Worker's direct Durable Object binding.
+      // Persist a one-way source-IP hash, never the raw address.
+      if (request.method === "POST" && url.pathname === "/internal/auth/login-attempts") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request" }, 400); }
+        const ipHash = typeof body?.ip_hash === "string" ? body.ip_hash : "";
+        const action = body?.action;
+        if (!/^[A-Za-z0-9_-]{40,64}$/.test(ipHash) ||
+            (action !== "reserve" && action !== "clear")) {
+          return jsonResponse({ error: "invalid_request" }, 400);
+        }
+        const nowMs = Date.now();
+        const windowMs = 10 * 60 * 1000;
+        const attemptLimit = 8;
+        this.sql.exec("DELETE FROM auth_login_attempts WHERE attempted_at_ms < ?", nowMs - windowMs);
+        if (action === "clear") {
+          this.sql.exec("DELETE FROM auth_login_attempts WHERE ip_hash=?", ipHash);
+          return jsonResponse({ cleared: true });
+        }
+        const attempts = Number(this.sql.exec(
+          "SELECT COUNT(*) AS count FROM auth_login_attempts WHERE ip_hash=? AND attempted_at_ms>=?",
+          ipHash, nowMs - windowMs
+        ).toArray()[0]?.count || 0);
+        if (attempts >= attemptLimit) {
+          return jsonResponse({ allowed: false, error: "too_many_login_attempts" }, 429);
+        }
+        this.sql.exec(
+          "INSERT INTO auth_login_attempts(ip_hash,attempted_at_ms) VALUES(?,?)",
+          ipHash, nowMs
+        );
+        // Bound storage when attempts arrive from many different source IPs.
+        this.sql.exec(
+          "DELETE FROM auth_login_attempts WHERE id IN (" +
+          "SELECT id FROM auth_login_attempts ORDER BY attempted_at_ms DESC,id DESC LIMIT -1 OFFSET 10000)"
+        );
+        return jsonResponse({ allowed: true, attempts_remaining: attemptLimit - attempts - 1 });
+      }
       if (request.method === "GET" && url.pathname === "/api/health") {
         // Expose only non-sensitive scheduler telemetry publicly so an external
         // watchdog can distinguish a live Worker from a stalled Durable Object alarm.

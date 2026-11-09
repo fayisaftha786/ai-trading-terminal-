@@ -30,6 +30,13 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - The 15-minute scheduler can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
 - No profit is promised. Paper results are not proof of live profitability.
 
+## Authentication abuse protection
+
+- Failed-login attempts are recorded in the single TradingEngine Durable Object SQLite database, so the limiter is shared across Worker isolates and survives Worker restarts.
+- The limiter stores an HMAC-SHA-256 fingerprint of the Cloudflare-provided source IP, keyed with the Worker session secret; it does not store the raw address. It allows at most eight attempts per source in a rolling ten-minute window; a successful login clears that source's attempt history.
+- If the Durable Object rate-limit check or reset cannot be completed, login fails closed with a service-unavailable response. This keeps the authentication path dependent on the durable limiter rather than silently falling back to per-isolate memory.
+- This is a per-source throttling layer, not a replacement for strong unique passwords, Cloudflare platform protections or session revocation.
+
 ## Market-data and scheduler safety watchdog
 
 - PAPER auto-entry can only be enabled after a recent complete scan verifies all configured BTC/USD, ETH/USD and SOL/USD markets, fresh two-sided quotes, a locally retrieved Level-2 order-book snapshot no older than 15 seconds with at least USD 5,000 of top-10 depth on both bid and ask sides, and at least 150 clean closed candles on both 1H and 6H for every market. These same order-book checks are part of the full-market health gate, not just the later trade-candidate check. It also requires at least one recent successful scheduled alarm scan; a manual **Scan now** cannot stand in for scheduler proof.
