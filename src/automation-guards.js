@@ -316,7 +316,7 @@ export function normalizeProviderFailureRows(runtime = {}, issues = []) {
     .slice(0, 3)
     .map((issue) => ({
       symbol: issue.symbol,
-      reason: String(issue.reason).slice(0, 80),
+      reason: String(issue.reason).slice(0, 120),
       primary_error_code: null,
       backup_error_code: null,
       inferred_from_scan_summary: true
