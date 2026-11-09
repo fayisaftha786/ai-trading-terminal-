@@ -165,9 +165,13 @@ test("snapshot uses ticker 24h volume and does not spend an extra request on sta
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
     assert.equal(snapshot.six_hour_audit.ok, true);
+    assert.equal(snapshot.one_minute_audit.ok, false, "unmocked lower-timeframe data is rejected, not fabricated");
+    assert.equal(snapshot.five_minute_audit.ok, false, "unmocked lower-timeframe data is rejected, not fabricated");
+    assert.equal(snapshot.data_quality.one_minute_provider, "coinbase_exchange");
+    assert.equal(snapshot.data_quality.five_minute_provider, "coinbase_exchange");
     assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.equal(calls.some((path) => path.endsWith("/stats")), false);
-    assert.equal(calls.length, 4, "ticker, book and two sequential candle refreshes are sufficient");
+    assert.equal(calls.length, 6, "ticker, book and four sequential timeframe refreshes are used");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -374,7 +378,7 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     assert.ok(calls.every((call) => !call.includes("BTC") && !call.includes("ETH")));
     assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 3,
       "the primary feed should honour its configured three-attempt retry policy");
-    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 6);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -528,8 +532,8 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
     assert.equal(snapshot.six_hour_audit.ok, true);
-    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 4);
-    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 6);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 6);
   } finally {
     globalThis.fetch = originalFetch;
   }
