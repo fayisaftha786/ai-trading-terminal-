@@ -587,8 +587,85 @@ export function evaluateResearchCandidates(
 }
 
 
-export function assessCandidate({ market, primary, higher, nowMs, costs }) {
-  const reject = (reason) => ({ eligible: false, reason });
+/**
+ * BTC-led market regime and breadth gate for long-only paper entries.
+ * This is a conservative risk-state classifier, not a forecast or return estimate.
+ * Missing, stale or unclassified symbols fail closed.
+ */
+export function assessCrossMarketContext(
+  markets,
+  nowMs = Date.now(),
+  requiredSymbols = ["BTC/USD", "ETH/USD", "SOL/USD"]
+) {
+  const symbols = Array.isArray(requiredSymbols) ? requiredSymbols : [];
+  const rows = Array.isArray(markets) ? markets : [];
+  const bySymbol = new Map(rows.map((market) => [market?.symbol, market]));
+  const supported = new Set(["UPTREND", "DOWNTREND", "RANGE_OR_TRANSITION", "HIGH_VOLATILITY"]);
+  const verified = [];
+  const missing = [];
+  for (const symbol of symbols) {
+    const market = bySymbol.get(symbol);
+    const oneHour = market?.primary?.regime;
+    const sixHour = market?.higher?.regime;
+    if (!isFreshTickerEvent(market, nowMs, 120000) || !supported.has(oneHour) || !supported.has(sixHour)) {
+      missing.push(symbol);
+      continue;
+    }
+    verified.push({ symbol, primary_regime: oneHour, higher_regime: sixHour });
+  }
+  const count = (key, regime) => verified.filter((row) => row[key] === regime).length;
+  const btc = verified.find((row) => row.symbol === "BTC/USD");
+  const base = {
+    benchmark_symbol: "BTC/USD",
+    expected_symbols: symbols.length,
+    verified_symbols: verified.map((row) => row.symbol),
+    missing_symbols: missing,
+    btc_regime_1h: btc?.primary_regime || "UNKNOWN",
+    btc_regime_6h: btc?.higher_regime || "UNKNOWN",
+    breadth_1h: {
+      uptrend: count("primary_regime", "UPTREND"),
+      downtrend: count("primary_regime", "DOWNTREND"),
+      high_volatility: count("primary_regime", "HIGH_VOLATILITY"),
+      total: verified.length
+    },
+    breadth_6h: {
+      uptrend: count("higher_regime", "UPTREND"),
+      downtrend: count("higher_regime", "DOWNTREND"),
+      high_volatility: count("higher_regime", "HIGH_VOLATILITY"),
+      total: verified.length
+    },
+    observed_at_ms: nowMs,
+    method: "btc_anchor_and_three_market_1h_6h_breadth_v1",
+    allowed_for_long_entries: false
+  };
+  if (!symbols.length || missing.length || verified.length !== symbols.length) {
+    return { ...base, status: "unavailable", mode: "BLOCKED", reason: "cross_market_inputs_missing_or_stale" };
+  }
+  if (!btc) {
+    return { ...base, status: "unavailable", mode: "BLOCKED", reason: "btc_benchmark_unavailable" };
+  }
+  const volatilityExpansion = verified.some((row) =>
+    row.primary_regime === "HIGH_VOLATILITY" || row.higher_regime === "HIGH_VOLATILITY"
+  );
+  const majorityDowntrend = base.breadth_1h.downtrend >= 2 || base.breadth_6h.downtrend >= 2;
+  const btcRiskOff = ["DOWNTREND", "HIGH_VOLATILITY"].includes(btc.primary_regime) ||
+    ["DOWNTREND", "HIGH_VOLATILITY"].includes(btc.higher_regime);
+  if (volatilityExpansion || majorityDowntrend || btcRiskOff) {
+    return {
+      ...base, status: "verified", mode: "RISK_OFF",
+      reason: volatilityExpansion ? "market_volatility_expansion" :
+        btcRiskOff ? "btc_anchor_trend_or_volatility_risk_off" : "majority_market_downtrend"
+    };
+  }
+  const riskOn = btc.primary_regime === "UPTREND" && btc.higher_regime === "UPTREND" &&
+    base.breadth_1h.uptrend >= 2 && base.breadth_6h.uptrend >= 2;
+  return riskOn
+    ? { ...base, status: "verified", mode: "RISK_ON", reason: "btc_trend_and_cross_market_breadth_aligned", allowed_for_long_entries: true }
+    : { ...base, status: "verified", mode: "CAUTIOUS", reason: "btc_or_market_breadth_not_confirmed" };
+}
+
+export function assessCandidate({ market, primary, higher, nowMs, costs, marketContext }) {
+  const reject = (reason) => ({ eligible: false, reason, ...(marketContext ? { market_context_mode: marketContext.mode || "BLOCKED" } : {}) });
   if (market?.status !== "live") return reject("market_data_unavailable");
   if (!Number.isFinite(nowMs)) return reject("invalid_evaluation_time");
   if (!primary || typeof primary !== "object" || !higher || typeof higher !== "object") {
@@ -631,11 +708,17 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
   // for provider timing, but reject older analysis before considering entry.
   if (oneHourAge < -1000 || oneHourAge > 5400000) return reject("one_hour_candle_stale");
   if (sixHourAge < -1000 || sixHourAge > 25200000) return reject("six_hour_candle_stale");
+  if (marketContext) {
+    if (marketContext.status !== "verified") return reject("cross_market_context_unavailable");
+    if (marketContext.allowed_for_long_entries !== true) {
+      return reject("cross_market_regime_" + String(marketContext.mode || "blocked").toLowerCase());
+    }
+  }
   if (primary.signal !== "BUY_CANDIDATE" || primary.score < 75) return reject("primary_signal_not_qualified");
   if (primary.regime !== "UPTREND" || higher.regime !== "UPTREND") return reject("timeframes_not_both_uptrend");
   if (primary.atr_pct >= 5 || primary.rsi14 >= 68 || primary.adx14 < 18 ||
       primary.plus_di14 <= primary.minus_di14) return reject("volatility_or_momentum_guard");
   const roundTripBps = 2 * (costs.feeBpsPerSide + costs.slippageBps) + spreadBps;
   if (primary.atr_pct * 100 < roundTripBps * 2.5) return reject("expected_range_below_cost_multiple");
-  return { eligible: true, reason: "eligible", spread_bps: Number(spreadBps.toFixed(2)), round_trip_cost_bps: Number(roundTripBps.toFixed(2)) };
+  return { eligible: true, reason: "eligible", market_context_mode: marketContext?.mode || "not_checked", spread_bps: Number(spreadBps.toFixed(2)), round_trip_cost_bps: Number(roundTripBps.toFixed(2)) };
 }
