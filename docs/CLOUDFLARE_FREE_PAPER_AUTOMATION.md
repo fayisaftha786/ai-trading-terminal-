@@ -2,7 +2,7 @@
 
 ## Purpose and safety boundary
 
-This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 also forces legacy v1 auto-entry settings OFF during migration, while preserving a deliberate owner opt-in made after v2 is active.
+This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 forces legacy v1 auto-entry settings OFF during migration. A new/empty ledger targets USD 10 virtual capital. If a legacy ledger has trades and a different starting balance, it stays locked until the owner reviews it; the review can preserve the existing starting balance and all history, requires all open positions to be closed, and keeps auto-entry OFF.
 
 This is not unattended real-money trading. Production/live exchange orders are not implemented here. Binance Testnet order execution is not part of this Worker. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
 
@@ -14,7 +14,7 @@ This is not unattended real-money trading. Production/live exchange orders are n
 - Coinbase is the primary USD spot market-data provider. Bitstamp's public USD spot API is a secondary whole-market fallback for BTC/USD, ETH/USD and SOL/USD: ticker, grouped order-book snapshot, native 1H candles (`step=3600`) and native 6H candles (`step=21600`). If the primary snapshot is unavailable or incomplete, the Worker retries that symbol as a complete Bitstamp snapshot; it never combines a Coinbase ticker/book with Bitstamp candles. Each selected market records `market_data_provider` and the provider for ticker, book, 1H and 6H so source mixing fails the market-universe gate.
 - No D1 database, KV namespace, paid container, load balancer, VPS or paid service is required by this design.
 
-The Durable Object alarm is initialized on the first /api/health or authenticated API request. The dashboard probes health during its initial load. If the object is not invoked, its alarm does not start.
+The Durable Object alarm is initialized on the first /api/health or authenticated API request. The dashboard probes health during its initial load. If the object is not invoked, its alarm does not start. Each next alarm is scheduled about 90 seconds after the current cycle completes; this is not a guaranteed fixed-rate 90-second market-data feed.
 
 ## Free-plan limits and honest expectations
 
@@ -48,18 +48,17 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 
 ## Default risk controls
 
-- PAPER starting equity: USD 100 of virtual funds only.
-- Risk budget per entry: 0.25% of paper equity.
-- Maximum total exposure: 20%.
-- Maximum open positions: 3.
-- Maximum entries per UTC day: 3.
+- New/empty PAPER profile starting equity: USD 10 of virtual funds only; USD 2 remains reserved and the position notional ceiling is USD 8.
+- Risk budget per entry: 1% of current paper equity, reduced further by adaptive risk when drawdown/loss streaks rise.
+- Maximum total exposure: 80%; maximum open positions: 1.
+- Maximum completed BUY→SELL round trips per UTC day: 5; this is a ceiling, not a target.
 - Per-symbol cooldown: 4 hours.
-- Stop distance: 1%; take-profit distance: 3%.
-- Estimated fee: 15 bps per side; estimated slippage: 10 bps.
-- Daily loss stop: 1.5%; weekly loss stop: 4%; peak-to-trough stop: 5%.
-- Only one eligible entry per scan.
+- Stop-loss distance: 1%; take-profit is dynamically selected from estimated round-trip costs and 1H ATR, with unsafe targets rejected.
+- Estimated fee: 60 bps per side; estimated slippage: 10 bps per side. The fee is a conservative placeholder, not the owner’s verified Coinbase tier.
+- Daily loss stop: 1%; weekly loss stop: 4%; peak-to-trough stop: 5%; soft daily/weekly lock begins at 75% of those limits.
+- A legacy ledger with recorded trades and a starting balance other than USD 10 is never silently rebased. After all open positions are closed, the owner may explicitly review and preserve the existing virtual starting balance and historical trades. This review keeps automatic PAPER entries OFF.
 
-These are initial conservative assumptions for a simulation; review them after measured paper data. The 15 bps fee assumption is not a statement of your actual Coinbase fee tier.
+All limits are simulation controls, not guarantees or promises of return.
 
 ## Temporary preview deployment (optional)
 
@@ -89,7 +88,7 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
 7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `worker_version.id`, `worker_version.tag` (the Git commit SHA when deployed with the command above), and a version timestamp. Compare the tag with the repository `main` SHA before treating the new deployment as current.
 8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, local order-book response retrieval age under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
 9. Confirm the scan timestamp advances after the first alarm and again roughly every 90 seconds. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
-10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real trading and Binance Testnet remain disabled.
+10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real-money order submission is disabled in this build; Coinbase account preflight and order preview do not place an order. Binance Testnet remains disabled.
 11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
 
 ### GitHub Actions deploy workflow (separate from Cloudflare Git integration)
