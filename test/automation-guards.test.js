@@ -188,8 +188,8 @@ test("loss cooldown pauses after two or three consecutive realised losses and re
 
 test("loss cooldown fails closed for malformed recent loss records", () => {
   assert.equal(assessLossCooldown([
-    { pnl_usd: -1, closed_at_ms: NOW - 1000 },
-    { pnl_usd: -1, closed_at_ms: "invalid" }
+    { pnl_usd: -1, closed_at_ms: "invalid" },
+    { pnl_usd: -1, closed_at_ms: NOW - 2000 }
   ], NOW).reason, "loss_cooldown_timestamp_invalid");
   assert.equal(assessLossCooldown([{ pnl_usd: "bad", closed_at_ms: NOW }], NOW).reason, "recent_trade_result_invalid");
 });
