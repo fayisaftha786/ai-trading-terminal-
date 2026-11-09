@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, deriveSchedulerStatus, shouldHaltPaperAutomation } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -11,7 +11,7 @@ const DEFAULT_RISK = {
   risk_per_trade_pct: 0.25, max_daily_loss_pct: 1.5, max_weekly_loss_pct: 4,
   max_total_exposure_pct: 20, max_open_positions: 3, stop_loss_pct: 1,
   take_profit_pct: 3, fee_bps_per_side: 15, slippage_bps: 10,
-  max_total_drawdown_pct: 5
+  max_total_drawdown_pct: 5, daily_profit_lock_pct: 1, soft_loss_guard_fraction: 0.75
 };
 
 function jsonResponse(data, status = 200) {
@@ -944,10 +944,51 @@ export class TradingEngine extends DurableObject {
     for (const trade of this.getOpenTrades()) {
       const bid = markBySymbol.get(trade.symbol);
       if (!Number.isFinite(bid) || bid <= 0) continue;
+
+      const metadata = trade.metadata || {};
+      const roundTripCostBps = Number.isFinite(Number(metadata.round_trip_cost_bps))
+        ? Number(metadata.round_trip_cost_bps)
+        : 2 * (risk.fee_bps_per_side + risk.slippage_bps);
+      const trailing = updateTrailingStop({
+        entryPrice: trade.entry_price,
+        currentStop: trade.stop_loss,
+        previousHighWater: Number(metadata.high_water_bid),
+        currentBid: bid,
+        roundTripCostBps
+      });
+      if (trailing.ok && trailing.changed) {
+        const nextMetadata = {
+          ...metadata,
+          high_water_bid: trailing.highWaterBid,
+          trailing_stop_active: trailing.active,
+          trailing_activation_pct: trailing.activationPct,
+          trailing_distance_pct: trailing.distancePct
+        };
+        this.sql.exec(
+          "UPDATE trades SET stop_loss=?,metadata_json=? WHERE id=? AND status='OPEN'",
+          trailing.stopLoss, JSON.stringify(nextMetadata), trade.id
+        );
+        const previousStop = trade.stop_loss;
+        trade.stop_loss = trailing.stopLoss;
+        trade.metadata = nextMetadata;
+        if (trailing.stopLoss > previousStop + 1e-10) {
+          this.logEvent("paper_trailing_stop", "Paper trailing stop moved upward", {
+            trade_id: trade.id, symbol: trade.symbol,
+            previous_stop: previousStop, trailing_stop: trailing.stopLoss,
+            high_water_bid: trailing.highWaterBid
+          });
+        }
+      }
+
       let reference = null;
       let reason = null;
-      if (bid <= trade.stop_loss) { reference = bid; reason = "stop_loss"; }
-      else if (bid >= trade.take_profit) { reference = trade.take_profit; reason = "take_profit"; }
+      if (bid <= trade.stop_loss) {
+        reference = bid;
+        reason = trade.metadata?.trailing_stop_active ? "trailing_stop" : "stop_loss";
+      } else if (bid >= trade.take_profit) {
+        reference = trade.take_profit;
+        reason = "take_profit";
+      }
       if (reference === null) continue;
       const exitPrice = reference * (1 - risk.slippage_bps / 10000);
       const exitFee = exitPrice * trade.quantity * risk.fee_bps_per_side / 10000;
@@ -1053,6 +1094,8 @@ export class TradingEngine extends DurableObject {
     const reasons = [];
     if (portfolio.unmarked_positions > 0) reasons.push("open_position_without_fresh_mark");
     if (portfolio.open_positions >= risk.max_open_positions) reasons.push("max_open_positions");
+    const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
+    reasons.push(...protection.block_reasons);
     if (portfolio.drawdown_pct_from_peak >= risk.max_total_drawdown_pct) {
       reasons.push("max_total_drawdown");
       const state = this.getState("settings");
@@ -1070,7 +1113,7 @@ export class TradingEngine extends DurableObject {
     if (entriesToday >= 3) reasons.push("daily_entry_cap");
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     if (portfolio.exposure_usd >= maxExposure) reasons.push("max_exposure");
-    return reasons;
+    return [...new Set(reasons)];
   }
 
   openPaperTrade(candidate, portfolio, risk, nowMs) {
@@ -1085,11 +1128,23 @@ export class TradingEngine extends DurableObject {
       if (previous.status === "OPEN") return { ok: false, reason: "position_already_open" };
       if (lastAt && nowMs - lastAt < 4 * 60 * 60 * 1000) return { ok: false, reason: "symbol_cooldown_4h" };
     }
+    const recentClosed = this.sql.exec(
+      "SELECT pnl_usd,closed_at_ms FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT 3"
+    ).toArray();
+    const lossCooldown = assessLossCooldown(recentClosed, nowMs);
+    if (lossCooldown.blocked) return { ok: false, reason: lossCooldown.reason };
+    const adaptiveRisk = assessAdaptiveRisk({
+      drawdownPct: portfolio.drawdown_pct_from_peak,
+      lossStreak: lossCooldown.lossStreak
+    });
+    if (!adaptiveRisk.allowed) return { ok: false, reason: adaptiveRisk.reason };
+
     const entryPrice = market.ask * (1 + risk.slippage_bps / 10000);
     const feeRate = risk.fee_bps_per_side / 10000;
     const roundTripCostRate = (2 * (risk.fee_bps_per_side + risk.slippage_bps) + assessment.spread_bps) / 10000;
     const effectiveStopRate = risk.stop_loss_pct / 100 + roundTripCostRate;
-    const riskBudget = portfolio.equity_usd * risk.risk_per_trade_pct / 100;
+    const effectiveRiskPct = risk.risk_per_trade_pct * adaptiveRisk.multiplier;
+    const riskBudget = portfolio.equity_usd * effectiveRiskPct / 100;
     const riskLimitedNotional = riskBudget / effectiveStopRate;
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     const remainingExposure = Math.max(0, maxExposure - portfolio.exposure_usd);
@@ -1107,6 +1162,11 @@ export class TradingEngine extends DurableObject {
         score: market.primary.score, regime_1h: market.primary.regime, regime_6h: market.higher.regime,
         spread_bps: assessment.spread_bps, round_trip_cost_bps: assessment.round_trip_cost_bps,
         fee_bps_per_side: risk.fee_bps_per_side, slippage_bps: risk.slippage_bps,
+        configured_risk_per_trade_pct: risk.risk_per_trade_pct,
+        adaptive_risk_multiplier: adaptiveRisk.multiplier,
+        effective_risk_per_trade_pct: effectiveRiskPct,
+        trailing_stop_policy: "cost_aware_ratchet_v1",
+        high_water_bid: entryPrice,
         execution: "simulated_market_buy_at_ask_plus_slippage"
       })
     };
@@ -1124,8 +1184,73 @@ export class TradingEngine extends DurableObject {
     } catch {
       return { ok: false, reason: "ledger_insert_failed_or_duplicate_open_trade" };
     }
-    this.logEvent("paper_entry", "Automatic paper position opened", { trade_id: id, symbol: trade.symbol, notional_usd: notional });
+    this.logEvent("paper_entry", "Automatic paper position opened", {
+      trade_id: id, symbol: trade.symbol, notional_usd: notional,
+      adaptive_risk_multiplier: adaptiveRisk.multiplier,
+      effective_risk_per_trade_pct: effectiveRiskPct
+    });
     return { ok: true, trade: { ...trade, id } };
+  }
+
+  riskProtectionStatus(portfolio, risk, nowMs) {
+    const recentClosed = this.sql.exec(
+      "SELECT pnl_usd,closed_at_ms FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT 3"
+    ).toArray();
+    const lossCooldown = assessLossCooldown(recentClosed, nowMs);
+    const adaptiveRisk = assessAdaptiveRisk({
+      drawdownPct: portfolio.drawdown_pct_from_peak,
+      lossStreak: lossCooldown.lossStreak
+    });
+    const blockReasons = [];
+    if (lossCooldown.blocked) blockReasons.push(lossCooldown.reason);
+    if (!adaptiveRisk.allowed) blockReasons.push(adaptiveRisk.reason);
+
+    const initial = Number(portfolio.initial_capital_usd);
+    const softFraction = Number.isFinite(risk.soft_loss_guard_fraction)
+      ? Math.min(1, Math.max(0.5, risk.soft_loss_guard_fraction)) : 0.75;
+    const dailyLimit = initial * risk.max_daily_loss_pct / 100;
+    const weeklyLimit = initial * risk.max_weekly_loss_pct / 100;
+    if (Number.isFinite(portfolio.daily_equity_pnl_usd)) {
+      if (portfolio.daily_equity_pnl_usd <= -(dailyLimit * softFraction)) {
+        blockReasons.push("daily_soft_loss_lock");
+      }
+      const profitLock = initial * risk.daily_profit_lock_pct / 100;
+      if (Number.isFinite(profitLock) && profitLock > 0 &&
+          portfolio.daily_equity_pnl_usd >= profitLock) {
+        blockReasons.push("daily_profit_lock");
+      }
+    } else {
+      blockReasons.push("daily_risk_baseline_unavailable");
+    }
+    if (Number.isFinite(portfolio.weekly_equity_pnl_usd)) {
+      if (portfolio.weekly_equity_pnl_usd <= -(weeklyLimit * softFraction)) {
+        blockReasons.push("weekly_soft_loss_lock");
+      }
+    } else {
+      blockReasons.push("weekly_risk_baseline_unavailable");
+    }
+    const multiplier = adaptiveRisk.allowed ? adaptiveRisk.multiplier : 0;
+    return {
+      mode: "paper_only",
+      new_entries_paused: blockReasons.length > 0,
+      block_reasons: [...new Set(blockReasons)],
+      base_risk_per_trade_pct: risk.risk_per_trade_pct,
+      adaptive_risk_multiplier: multiplier,
+      effective_risk_per_trade_pct: Number((risk.risk_per_trade_pct * multiplier).toFixed(4)),
+      drawdown_pct_from_peak: portfolio.drawdown_pct_from_peak,
+      consecutive_loss_streak: lossCooldown.lossStreak,
+      loss_cooldown_active: lossCooldown.blocked,
+      loss_cooldown_remaining_ms: lossCooldown.remainingMs,
+      trailing_stop: {
+        enabled: true,
+        activation: "cost-aware; at least 2% above entry",
+        distance: "cost-aware; at least 0.9% below high-water bid",
+        ratchet_only: true
+      },
+      soft_daily_loss_limit_usd: Number.isFinite(dailyLimit) ? dailyLimit * softFraction : null,
+      soft_weekly_loss_limit_usd: Number.isFinite(weeklyLimit) ? weeklyLimit * softFraction : null,
+      daily_profit_lock_usd: Number.isFinite(initial) ? initial * risk.daily_profit_lock_pct / 100 : null
+    };
   }
 
   automationStatus() {
@@ -1178,6 +1303,7 @@ export class TradingEngine extends DurableObject {
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
       },
       automation: this.automationStatus(), portfolio, markets, trades, open_positions: openPositions,
+      risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now()),
       runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
