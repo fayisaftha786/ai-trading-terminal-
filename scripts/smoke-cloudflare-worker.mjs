@@ -196,6 +196,13 @@ try {
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
   assert.equal(settingsAfterResearch.enabled, false, "read-only research must not enable PAPER automation by itself");
 
+  const unnecessaryCapitalReview = await request("/api/automation/capital-review", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ action: "keep_existing_capital", confirmed: true })
+  });
+  assert.equal(unnecessaryCapitalReview.status, 409, "a fresh ledger must not accept a legacy capital review");
+  assert.equal((await unnecessaryCapitalReview.json()).error, "capital_review_not_required");
+
   const enableWithoutFreshScan = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
   });
@@ -229,6 +236,7 @@ try {
   assert.match(staticHtml, /id="researchHistory"/);
   assert.match(staticHtml, /Coinbase Advanced · read-only preflight/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
+  assert.match(staticHtml, /id="capitalReview"/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);
   assert.doesNotMatch(staticHtml, /Confirm guarded real order/);
   assert.match(staticHtml, /Preview LIMIT order only/);
