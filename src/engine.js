@@ -284,6 +284,16 @@ export class TradingEngine extends DurableObject {
         }, 423);
       }
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        const executionStatus = coinbaseAdvancedStatus(this.env);
+        if (!executionStatus.order_submission_available) {
+          return jsonResponse({
+            status: "blocked",
+            blockers: [...executionStatus.blockers, "guarded_live_execution_switch_or_open_order_limit_not_configured"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 423);
+        }
         let rawBody;
         try { rawBody = await request.text(); } catch {
           return jsonResponse({ status: "blocked", blockers: ["invalid_request_body"] }, 400);
@@ -307,7 +317,13 @@ export class TradingEngine extends DurableObject {
         const active = records.filter((item) => ["SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED", "PARTIALLY_FILLED", "CANCEL_QUEUED"].includes(item.status));
         const status = coinbaseAdvancedStatus(this.env);
         if (!status.order_submission_available || active.length >= status.max_open_orders) {
-          return jsonResponse({ status: "blocked", blockers: [...status.blockers, ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : [])], order_submission_available: false }, 423);
+          return jsonResponse({
+            status: "blocked",
+            blockers: [...status.blockers, ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : [])],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 423);
         }
         const record = {
           client_order_id: clientOrderId,
