@@ -59,7 +59,7 @@ jobs:
         shell: bash
         run: |
           for attempt in $(seq 1 12); do
-            response="$(curl --fail --silent --max-time 15 "$WORKER_HEALTH_URL" 2>/dev/null || true)"
+            response="$(curl --fail --silent --max-time 15 "${WORKER_HEALTH_URL}?deploy_verify=${GITHUB_SHA}-${attempt}" 2>/dev/null || true)"
             if [ -n "$response" ] && printf '%s' "$response" | node -e '
               let raw = "";
               process.stdin.setEncoding("utf8");
@@ -75,7 +75,8 @@ jobs:
                     liveTradingDisabled: health.live_trading_enabled === false,
                     binanceTestnetDisabled: health.binance_testnet_enabled === false
                   };
-                  if (Object.values(checks).every(Boolean)) {
+                  console.log("Deployment verification:", JSON.stringify({ checks, deployment_commit_sha: health.deployment_commit_sha, worker_version: health.worker_version }));
+        if (Object.values(checks).every(Boolean)) {
                     console.log("Deployed Worker revision and PAPER-only safety verified.");
                     return;
                   }

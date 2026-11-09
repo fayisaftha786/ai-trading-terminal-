@@ -45,3 +45,22 @@ test("dashboard UI never labels an omitted market-feed status as UNKNOWN", () =>
   assert.match(dashboardSource, /currentFeed\.freshness_state/);
   assert.match(dashboardSource, /currentFeed\.freshness_reason/);
 });
+
+
+const watchdogWorkflow = readFileSync(
+  new URL("../.github/workflows/production-paper-watchdog.yml", import.meta.url),
+  "utf8"
+);
+
+test("deployment verification bypasses cached health responses and reports provenance", () => {
+  assert.match(deploymentWorkflow, /deploy_verify=\\$\\{GITHUB_SHA\\}-\\$\\{attempt\\}/);
+  assert.match(deploymentWorkflow, /deployment_commit_sha: health\.deployment_commit_sha/);
+  assert.match(deploymentWorkflow, /deploymentCommitMatches: health\.deployment_commit_sha === process\.env\.EXPECTED_DEPLOY_COMMIT_SHA/);
+});
+
+test("production watchdog checks the injected deployment SHA, not optional version tags", () => {
+  assert.match(watchdogWorkflow, /deployedCommitMatchesMain: health\.deployment_commit_sha === process\.env\.EXPECTED_MAIN_SHA/);
+  assert.doesNotMatch(watchdogWorkflow, /deployedCommitMatchesMain: health\.worker_version\?\.tag/);
+  assert.match(watchdogWorkflow, /freshness_state: currentFeed\.freshness_state/);
+  assert.match(watchdogWorkflow, /strict 15-second freshness gate/);
+});

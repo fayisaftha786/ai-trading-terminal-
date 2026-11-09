@@ -72,7 +72,7 @@ jobs:
                   liveTradingDisabled: health.live_trading_enabled === false,
                   binanceTestnetDisabled: health.binance_testnet_enabled === false,
                   workerVersionIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
-                  deployedCommitMatchesMain: health.worker_version?.tag === process.env.EXPECTED_MAIN_SHA,
+                  deployedCommitMatchesMain: health.deployment_commit_sha === process.env.EXPECTED_MAIN_SHA,
                   schedulerHeartbeatFresh: validAge(scheduler.last_alarm_age_ms),
                   schedulerNotStale: ["healthy", "running"].includes(scheduler.status),
                   lastScheduledScanHealthy: ["completed", "running"].includes(scheduler.last_scheduled_scan_status),
@@ -99,9 +99,11 @@ jobs:
                   },
                   current_market_snapshots: {
                     status: currentFeed.status ?? health.market_data_status ?? "unknown",
+                    freshness_state: currentFeed.freshness_state ?? "not_reported",
+                    freshness_reason: currentFeed.freshness_reason ?? null,
                     healthy_market_count: currentFeed.healthy_market_count ?? null,
                     expected_market_count: currentFeed.expected_market_count ?? null,
-                    note: "Current snapshots can become stale between 15-minute scans; this is reported separately from the most recent scheduled scan."
+                    note: "Order-book snapshots have a strict 15-second freshness gate; scheduled scans run every 90 seconds. Expired cached snapshots are reported separately from the last completed scan."
                   }
                 }, null, 2));
                 if (!Object.values(checks).every(Boolean)) {
