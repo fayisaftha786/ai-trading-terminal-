@@ -33,7 +33,7 @@ test("empty legacy paper ledger migrates from 100 to 10 dollars with automation 
   }, 0);
   assert.equal(settings.initial_capital_usd, 10);
   assert.equal(settings.peak_equity_usd, 10);
-  assert.equal(settings.auto_paper_enabled, true);
+  assert.equal(settings.auto_paper_enabled, false);
   assert.equal(settings.risk.max_open_positions, 1);
   assert.equal(settings.capital_setup_required, false);
 });
@@ -49,6 +49,28 @@ test("paper ledger with trade history is never silently rebased", () => {
   assert.equal(settings.auto_paper_enabled, false);
   assert.equal(settings.capital_setup_required, true);
   assert.equal(settings.capital_setup_required_reason, "existing_paper_ledger_not_rebased_automatically");
+});
+
+
+test("legacy profile v1 cannot carry automatic PAPER entry permission into v2", () => {
+  const settings = migratePaperAutomationSettings({
+    paper_automation_profile_version: 1,
+    initial_capital_usd: 10,
+    auto_paper_enabled: true,
+    halted: false
+  }, 0);
+  assert.equal(settings.paper_automation_profile_version, 2);
+  assert.equal(settings.auto_paper_enabled, false);
+});
+
+test("explicit PAPER opt-in is preserved after profile v2 is active", () => {
+  const settings = migratePaperAutomationSettings({
+    paper_automation_profile_version: 2,
+    initial_capital_usd: 10,
+    auto_paper_enabled: true,
+    halted: false
+  }, 0);
+  assert.equal(settings.auto_paper_enabled, true);
 });
 
 test("dynamic take-profit clears estimated round-trip costs with a minimum net buffer", () => {
