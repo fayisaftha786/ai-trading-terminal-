@@ -8,28 +8,57 @@ const DEFAULTS = Object.freeze({
   maxBarsInTrade: 72
 });
 
-function finiteBar(row) {
-  return row && [row.time, row.open, row.high, row.low, row.close, row.volume]
-    .every((value) => Number.isFinite(Number(value))) &&
-    Number(row.open) > 0 && Number(row.high) >= Math.max(Number(row.open), Number(row.close), Number(row.low)) &&
-    Number(row.low) <= Math.min(Number(row.open), Number(row.close), Number(row.high)) &&
-    Number(row.volume) >= 0;
+function hasPresentNumericValue(value) {
+  return (typeof value === "number" ||
+    (typeof value === "string" && value.trim() !== "")) &&
+    Number.isFinite(Number(value));
 }
 
 function normalizeBars(input, intervalMs) {
-  if (!Array.isArray(input)) return [];
-  const rows = input.filter(finiteBar).map((row) => ({
-    time: Number(row.time), open: Number(row.open), high: Number(row.high),
-    low: Number(row.low), close: Number(row.close), volume: Number(row.volume)
-  })).sort((a, b) => a.time - b.time);
-  const unique = [];
-  for (const row of rows) {
-    if (row.time % intervalMs !== 0) continue;
-    if (unique.length && row.time === unique.at(-1).time) continue;
-    if (unique.length && row.time - unique.at(-1).time !== intervalMs) return [];
-    unique.push(row);
+  if (!Array.isArray(input)) return { rows: [], issues: ["candles_not_array"] };
+  const issues = new Set();
+  const rows = [];
+
+  for (const raw of input) {
+    if (!raw || typeof raw !== "object") {
+      issues.add("invalid_candle_row");
+      continue;
+    }
+    if (!hasPresentNumericValue(raw.time) ||
+        !Number.isSafeInteger(Number(raw.time)) || Number(raw.time) < 0) {
+      issues.add("invalid_timestamp");
+      continue;
+    }
+    const values = [raw.open, raw.high, raw.low, raw.close, raw.volume];
+    if (!values.every(hasPresentNumericValue)) {
+      issues.add("invalid_ohlcv");
+      continue;
+    }
+    const row = {
+      time: Number(raw.time),
+      open: Number(raw.open),
+      high: Number(raw.high),
+      low: Number(raw.low),
+      close: Number(raw.close),
+      volume: Number(raw.volume)
+    };
+    if (row.open <= 0 || row.high < Math.max(row.open, row.close, row.low) ||
+        row.low > Math.min(row.open, row.close, row.high) || row.volume < 0) {
+      issues.add("invalid_ohlcv");
+      continue;
+    }
+    if (row.time % intervalMs !== 0) issues.add("off_grid_timestamp");
+    rows.push(row);
   }
-  return unique;
+
+  rows.sort((a, b) => a.time - b.time);
+  for (let index = 1; index < rows.length; index += 1) {
+    const distance = rows[index].time - rows[index - 1].time;
+    if (distance === 0) issues.add("duplicate_timestamp");
+    else if (distance !== intervalMs) issues.add("missing_intervals");
+  }
+
+  return { rows, issues: [...issues] };
 }
 
 function ema(values, period) {
@@ -267,7 +296,11 @@ function simulate(name, bars, featureRows, options, startIndex, endIndex) {
     curve.push(mark);
     exposure.push(heldDuringBar);
   }
-  if (position) closePosition(bars[finish].close, finish, "end_of_window");
+  if (position) {
+    closePosition(bars[finish].close, finish, "end_of_window");
+    // Include the final forced-exit slippage and fee in the last drawdown mark.
+    if (curve.length) curve[curve.length - 1] = equity;
+  }
   const finalEquity = equity;
   const summary = metrics(trades, curve, initialEquity, finalEquity);
   summary.exposure_pct = exposure.length
@@ -293,8 +326,20 @@ function buyAndHold(bars, options, startIndex, endIndex) {
 export function runStrategyTournament({
   candles1h, candles6h, options = {}, startIndex = 100, endIndex
 }) {
-  const oneHour = normalizeBars(candles1h, HOUR_MS);
-  const sixHour = normalizeBars(candles6h, SIX_HOUR_MS);
+  const oneHourInput = normalizeBars(candles1h, HOUR_MS);
+  const sixHourInput = normalizeBars(candles6h, SIX_HOUR_MS);
+  if (oneHourInput.issues.length || sixHourInput.issues.length) {
+    return {
+      ok: false,
+      reason: "invalid_candle_history",
+      issues_1h: oneHourInput.issues,
+      issues_6h: sixHourInput.issues,
+      bars_1h: oneHourInput.rows.length,
+      bars_6h: sixHourInput.rows.length
+    };
+  }
+  const oneHour = oneHourInput.rows;
+  const sixHour = sixHourInput.rows;
   if (oneHour.length < 150 || sixHour.length < 50) {
     return { ok: false, reason: "insufficient_clean_history", bars_1h: oneHour.length, bars_6h: sixHour.length };
   }
@@ -335,8 +380,20 @@ export function runStrategyTournament({
 }
 
 export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
-  const oneHour = normalizeBars(candles1h, HOUR_MS);
-  const sixHour = normalizeBars(candles6h, SIX_HOUR_MS);
+  const oneHourInput = normalizeBars(candles1h, HOUR_MS);
+  const sixHourInput = normalizeBars(candles6h, SIX_HOUR_MS);
+  if (oneHourInput.issues.length || sixHourInput.issues.length) {
+    return {
+      ok: false,
+      reason: "invalid_candle_history",
+      issues_1h: oneHourInput.issues,
+      issues_6h: sixHourInput.issues,
+      bars_1h: oneHourInput.rows.length,
+      bars_6h: sixHourInput.rows.length
+    };
+  }
+  const oneHour = oneHourInput.rows;
+  const sixHour = sixHourInput.rows;
   if (oneHour.length < 500 || sixHour.length < 50) {
     return { ok: false, reason: "need_at_least_500_clean_1h_and_50_clean_6h_bars",
       bars_1h: oneHour.length, bars_6h: sixHour.length };
