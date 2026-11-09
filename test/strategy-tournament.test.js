@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   runStrategyTournament, runWalkForwardResearch, resolveLongBarExit,
   runTradeOrderMonteCarlo, runRecursiveWarmupAnalysis
@@ -244,4 +245,15 @@ test("recursive warmup analysis remains inconclusive when fewer than two startup
   });
   assert.equal(result.status, "insufficient_warmup_history");
   assert.equal(result.configurations_tested, 1);
+});
+
+test("dashboard walk-forward requirement matches the strict research implementation", () => {
+  const dashboard = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  assert.match(
+    dashboard,
+    /strict walk-forward validation requires at least 3,000 clean 1H bars and 500 clean 6H bars per asset/i
+  );
+  assert.match(dashboard, /four non-overlapping 28-day test folds/i);
+  assert.match(dashboard, /separate final holdout/i);
+  assert.doesNotMatch(dashboard, /requires at least 500 one-hour and 50 six-hour candles/i);
 });
