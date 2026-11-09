@@ -2622,6 +2622,15 @@ export class TradingEngine extends DurableObject {
       daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       schedule_seconds: SCAN_INTERVAL_MS / 1000,
+      book_refresh_seconds: BOOK_REFRESH_INTERVAL_MS / 1000,
+      last_book_refresh_at_ms: Number(runtime.last_book_refresh_at_ms) > 0
+        ? Number(runtime.last_book_refresh_at_ms) : null,
+      last_book_refresh_age_ms: Number(runtime.last_book_refresh_at_ms) > 0
+        ? Math.max(0, nowMs - Number(runtime.last_book_refresh_at_ms)) : null,
+      last_book_refresh_status: runtime.last_book_refresh_status || "not_started",
+      last_book_refresh_success_count: Number(runtime.last_book_refresh_success_count) || 0,
+      last_book_refresh_failed_count: Number(runtime.last_book_refresh_failed_count) || 0,
+      last_book_refresh_skipped_count: Number(runtime.last_book_refresh_skipped_count) || 0,
       scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
       last_scheduled_alarm_age_ms: scheduler.ageMs,
