@@ -499,3 +499,51 @@ export function mergeScanRuntimeState(previousRuntime, nextRuntime, source) {
   }
   return merged;
 }
+
+
+/**
+ * Explain whether a stale current snapshot reflects a provider failure or the
+ * normal expiry of a previously healthy scan. This is diagnostic only: it
+ * never changes market eligibility or relaxes any entry freshness gate.
+ */
+export function classifyMarketFeedFreshness({
+  currentFeedHealthy,
+  lastScheduledScanStatus,
+  lastScheduledHealthyMarketCount,
+  lastScheduledExpectedMarketCount,
+  lastScheduledScanAgeMs,
+  staleAfterMs
+} = {}) {
+  const expected = Number.isSafeInteger(Number(lastScheduledExpectedMarketCount)) &&
+    Number(lastScheduledExpectedMarketCount) > 0
+    ? Number(lastScheduledExpectedMarketCount) : 0;
+  const healthy = Number.isSafeInteger(Number(lastScheduledHealthyMarketCount)) &&
+    Number(lastScheduledHealthyMarketCount) >= 0
+    ? Number(lastScheduledHealthyMarketCount) : 0;
+  const age = Number(lastScheduledScanAgeMs);
+  const maxAge = Number(staleAfterMs);
+  const recent = Number.isFinite(age) && age >= 0 &&
+    Number.isFinite(maxAge) && maxAge > 0 && age <= maxAge;
+
+  if (currentFeedHealthy === true) {
+    return { state: "fresh", reason: "current_market_snapshots_pass_all_entry_data_gates" };
+  }
+  if (lastScheduledScanStatus === "running") {
+    return { state: "refresh_in_progress", reason: "scheduled_market_refresh_is_running" };
+  }
+  if (lastScheduledScanStatus === "completed" &&
+      expected > 0 && healthy === expected && recent) {
+    return {
+      state: "snapshot_expired_after_healthy_scan",
+      reason: "last_scheduled_scan_was_healthy_but_persisted_order_book_snapshots_have_expired"
+    };
+  }
+  if (lastScheduledScanStatus === "completed" && expected > 0 && healthy === expected && !recent) {
+    return { state: "scheduled_scan_overdue", reason: "last_healthy_scan_is_older_than_scheduler_health_window" };
+  }
+  if (lastScheduledScanStatus === "partial" || lastScheduledScanStatus === "unavailable" ||
+      lastScheduledScanStatus === "error") {
+    return { state: "last_scan_degraded", reason: "last_scheduled_scan_did_not_validate_the_full_market_universe" };
+  }
+  return { state: "not_yet_verified", reason: "no_recent_complete_healthy_market_scan_is_available" };
+}
