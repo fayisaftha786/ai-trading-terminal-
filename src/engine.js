@@ -16,6 +16,7 @@ import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCa
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
+import { summarizePaperExecution } from "./execution-audit.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -1727,6 +1728,14 @@ export class TradingEngine extends DurableObject {
       "SELECT at_ms,equity_usd,realized_pnl_usd,unrealized_pnl_usd,open_positions,drawdown_pct " +
       "FROM (SELECT * FROM equity_snapshots ORDER BY at_ms DESC LIMIT 200) ORDER BY at_ms ASC"
     ).toArray();
+    const executionRows = this.sql.exec(
+      "SELECT entry_price,metadata_json,status FROM trades ORDER BY opened_at_ms DESC,id DESC LIMIT 1000"
+    ).toArray().map((row) => ({
+      entry_price: Number(row.entry_price),
+      status: row.status,
+      metadata: this.parseJson(row.metadata_json)
+    }));
+    const executionAudit = summarizePaperExecution(executionRows);
     const recentClosed = this.sql.exec(
       "SELECT pnl_usd FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT 1000"
     ).toArray();
@@ -1757,6 +1766,7 @@ export class TradingEngine extends DurableObject {
       average_win_usd: totals.average_win_usd == null ? null : Number(totals.average_win_usd),
       average_loss_usd: totals.average_loss_usd == null ? null : Number(totals.average_loss_usd),
       average_holding_minutes: totals.average_holding_minutes == null ? null : Number(totals.average_holding_minutes),
+      execution_audit: executionAudit,
       longest_loss_streak_in_latest_1000_closed: longestRecentLossStreak,
       loss_streak_scope: "latest 1000 closed trades",
       per_symbol: perSymbol.map((row) => ({
@@ -1834,6 +1844,11 @@ export class TradingEngine extends DurableObject {
           ...trade.metadata,
           close_reason: reason,
           close_reference_price: reference,
+          exit_mark_bid: bid,
+          exit_fill_price: exitPrice,
+          exit_slippage_bps: risk.slippage_bps,
+          exit_fee_bps_per_side: risk.fee_bps_per_side,
+          exit_observed_at_ms: nowMs,
           close_market_data_provider: trade.metadata?.market_data_provider || "coinbase_exchange"
         }), trade.id
       );
@@ -1859,6 +1874,11 @@ export class TradingEngine extends DurableObject {
         ...trade.metadata,
         close_reason: reason,
         close_reference_price: bid,
+        exit_mark_bid: bid,
+        exit_fill_price: exitPrice,
+        exit_slippage_bps: risk.slippage_bps,
+        exit_fee_bps_per_side: risk.fee_bps_per_side,
+        exit_observed_at_ms: nowMs,
         close_market_data_provider: exitMarketDataProvider ||
           trade.metadata?.market_data_provider || "coinbase_exchange"
       }), trade.id
@@ -2034,6 +2054,17 @@ export class TradingEngine extends DurableObject {
         effective_risk_per_trade_pct: effectiveRiskPct,
         trailing_stop_policy: "cost_aware_ratchet_v1",
         high_water_bid: entryPrice,
+        entry_quote_bid: market.bid,
+        entry_quote_ask: market.ask,
+        entry_quote_mid: (market.bid + market.ask) / 2,
+        entry_quote_received_at_ms: market.quote_received_at_ms ?? null,
+        entry_ticker_time: market.ticker_time ?? null,
+        entry_order_book_retrieved_at_ms: market.book_retrieved_at_ms ?? null,
+        entry_bid_depth_quote: market.bid_depth_quote ?? null,
+        entry_ask_depth_quote: market.ask_depth_quote ?? null,
+        entry_fill_price: entryPrice,
+        entry_slippage_bps: risk.slippage_bps,
+        entry_fee_bps_per_side: risk.fee_bps_per_side,
         execution: "simulated_market_buy_at_ask_plus_slippage"
       })
     };
