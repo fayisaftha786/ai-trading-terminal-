@@ -1,5 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchBitstampResearchHistory, fetchProductSnapshot } from "./coinbase.js";
+import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
@@ -538,7 +539,31 @@ export class TradingEngine extends DurableObject {
             error: String(error?.message || error).slice(0, 160)
           });
         }
+        for (const [timeframeSeconds, key, label] of [
+          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
+        ]) {
+          try {
+            cachedCandles[key] = this.loadResearchCandleCache(product.product, timeframeSeconds);
+          } catch (error) {
+            this.logEvent("research_cache_read_error", label + " research cache read failed; fetching fresh candles", {
+              product: product.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 160)
+            });
+          }
+        }
         cachedCandles.bitstamp = {};
+        for (const [timeframeSeconds, key, label] of [
+          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
+        ]) {
+          try {
+            cachedCandles.bitstamp[key] = this.loadResearchCandleCache(product.product, timeframeSeconds, "bitstamp_spot");
+          } catch (error) {
+            this.logEvent("research_cache_read_error", "Bitstamp " + label + " fallback cache read failed", {
+              product: product.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 160)
+            });
+          }
+        }
         try {
           cachedCandles.bitstamp.one_hour = this.loadResearchCandleCache(
             product.product, 3600, "bitstamp_spot"
@@ -563,6 +588,8 @@ export class TradingEngine extends DurableObject {
         candleArchives.push({
           product: product.product,
           exchange: snapshot.market_data_provider || "coinbase_exchange",
+          one_minute: snapshot.one_minute_audit,
+          five_minute: snapshot.five_minute_audit,
           one_hour: snapshot.one_hour_audit,
           six_hour: snapshot.six_hour_audit,
           received_at_ms: Date.now()
@@ -572,6 +599,24 @@ export class TradingEngine extends DurableObject {
         const strategyResearch = evaluateResearchCandidates(
           snapshot.one_hour_audit, snapshot.six_hour_audit, 6 * 60 * 60 * 1000
         );
+        const microScalpResearch = evaluateMicroScalpResearch({
+          oneMinuteAudit: snapshot.one_minute_audit,
+          fiveMinuteAudit: snapshot.five_minute_audit,
+          market: {
+            status: snapshot.status,
+            market_data_provider: snapshot.market_data_provider,
+            quote_received_at_ms: snapshot.quote_received_at_ms,
+            ticker_time: snapshot.ticker_time,
+            book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
+            bid: snapshot.bid, ask: snapshot.ask, last: snapshot.last,
+            spread_bps: snapshot.spread_bps,
+            quote_volume_usd: snapshot.quote_volume_usd,
+            bid_depth_quote: snapshot.bid_depth_quote,
+            ask_depth_quote: snapshot.ask_depth_quote,
+            data_quality: snapshot.data_quality
+          },
+          primary, higher, nowMs: Date.now()
+        });
         // Store compact evidence only; never include hundreds of raw candles in each dashboard payload.
         const market = {
           symbol: snapshot.symbol,
@@ -610,6 +655,7 @@ export class TradingEngine extends DurableObject {
           primary,
           higher,
           strategy_research: strategyResearch,
+          micro_scalp_research: microScalpResearch,
           signal: primary.signal,
           score: primary.score,
           regime_1h: primary.regime,
@@ -643,7 +689,7 @@ export class TradingEngine extends DurableObject {
     for (const archive of candleArchives) {
       const checkedAt = archive.received_at_ms || Date.now();
       if (archive.provider_error) {
-        for (const timeframeSeconds of [3600, 21600]) {
+        for (const timeframeSeconds of [60, 300, 3600, 21600]) {
           try {
             this.markResearchHistoryUnavailable(archive.product, timeframeSeconds, checkedAt);
           } catch (error) {
@@ -656,6 +702,8 @@ export class TradingEngine extends DurableObject {
         continue;
       }
       for (const [timeframeSeconds, audit] of [
+        [60, archive.one_minute],
+        [300, archive.five_minute],
         [3600, archive.one_hour],
         [21600, archive.six_hour]
       ]) {
@@ -865,7 +913,9 @@ export class TradingEngine extends DurableObject {
 
   archiveClosedCandles(product, timeframeSeconds, audit, receivedAtMs) {
     const intervalMs = timeframeSeconds * 1000;
-    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    const retentionBars = timeframeSeconds === 60 ? 4320
+      : timeframeSeconds === 300 ? 2000
+        : timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
     const previous = this.sql.exec(
       "SELECT * FROM research_history_state WHERE product=? AND timeframe_seconds=?",
       product, timeframeSeconds
@@ -956,7 +1006,9 @@ export class TradingEngine extends DurableObject {
 
   archiveProviderCandles(exchange, product, timeframeSeconds, audit, receivedAtMs) {
     if (exchange !== "bitstamp_spot") return { stored: 0, status: "unsupported_provider" };
-    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    const retentionBars = timeframeSeconds === 60 ? 4320
+      : timeframeSeconds === 300 ? 2000
+        : timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
     if (!retentionBars || !audit?.ok || !Array.isArray(audit.rows)) {
       return { stored: 0, status: "audit_rejected" };
     }
