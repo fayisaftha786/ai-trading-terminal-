@@ -117,6 +117,7 @@ async function analyzeCex(i) {
     const body = {
       candles: result.candles || [],
       higher_timeframe_candles: higherRows,
+      higher_timeframe_interval_ms: result.higher_timeframe_interval_ms || 14_400_000,
       timeframe: '1h'
     };
     const dataQualityOk = result.data_quality?.contiguous_closed_candles === true && result.data_quality?.sufficient_indicator_history === true;
@@ -161,7 +162,7 @@ async function analyzeCex(i) {
          <span>Excess vs exposure-matched hold <b>${strategyTest.excess_return_vs_benchmark_pct ?? '—'}%</b></span>
          <span>Saved risk / stop / target <b>${strategyTest.risk_assumptions?.risk_per_trade_pct ?? '—'}% / ${strategyTest.risk_assumptions?.stop_loss_pct ?? '—'}% / ${strategyTest.risk_assumptions?.take_profit_pct ?? '—'}%</b></span>
          <span>Costs / side <b>${strategyTest.cost_assumptions?.fee_bps_per_side ?? '—'} fee + ${strategyTest.cost_assumptions?.slippage_bps_per_side ?? '—'} slip bps</b></span>`
-      : `<span>Strategy test <b>${esc(strategyResearchError || (!dataQualityOk ? 'Blocked: candle integrity/history requirements failed' : 'Not enough synchronized 1h/4h history'))}</b></span>`;
+      : `<span>Strategy test <b>${esc(strategyResearchError || (!dataQualityOk ? 'Blocked: candle integrity/history requirements failed' : 'Not enough synchronized 1h/higher-timeframe history'))}</b></span>`;
 
     const walkForwardText = Array.isArray(strategyWalkForward?.cost_stress)
       ? `Signal walk-forward: ${strategyWalkForward.positive_folds}/${strategyWalkForward.total_folds} positive windows · mean ${strategyWalkForward.mean_fold_return_pct}% · max fold drawdown ${strategyWalkForward.worst_fold_drawdown_pct}%. 1.5x / 2x cost stress: ${strategyWalkForward.cost_stress.filter(x => x.cost_multiplier > 1).map(x => `${x.cost_multiplier}x ${x.positive_folds}/${x.total_folds} positive`).join(' · ')}.`
