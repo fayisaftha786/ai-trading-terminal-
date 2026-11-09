@@ -66,6 +66,10 @@ try {
   assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
   assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
   assert.equal(health.scan_diagnostics.last_scan_expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_healthy_market_count, 0);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_at_ms, null);
+  assert.equal(health.scan_diagnostics.last_scheduled_scan_age_ms, null);
   assert.equal(health.scan_diagnostics.current_market_feed.status, "unavailable");
   assert.equal(health.scan_diagnostics.current_market_feed.healthy_market_count, 0);
   assert.equal(health.scan_diagnostics.current_market_feed.expected_market_count, 3);
@@ -81,6 +85,8 @@ try {
   assert.equal(health.scheduler.status, "starting", "scheduler must be explicit before its first alarm");
   assert.equal(health.scheduler.last_alarm_age_ms, null, "alarm age must be null before the first alarm");
   assert.equal(health.scheduler.last_scheduled_scan_status, "not_run");
+  assert.equal(health.scheduler.last_scheduled_scan_at_ms, null);
+  assert.equal(health.scheduler.last_scheduled_scan_age_ms, null);
   assert.equal(health.scheduler.last_healthy_scan_age_ms, null);
   assert.ok(Object.hasOwn(health, "worker_version"), "health must expose deployment version metadata");
   assert.ok(
