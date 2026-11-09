@@ -3,7 +3,7 @@ import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
-import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
+import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -1012,6 +1012,7 @@ export class TradingEngine extends DurableObject {
         startIndex: 100
       });
       const walkForward = runWalkForwardResearch({ candles1h, candles6h, options });
+      const recursiveWarmup = runRecursiveWarmupAnalysis({ candles1h, candles6h });
       const compactStrategies = (strategies) => Object.fromEntries(
         Object.entries(strategies || {}).map(([name, result]) => {
           const { trades = [], ...summary } = result;
@@ -1040,6 +1041,7 @@ export class TradingEngine extends DurableObject {
         symbol,
         product,
         history: { bars_1h: candles1h.length, bars_6h: candles6h.length },
+        recursive_warmup: recursiveWarmup,
         exploratory: compactExploratory,
         walk_forward: compactWalkForward
       };
