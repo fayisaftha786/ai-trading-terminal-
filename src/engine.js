@@ -11,7 +11,7 @@ import {
   cancelCoinbaseAdvancedOrder
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
@@ -509,25 +509,30 @@ export class TradingEngine extends DurableObject {
         if (body.enabled) {
           const nowMs = Date.now();
           const runtime = this.getState("runtime") || {};
-          const lastScanAtMs = Number(runtime.last_scan_at_ms);
-          const scanAgeMs = Number.isFinite(lastScanAtMs) ? nowMs - lastScanAtMs : Number.POSITIVE_INFINITY;
-          const lastScheduledScanAtMs = Number(runtime.last_healthy_scheduled_scan_at_ms);
-          const scheduledScanAgeMs = Number.isFinite(lastScheduledScanAtMs)
-            ? nowMs - lastScheduledScanAtMs : Number.POSITIVE_INFINITY;
-          const marketFeed = assessMarketUniverse(
-            this.getMarkets(), PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
-          );
-          if (runtime.last_scan_status !== "completed" || scanAgeMs < 0 ||
-              scanAgeMs > (SCAN_INTERVAL_MS * 3) || !marketFeed.healthy ||
-              runtime.last_scheduled_scan_status !== "completed" ||
-              scheduledScanAgeMs < 0 || scheduledScanAgeMs > (SCAN_INTERVAL_MS * 3)) {
+          const scheduledScanAtMs = Number(runtime.last_scheduled_scan_at_ms);
+          const scheduledScanAgeMs = Number.isFinite(scheduledScanAtMs)
+            ? nowMs - scheduledScanAtMs : Number.POSITIVE_INFINITY;
+          const healthyMarketCount = Number(runtime.last_scheduled_scan_healthy_market_count) || 0;
+          const expectedMarketCount = Number(runtime.last_scheduled_scan_expected_market_count) || PRODUCTS.length;
+          const recentHealthyScheduledScan = hasRecentHealthyScheduledScan({
+            status: runtime.last_scheduled_scan_status,
+            scanAtMs: scheduledScanAtMs,
+            healthyMarketCount,
+            expectedMarketCount,
+            nowMs,
+            maxAgeMs: SCAN_INTERVAL_MS * 3
+          });
+          // Do not require the persisted L2 snapshot to remain younger than 15s
+          // while an owner clicks Enable. Each actual scheduled entry cycle
+          // fetches a new book and re-runs the strict market-universe gate.
+          if (!recentHealthyScheduledScan) {
             return jsonResponse({
               error: "fresh_complete_scheduled_scan_required",
               scheduled_scan_status: runtime.last_scheduled_scan_status || "not_run",
-              scheduled_scan_age_ms: Number.isFinite(scheduledScanAgeMs) ? scheduledScanAgeMs : null,
-              healthy_market_count: marketFeed.healthy_market_count,
-              expected_market_count: marketFeed.expected_market_count,
-              issues: marketFeed.issues
+              scheduled_scan_age_ms: Number.isFinite(scheduledScanAgeMs) ? Math.max(0, scheduledScanAgeMs) : null,
+              healthy_market_count: healthyMarketCount,
+              expected_market_count: expectedMarketCount,
+              issues: Array.isArray(runtime.last_scheduled_scan_issues) ? runtime.last_scheduled_scan_issues : []
             }, 409);
           }
         }
