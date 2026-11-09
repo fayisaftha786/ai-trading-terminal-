@@ -182,6 +182,12 @@ export class TradingEngine extends DurableObject {
             .map((issue) => ({
               symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
               reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
+            })),
+          provider_failures: (Array.isArray(runtime.provider_failures) ? runtime.provider_failures : [])
+            .slice(0, 3)
+            .map((failure) => ({
+              symbol: typeof failure?.symbol === "string" ? failure.symbol.slice(0, 24) : null,
+              reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 80) : "unknown"
             }))
         };
         return jsonResponse({
@@ -473,7 +479,18 @@ export class TradingEngine extends DurableObject {
         markets.push(market);
       } catch (error) {
         candleArchives.push({ product: product.product, provider_error: true, error: String(error?.message || error).slice(0, 120), received_at_ms: Date.now() });
-        const failed = { symbol: product.symbol, product: product.product, status: "error", error: String(error?.message || error).slice(0, 180), fetched_at_ms: Date.now() };
+        const status = Number(error?.status);
+        const errorCode = status === 429 ? "provider_rate_limited"
+          : Number.isFinite(status) && status >= 500 ? "provider_server_error"
+            : Number.isFinite(status) && status >= 400 ? "provider_http_error"
+              : error?.name === "TimeoutError" || error?.name === "AbortError"
+                ? "provider_timeout" : "provider_network_error";
+        const failed = {
+          symbol: product.symbol, product: product.product, status: "error",
+          error_code: errorCode,
+          error: String(error?.message || error).slice(0, 180),
+          fetched_at_ms: Date.now()
+        };
         markets.push(failed);
       }
     }
@@ -648,7 +665,11 @@ export class TradingEngine extends DurableObject {
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
       last_entry_results: entryResults.slice(0, 10),
-      market_feed_issues: marketFeed.issues.slice(0, 12)
+      market_feed_issues: marketFeed.issues.slice(0, 12),
+      provider_failures: markets.filter((market) => market.status === "error").map((market) => ({
+        symbol: market.symbol,
+        reason: market.error_code || "provider_unavailable"
+      })).slice(0, 3)
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
