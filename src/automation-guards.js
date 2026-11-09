@@ -256,8 +256,13 @@ export function updateTrailingStop({
     ? previousHighWater : entryPrice;
   const highWaterBid = Math.max(entryPrice, previousHigh, currentBid);
   const costPct = roundTripCostBps / 100;
-  const activationPct = Math.max(2, (costPct * 2) + 0.75);
-  const distancePct = Math.max(0.9, costPct + 0.35);
+  // Align activation with the cost-aware take-profit model. Under the former
+  // 2x-cost activation rule, the trailing stop often activated after the
+  // dynamic take-profit had already closed the position (e.g. 165 bps costs:
+  // 4.05% activation vs ~2.48% target). The new stop activates early enough
+  // to lock a small positive net buffer before the target, without loosening.
+  const distancePct = Math.max(0.25, Math.min(0.6, costPct * 0.25));
+  const activationPct = costPct + distancePct + 0.2;
   const active = highWaterBid >= entryPrice * (1 + activationPct / 100);
   const candidateStop = active ? highWaterBid * (1 - distancePct / 100) : currentStop;
   const stopLoss = Math.max(currentStop, candidateStop);

@@ -82,3 +82,12 @@ Before any research hypothesis is promoted, require look-ahead/prefix-invariance
 - Never request or store passwords, API tokens, wallet seeds or recovery codes in source files, APKs or chat.
 - Never bypass stale-data, provider-consistency, depth, drawdown, scheduler or kill-switch gates to force automation.
 - Do not claim 100% profit, live execution, physical Android installation or cloud deployment unless that exact behaviour has been verified.
+
+
+## 2026-11-09 profit-protection audit
+
+A review of the live PAPER exit path found a mismatch between trailing-stop activation and the dynamic take-profit target. The previous trailing stop activated at the greater of 2% or twice the estimated round-trip cost plus 0.75%. With the configured fee/slippage assumptions and ordinary spread, that activation threshold could be above the dynamic take-profit target, meaning the position would close at take-profit before the trailing stop ever became active.
+
+The proposed fix on `fix/cost-aware-profit-trailing-stop` changes the trailing distance to a bounded 0.25%–0.60% based on estimated round-trip costs and activates after the high-water bid exceeds estimated costs + trail distance + a 0.20% net buffer. The stop remains ratchet-only and never loosens. A regression test uses 165 bps round-trip costs and verifies that the stop activates before the modelled take-profit and sits above the estimated cost break-even.
+
+This is a PAPER risk-management improvement, not proof of profitability. It does not guarantee a fill at the simulated stop, prevent gaps/slippage, or enable live exchange execution. The change must pass CI and be deployed/verified before being considered active in production.
