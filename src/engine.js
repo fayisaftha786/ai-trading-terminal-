@@ -243,6 +243,7 @@ export class TradingEngine extends DurableObject {
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
+       schedule_seconds: SCAN_INTERVAL_MS / 1000,
           live_trading_enabled: false, binance_testnet_enabled: false,
           market_data_status: currentMarketStatus,
           scheduler: {
