@@ -46,7 +46,11 @@ A temporary 60-minute preview is optional and requires the owner to accept Cloud
 - Alarm cadence is approximate and subject to platform limits, quota, network failures and delays. A simulated stop is not an exchange-native protective order.
 - Cloudflare Free has request, CPU, storage and SQL quotas. It is not unlimited continuous compute. Do not upgrade to a paid plan under a ₹0 budget; halt rather than bypass a quota or safety failure.
 
-## Phase 1 research-integrity hardening\n\nThe research tournament must reject malformed OHLCV rows, null/empty numeric fields, duplicate timestamps, off-grid timestamps and gaps instead of silently dropping bad rows and continuing on a partial sample. Final forced-liquidation fees and slippage must be included in the final equity-curve drawdown mark. These are research correctness controls; they do not enable trading or approve a strategy.\n\n## Next verification after deployment
+## Phase 1 research-integrity hardening
+
+The research tournament must reject malformed OHLCV rows, null/empty numeric fields, duplicate timestamps, off-grid timestamps and gaps instead of silently dropping bad rows and continuing on a partial sample. Final forced-liquidation fees and slippage must be included in the final equity-curve drawdown mark. These are research correctness controls; they do not enable trading or approve a strategy.
+
+## Next verification after deployment
 
 - Confirm the Worker remains healthy and authentication rejects bad passwords/tokens.
 - Confirm all three Coinbase markets are live and the ticker and local order-book retrieval ages meet freshness gates.
