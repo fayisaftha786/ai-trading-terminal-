@@ -105,6 +105,10 @@ def evaluate_strategy_candidates(
         or higher_quality["valid_unique_candles"] < MIN_HISTORY_BARS
     ):
         return _blocked("insufficient_closed_history", primary_quality, higher_quality)
+    primary_closed_at = float(primary_rows[-1][0]) + PRIMARY_INTERVAL_MS
+    higher_closed_at = float(higher_rows[-1][0]) + higher_interval_ms
+    if higher_closed_at > primary_closed_at:
+        return _blocked("higher_timeframe_data_is_from_the_future", primary_quality, higher_quality)
 
     primary = analyze_candles(primary_rows, bars_per_day=24.0)
     higher = analyze_candles(higher_rows, bars_per_day=86_400_000 / higher_interval_ms)
