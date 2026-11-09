@@ -86,7 +86,7 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <section class="panel">
 <div class="row"><h2>Strategy tournament · offline research only</h2><button id="runTournament" type="button">Run strategy tournament</button></div>
 <p class="note"><strong>RESEARCH ONLY — NOT A BACKTEST OF THE PRODUCTION PAPER BOT.</strong> These trend, range mean-reversion and breakout hypotheses use separate ATR-based stop/target rules and next-hour-open fills. Production PAPER uses the cloud-paper-v1 entry gates, live ask/bid quote fills, a cost-aware dynamic target and trailing stop. Historical OHLCV has no spread or order-book depth, so production entry gates cannot be replayed from this archive. Results compare research hypotheses only; they are not the bot's expected returns.</p>
-<p class="note" id="tournamentStatus">Run manually when enough clean candle history is available. Walk-forward validation requires at least 500 one-hour and 50 six-hour candles per asset.</p>
+<p class="note" id="tournamentStatus">Run manually when enough clean candle history is available. Strict walk-forward validation requires at least 3,000 clean 1H bars and 500 clean 6H bars per asset, four non-overlapping 28-day test folds and a separate final holdout.</p>
 <div class="table-wrap" id="tournamentResults"><div class="muted">No tournament has been run in this session.</div></div>
 </section>
 <section class="panel"><h2>Trade performance · all recorded paper trades</h2>
