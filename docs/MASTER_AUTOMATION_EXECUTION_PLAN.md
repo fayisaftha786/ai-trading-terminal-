@@ -52,7 +52,7 @@ The research tournament must reject malformed OHLCV rows, null/empty numeric fie
 
 ## Phase 1 authentication hardening
 
-Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger instead of Worker-isolate memory. The ledger stores a one-way source-IP hash, allows at most eight attempts in a rolling ten-minute window, clears the source counter after successful authentication, and fails closed if the limiter is unavailable. Regression coverage must verify the threshold, source isolation and successful-login reset in the local Cloudflare runtime smoke test.
+Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger instead of Worker-isolate memory. The ledger stores a keyed HMAC-SHA-256 source-IP fingerprint, allows at most eight attempts in a rolling ten-minute window, clears the source counter after successful authentication, and fails closed if the limiter is unavailable. Regression coverage must verify the threshold, source isolation and successful-login reset in the local Cloudflare runtime smoke test.
 
 ## Next verification after deployment
 
