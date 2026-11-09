@@ -61,6 +61,7 @@ try {
   assert.equal(health.mode, "paper_only");
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
+  assert.equal(health.schedule_minutes, 1.5, "PAPER market/exit monitoring must use the 90-second cadence");
   assert.equal(health.market_data_status, "unavailable", "no current snapshots must not be reported as healthy");
   assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
   assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
