@@ -25,7 +25,7 @@ This package is signed with an Android debug key for testing, not a production r
 
 - Cloudflare Worker + SQLite-backed Durable Object ledger.
 - Coinbase is the primary USD spot feed; Bitstamp is a secondary same-venue fallback for BTC/USD, ETH/USD and SOL/USD. Ticker, order book, 1H and 6H candles are never mixed across exchanges within one market snapshot.
-- Scheduled market scan and simulated stop/target monitoring at approximately 15-minute intervals after the Durable Object is first initialized.
+- Production currently uses a 15-minute Durable Object alarm. PR #66 proposes a 90-second PAPER scan/exit-monitor cadence (1.5 minutes) while retaining a 120-second quote-age gate; this tighter cadence is not live until the PR passes Cloudflare deployment verification.
 - Virtual starting equity is USD 100. Risk limits and estimated execution costs are simulation assumptions, not a promise of returns.
 - Automatic PAPER entries start **OFF**. The owner must sign in and explicitly enable them after validating live deployment, market freshness, local order-book retrieval age, candle integrity, persistence and alarm cadence.
 - Real-money exchange orders and Binance Testnet execution are hard-disabled in this Worker. It does not sign wallets or submit Solana swaps.
@@ -50,7 +50,7 @@ The read-only market scanner now compares three separate spot-long research hypo
 - `volatility_breakout`: close above the prior 20-bar high, at least 1.5x relative volume, ADX/positive directional movement and controlled ATR.
 - `range_mean_reversion`: range regime on both timeframes, low ADX, RSI at or below 40, and a confirmed reclaim of the lower Bollinger band (not a falling-knife entry).
 
-The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. The existing signal backtest and walk-forward APIs also receive the actual 4h/6h confirmation interval rather than assuming 4h, including the correct bars-per-day input for indicator calculations. Its scores are transparent rule counts, not probabilities or model confidence. It does not connect to the automatic paper executor. Candidate strategies must undergo separate chronological out-of-sample/walk-forward tests, realistic fee/slippage stress and forward PAPER observation before any future promotion.
+The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. PR #66 strengthens offline research with four chronological non-overlapping test folds of at least 28 days, an untouched final holdout, out-of-sample trade counts, 2x fee/slippage stress and deterministic Monte Carlo trade-order / moving-block resampling. The stricter walk-forward gate requires at least 3,000 clean 1H and 500 clean 6H bars (roughly 125 days of 6H history); it reports insufficient history until that sample exists. Monte Carlo resampling is a sensitivity diagnostic, not a prediction. Strategy scores are transparent rule counts, not probabilities or model confidence. None of this research connects directly to automatic PAPER entries.
 
 ## Security and limitations
 
@@ -59,7 +59,7 @@ The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future h
 - The Worker uses public endpoints and does not need exchange credentials. Failed-login throttling is stored in the Durable Object SQLite ledger under a keyed HMAC-SHA-256 source-IP fingerprint; raw IP addresses are not stored by this limiter. Eight attempts are allowed per source in a rolling ten-minute window, and a successful login clears that source's counter. If the limiter is unavailable, login fails closed. Never place passwords, session secrets, exchange API keys, wallet seeds, recovery codes or Cloudflare tokens in source control or chat.
 - Cloudflare account creation, acceptance of Cloudflare legal terms, secrets configuration and live deployment remain owner-controlled.
 - Cloudflare Free has documented request, CPU, storage and SQL quotas. It is not an unlimited 24/7 compute guarantee. Stop automation if quota or data-quality gates fail; do not upgrade to a paid plan under a ₹0 budget.
-- A 15-minute simulated exit monitor is not an exchange-native stop-loss. Fast price gaps, service outages or missed alarms can produce a much worse simulated exit than the trigger level.
+- The production 15-minute / proposed 90-second simulated exit monitor is not an exchange-native stop-loss. Fast price gaps, service outages or missed alarms can produce a much worse simulated exit than the trigger level.
 - Paper fills approximate spread, fee and slippage assumptions. They do not reproduce queue position, partial fills, latency, market impact or actual account fee tiers.
 - A good backtest, passed CI run, paper result or Testnet fill does not prove future profitability.
 - The Android APK is a debug/testing build, not production-signed. If an update is rejected because the signing key differs from a previously installed debug build, export any local PAPER records before uninstalling; uninstalling may erase local history.
