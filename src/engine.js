@@ -54,7 +54,7 @@ export class TradingEngine extends DurableObject {
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
-      JSON.stringify({ initial_capital_usd: 10, risk: DEFAULT_RISK, auto_paper_enabled: true, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
+      JSON.stringify({ initial_capital_usd: 10, risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
     const currentSettings = this.getState("settings");
     const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
