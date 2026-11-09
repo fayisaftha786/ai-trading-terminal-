@@ -116,3 +116,32 @@ def test_strategy_lab_reports_all_three_strategy_families_and_non_probability_sc
     assert all(item["score_is_probability"] is False for item in result["candidates"])
     assert result["ranking_method"].startswith("fixed transparent rule count")
     assert result["execution_authorized"] is False
+
+
+
+def test_strategy_lab_normalizes_reverse_ordered_provider_candles(monkeypatch):
+    primary, higher, now_ms = _aligned_history(breakout=True)
+    primary.reverse()
+    higher.reverse()
+
+    def fake_analysis(candles, bars_per_day=24.0):
+        if bars_per_day == 24.0:
+            return {
+                "signal": "HOLD", "score": 50, "regime": "RANGE_OR_TRANSITION",
+                "rsi14": 55.0, "atr_pct": 1.0, "adx14": 25.0,
+                "plus_di14": 30.0, "minus_di14": 10.0, "ema50": 99.0,
+            }
+        return {
+            "signal": "HOLD", "score": 60, "regime": "UPTREND",
+            "rsi14": 55.0, "atr_pct": 1.0, "adx14": 25.0,
+            "plus_di14": 30.0, "minus_di14": 10.0, "ema50": 99.0,
+        }
+
+    monkeypatch.setattr(strategy_lab, "analyze_candles", fake_analysis)
+    result = strategy_lab.evaluate_strategy_candidates(
+        primary, higher, higher_interval_ms=FOUR_HOURS_MS, now_ms=now_ms
+    )
+    breakout = next(item for item in result["candidates"] if item["strategy_id"] == "volatility_breakout")
+    assert result["status"] == "research_only"
+    assert breakout["eligible_for_research"] is True
+    assert result["relative_volume_20"] == 2.0
