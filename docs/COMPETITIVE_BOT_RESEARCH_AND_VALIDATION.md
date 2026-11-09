@@ -87,3 +87,32 @@ These checks do not certify a strategy. The archive must accumulate roughly 125 
 - Coinbase Exchange REST rate limits: https://docs.cdp.coinbase.com/exchange/rest-api/rate-limits
 - Cloudflare Durable Object alarms: https://developers.cloudflare.com/durable-objects/api/alarms/
 - Cloudflare Durable Objects platform limits: https://developers.cloudflare.com/durable-objects/platform/limits/
+
+## Micro-scalping research gate (1m / 5m)
+
+The dashboard now includes a read-only micro-scalping research gate. It uses validated,
+fully closed 1-minute candles for a breakout/relative-volume trigger, a closed 5-minute
+trend setup, and 1H/6H context. Ticker, order-book and both candle timeframes must have
+fresh timestamps and matching exchange provenance. Missing, stale, discontinuous or
+mixed-provider inputs fail closed to `NO_TRADE`.
+
+The default research cost model is deliberately conservative: 60 bps taker fee per
+side, 10 bps slippage per side, plus the observed full bid/ask spread. This is a
+placeholder assumption, not the user's verified Coinbase tier. The model requires
+the ATR-derived gross target to exceed round-trip costs by at least 1.5x and leave a
+positive minimum estimated net edge. These ATR values are screening estimates, not
+forecasts, fills or measured returns.
+
+1m and 5m closed candles are archived separately from the 1H/6H strategy archive.
+1m retention is 4,320 bars; 5m retention is 2,000 bars. The gate is intentionally not
+connected to PAPER auto-entry or any live order endpoint. It is surfaced only as
+`RESEARCH_CANDIDATE` or `NO_TRADE`.
+
+**Execution limitation:** the scheduled Worker scanner polls on a 90-second cadence.
+It is not an exchange WebSocket feed, does not observe every trade/book event, and
+cannot safely promise repeated one-minute fills or exchange-native protective orders.
+Before any micro-scalp PAPER execution is considered, build a persistent real-time
+market-data path and a separate fill simulator that accounts for queue position,
+partial fills, spread, market impact, latency, and stop/target ordering. Require
+chronological out-of-sample validation and forward paper observation; never promote
+based on a small profitable sample alone.
