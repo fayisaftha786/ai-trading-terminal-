@@ -72,6 +72,8 @@ test("tournament uses next-bar fills and reports cost assumptions", () => {
   assert.equal(result.ok, true);
   assert.equal(result.mode, "offline_research_only");
   assert.equal(result.assumptions.next_bar_open_fills, true);
+  assert.equal(result.assumptions.fee_bps_per_side, 60);
+  assert.equal(result.assumptions.slippage_bps_per_side, 10);
   assert.equal(result.assumptions.intrabar_stop_target_conflict, "stop_first");
   assert.deepEqual(Object.keys(result.strategies).sort(), [
     "breakout_continuation", "range_mean_reversion", "trend_continuation"
