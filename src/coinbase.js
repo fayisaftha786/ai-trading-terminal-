@@ -454,6 +454,122 @@ function convertBitstampCandles(payload) {
   }));
 }
 
+/**
+ * Fetch a bounded historical research window from the explicitly verified
+ * Bitstamp USD SPOT market. Uses the documented 1,000-candle maximum and pages
+ * backwards with the `end` timestamp. This function is research-only: it does
+ * not supply the live ticker, order book, or PAPER entry/exit path.
+ */
+export async function fetchBitstampResearchHistory({
+  product,
+  nowMs = Date.now(),
+  oneHourBars = 3500,
+  sixHourBars = 600,
+  requestState = DEFAULT_REQUEST_STATE
+} = {}) {
+  const pair = BITSTAMP_PAIRS[product];
+  if (!pair || !Number.isFinite(nowMs) || nowMs <= 0 ||
+      !Number.isSafeInteger(oneHourBars) || oneHourBars < 150 || oneHourBars > 4320 ||
+      !Number.isSafeInteger(sixHourBars) || sixHourBars < 150 || sixHourBars > 1440) {
+    const error = new Error("invalid Bitstamp research backfill request");
+    error.code = "invalid_research_backfill_request";
+    error.status = 400;
+    throw error;
+  }
+
+  const state = bitstampRequestState(requestState);
+  const markets = await getBitstampJson("/markets/", state);
+  const market = Array.isArray(markets)
+    ? markets.find((row) => String(row?.market_symbol || "").toLowerCase() === pair)
+    : null;
+  const expectedPair = product.toUpperCase().replace("-", "/");
+  if (!market || String(market.market_type || "").toUpperCase() !== "SPOT" ||
+      String(market.counter_currency || "").toUpperCase() !== "USD" ||
+      String(market.trading || "").toLowerCase() !== "enabled") {
+    const error = new Error("Bitstamp historical market is not an enabled USD SPOT pair");
+    error.code = "research_backfill_market_not_enabled_spot";
+    error.status = 409;
+    throw error;
+  }
+
+  async function fetchHistory(timeframeSeconds, targetBars) {
+    const intervalMs = timeframeSeconds * 1000;
+    const collected = new Map();
+    let endSeconds = Math.floor(nowMs / 1000);
+    let requests = 0;
+    const maximumRequests = Math.ceil(targetBars / 1000) + 2;
+
+    while (collected.size < targetBars && requests < maximumRequests) {
+      const pageLimit = Math.min(1000, targetBars - collected.size);
+      const payload = await getBitstampJson(
+        "/ohlc/" + pair + "/?step=" + timeframeSeconds +
+          "&limit=" + pageLimit + "&end=" + endSeconds +
+          "&exclude_current_candle=true",
+        state
+      );
+      requests += 1;
+      const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\\s+/g, "");
+      if (responsePair !== expectedPair) {
+        const error = new Error("Bitstamp historical OHLC response pair mismatch");
+        error.code = "research_backfill_pair_mismatch";
+        error.status = 502;
+        throw error;
+      }
+
+      const rows = convertBitstampCandles(payload);
+      if (!rows.length) break;
+      let oldestSeconds = Number.POSITIVE_INFINITY;
+      for (const row of rows) {
+        if (!Number.isFinite(row.time) || row.time + intervalMs > nowMs) continue;
+        const timestampSeconds = Math.floor(row.time / 1000);
+        oldestSeconds = Math.min(oldestSeconds, timestampSeconds);
+        if (!collected.has(row.time)) collected.set(row.time, row);
+      }
+      if (!Number.isFinite(oldestSeconds)) break;
+      if (oldestSeconds >= endSeconds) {
+        const error = new Error("Bitstamp historical OHLC pagination did not move backwards");
+        error.code = "research_backfill_pagination_stalled";
+        error.status = 502;
+        throw error;
+      }
+      endSeconds = oldestSeconds - 1;
+    }
+
+    const orderedRows = [...collected.values()].sort((a, b) => a.time - b.time);
+    const audit = auditCandles(orderedRows, intervalMs, nowMs, targetBars);
+    if (!audit.ok || audit.valid_closed_bars < targetBars) {
+      const error = new Error(
+        "Bitstamp historical " + timeframeSeconds + "s candle history failed integrity or sample-size checks"
+      );
+      error.code = "research_backfill_candle_integrity_failed";
+      error.status = 422;
+      error.issues = audit.issues;
+      error.valid_closed_bars = audit.valid_closed_bars;
+      error.expected_bars = targetBars;
+      throw error;
+    }
+    return { audit, requests };
+  }
+
+  const oneHour = await fetchHistory(3600, oneHourBars);
+  const sixHour = await fetchHistory(21600, sixHourBars);
+  return {
+    product,
+    symbol: product.replace("-", "/"),
+    provider: "bitstamp_spot",
+    market_type: "SPOT",
+    quote_currency: "USD",
+    fetched_at_ms: Date.now(),
+    one_hour: oneHour.audit,
+    six_hour: sixHour.audit,
+    requests: {
+      markets: 1,
+      one_hour: oneHour.requests,
+      six_hour: sixHour.requests
+    }
+  };
+}
+
 async function loadBitstampCandleHistory({
   symbol,
   pair,
