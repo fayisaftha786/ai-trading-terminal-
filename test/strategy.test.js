@@ -258,7 +258,7 @@ test("fresh local ticker retrieval remains usable for paper exits when last trad
 });
 
 
-test("candidate gate accepts a fresh received quote even when the last trade is older", () => {
+test("candidate gate blocks a newly retrieved quote when no recent exchange trade occurred", () => {
   const now = Date.now();
   const market = {
     status: "live",
@@ -279,5 +279,6 @@ test("candidate gate accepts a fresh received quote even when the last trade is 
     market, primary, higher, nowMs: now,
     costs: { feeBpsPerSide: 15, slippageBps: 10 }
   });
-  assert.equal(result.eligible, true);
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, "ticker_stale_or_timestamp_invalid");
 });
