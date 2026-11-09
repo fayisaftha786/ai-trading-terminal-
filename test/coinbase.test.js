@@ -320,6 +320,7 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     if (path === "/api/v2/ticker/solusd/") {
       return jsonResponse({
         timestamp: String(Math.floor(Date.now() / 1000)),
+        market_type: "SPOT",
         bid: "99.99", ask: "100.01", last: "100",
         volume: "25000"
       });
@@ -396,6 +397,7 @@ test("Bitstamp OHLC pair mismatch is rejected instead of mixing another market's
     if (path === "/api/v2/ticker/solusd/") {
       return jsonResponse({
         timestamp: String(Math.floor(Date.now() / 1000)),
+        market_type: "SPOT",
         bid: "99.99", ask: "100.01", last: "100", volume: "25000"
       });
     }
@@ -488,6 +490,7 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
     if (path === "/api/v2/ticker/solusd/") {
       return jsonResponse({
         timestamp: String(Math.floor(Date.now() / 1000)),
+        market_type: "SPOT",
         bid: "99.99", ask: "100.01", last: "100",
         volume: "25000"
       });
@@ -527,6 +530,92 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
     assert.equal(snapshot.six_hour_audit.ok, true);
     assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 4);
     assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+
+test("Bitstamp fallback rejects non-SPOT ticker responses", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    if (parsed.hostname === "api.exchange.coinbase.com") {
+      return jsonResponse({ error: "primary unavailable" }, 404);
+    }
+    if (path === "/api/v2/ticker/solusd/") {
+      return jsonResponse({
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        market_type: "MARGIN",
+        bid: "99.99", ask: "100.01", last: "100", volume: "25000"
+      });
+    }
+    return jsonResponse({ error: "unexpected endpoint" }, 404);
+  };
+  try {
+    await assert.rejects(
+      fetchProductSnapshot(
+        { symbol: "SOL/USD", product: "SOL-USD" },
+        Date.now(), {}, createCoinbaseRequestState()
+      ),
+      (error) => error.code === "all_market_data_providers_unavailable"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Bitstamp fallback rejects a stale exchange-side order-book timestamp", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const interval1h = 3600000;
+  const interval6h = 21600000;
+  const last1h = Math.floor(now / interval1h) * interval1h - interval1h;
+  const last6h = Math.floor(now / interval6h) * interval6h - interval6h;
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    if (parsed.hostname === "api.exchange.coinbase.com") {
+      return jsonResponse({ error: "primary unavailable" }, 404);
+    }
+    if (path === "/api/v2/ticker/solusd/") {
+      return jsonResponse({
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        market_type: "SPOT",
+        bid: "99.99", ask: "100.01", last: "100", volume: "25000"
+      });
+    }
+    if (path === "/api/v2/order_book/solusd/?group=1") {
+      return jsonResponse({
+        ...makeBitstampBook(),
+        timestamp: String(Math.floor((Date.now() - 16000) / 1000))
+      });
+    }
+    if (path.includes("step=3600")) {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval1h, last1h) }
+      });
+    }
+    if (path.includes("step=21600")) {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval6h, last6h) }
+      });
+    }
+    return jsonResponse({ error: "unexpected endpoint" }, 404);
+  };
+
+  try {
+    const snapshot = await fetchProductSnapshot(
+      { symbol: "SOL/USD", product: "SOL-USD" },
+      now, {}, createCoinbaseRequestState()
+    );
+    assert.equal(snapshot.market_data_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.book_status, "provider_error");
+    assert.equal(snapshot.data_quality.book_error, "provider_timestamp_invalid_or_stale");
+    assert.ok(Number.isFinite(snapshot.book_event_time_ms));
+    assert.ok(snapshot.book_age_ms <= 15000);
   } finally {
     globalThis.fetch = originalFetch;
   }
