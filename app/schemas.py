@@ -68,6 +68,7 @@ class SignalWalkForwardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candles: list[list[float]] = Field(min_length=240, max_length=5000)
     higher_timeframe_candles: list[list[float]] = Field(min_length=150, max_length=1000)
+    higher_timeframe_interval_ms: Literal[14_400_000, 21_600_000] = 14_400_000
     timeframe: Literal["1h"] = "1h"
     folds: int = Field(default=3, ge=2, le=6)
 
