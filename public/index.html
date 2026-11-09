@@ -102,16 +102,24 @@ async function runTournament(){
       const walk=asset.walk_forward||{};
       const holdout=walk.ok?(walk.folds||[]).find((fold)=>fold.name==="untouched_holdout")?.results||{}:{};
       const stress=walk.ok?(walk.cost_stress||[]).find((item)=>item.cost_multiplier===2)?.result?.strategies||{}:{};
-      rows.push('<tr><td colspan="8"><strong>'+esc(asset.symbol)+'</strong> · '+String(asset.history?.bars_1h||0)+' 1H / '+String(asset.history?.bars_6h||0)+' 6H bars · '+(walk.ok?'walk-forward ready':'walk-forward unavailable: '+esc(walk.reason||'insufficient history'))+'</td></tr>');
+      rows.push('<tr><td colspan="9"><strong>'+esc(asset.symbol)+'</strong> · '+String(asset.history?.bars_1h||0)+' 1H / '+String(asset.history?.bars_6h||0)+' 6H bars · '+(walk.ok?'walk-forward screening · '+String(walk.approximate_test_days_per_fold||0)+' days/fold':'walk-forward unavailable: '+esc(walk.reason||'insufficient history'))+'</td></tr>');
       for(const name of tournamentNames){
         const result=exploratory.strategies?.[name];
         const final=holdout[name];
         const stressed=stress[name];
-        rows.push('<tr><td>'+esc(name.replace(/_/g," "))+'</td><td>'+String(result?.trade_count??"—")+'</td><td>'+pct(result?.net_return_pct)+'</td><td>'+num(result?.profit_factor)+'</td><td>'+pct(result?.max_drawdown_pct)+'</td><td>'+pct(final?.net_return_pct)+'</td><td>'+pct(stressed?.net_return_pct)+'</td><td>'+num(result?.expectancy_per_trade)+'</td></tr>');
+        const mc=result?.monte_carlo;
+        const mcSummary=mc?.status==="research_only"
+          ? 'p05 '+pct(mc.moving_block_bootstrap?.p05_net_return_pct)+' · loss '+pct(mc.moving_block_bootstrap?.probability_of_loss_pct)+' · p95 DD '+pct(mc.moving_block_bootstrap?.p95_max_drawdown_pct)
+          : mc?.status==="insufficient_trade_sample"
+            ? 'LOW SAMPLE '+String(mc.sample_size||0)+'/'+String(mc.minimum_required_trades||30)
+            : 'not run';
+        const foldSample=walk.strategy_samples?.[name];
+        const sampleText=foldSample?' · OOS trades '+String(foldSample.out_of_sample_trade_count||0)+' · '+String(foldSample.sample_status||''):'';
+        rows.push('<tr><td>'+esc(name.replace(/_/g," "))+'</td><td>'+String(result?.trade_count??"—")+'</td><td>'+pct(result?.net_return_pct)+'</td><td>'+num(result?.profit_factor)+'</td><td>'+pct(result?.max_drawdown_pct)+'</td><td>'+pct(final?.net_return_pct)+esc(sampleText)+'</td><td>'+pct(stressed?.net_return_pct)+'</td><td>'+num(result?.expectancy_per_trade)+'</td><td>'+esc(mcSummary)+'</td></tr>');
       }
     }
-    $("tournamentResults").innerHTML='<table><thead><tr><th>STRATEGY</th><th>TRADES</th><th>EXPLORATORY NET</th><th>PF</th><th>MAX DD</th><th>HOLDOUT NET</th><th>2× COST NET</th><th>EXPECTANCY</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
-    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · offline research only · no trades placed. A strategy is not approved by a positive exploratory result.";
+    $("tournamentResults").innerHTML='<table><thead><tr><th>STRATEGY</th><th>TRADES</th><th>EXPLORATORY NET</th><th>PF</th><th>MAX DD</th><th>HOLDOUT NET / OOS SAMPLE</th><th>2× COST NET</th><th>EXPECTANCY</th><th>MONTE CARLO · 500 PATHS</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
+    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · walk-forward requires 3,000 clean 1H + 500 clean 6H bars and four non-overlapping ~28-day test folds · Monte Carlo is a resampling stress test, not a forecast · offline only, no trades placed.";
   }catch(error){$("tournamentStatus").textContent="Research failed: "+error.message;}
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
