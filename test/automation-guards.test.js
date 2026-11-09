@@ -6,6 +6,9 @@ import {
   assessAdaptiveRisk,
   assessLossCooldown,
   deriveSchedulerStatus,
+  normalizeProviderFailureRows,
+  normalizeScanIssueRows,
+  parseScanIssueSummaries,
   shouldHaltPaperAutomation,
   updateTrailingStop
 } from "../src/automation-guards.js";
@@ -315,4 +318,40 @@ test("market-universe gate rejects mixed or missing data-provider provenance", (
   delete missing.market_data_provider;
   const missingResult = assessMarketUniverse([missing], [symbol], NOW);
   assert.ok(missingResult.issues[0].reason.includes("market_data_provider_missing"));
+});
+
+
+test("scan diagnostics recover SOL provider issues from legacy stored summary strings", () => {
+  const runtime = {
+    last_scan_error: "SOL/USD: provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,",
+    last_scheduled_scan_error: "SOL/USD: provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,"
+  };
+  const issues = normalizeScanIssueRows(runtime);
+  assert.deepEqual(issues, [{
+    symbol: "SOL/USD",
+    reason: "provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,"
+  }]);
+  assert.deepEqual(normalizeProviderFailureRows(runtime, issues), [{
+    symbol: "SOL/USD",
+    reason: "provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,",
+    primary_error_code: null,
+    backup_error_code: null,
+    inferred_from_scan_summary: true
+  }]);
+});
+
+test("diagnostic parser handles multiple markets, deduplicates and respects real stored issue rows", () => {
+  assert.deepEqual(parseScanIssueSummaries(
+    "BTC/USD: spread_too_wide;SOL/USD: provider_unavailable",
+    "SOL/USD: provider_unavailable;ETH/USD: orderbook_snapshot_stale_or_missing"
+  ), [
+    { symbol: "BTC/USD", reason: "spread_too_wide" },
+    { symbol: "SOL/USD", reason: "provider_unavailable" },
+    { symbol: "ETH/USD", reason: "orderbook_snapshot_stale_or_missing" }
+  ]);
+
+  assert.deepEqual(normalizeScanIssueRows({
+    market_feed_issues: [{ symbol: "SOL/USD", reason: "provider_unavailable" }],
+    last_scan_error: "BTC/USD: stale"
+  }), [{ symbol: "SOL/USD", reason: "provider_unavailable" }]);
 });
