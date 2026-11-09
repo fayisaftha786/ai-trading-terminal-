@@ -587,7 +587,7 @@ function sanitizeOrder(order) {
 
 export async function submitCoinbaseAdvancedLimitBuy(
   env = {},
-  { productId, quoteSize, limitPrice, previewId, clientOrderId } = {},
+  { productId, quoteSize, limitPrice, commissionTotal, previewId, clientOrderId } = {},
   { fetchImpl = fetch } = {}
 ) {
   const config = configuration(env);
@@ -615,10 +615,14 @@ export async function submitCoinbaseAdvancedLimitBuy(
       !isIncrementMultiple(limitPrice, product.price_increment)) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_exchange_size_or_price_filter_failed"], order_submission_available: false };
   }
+  if (!validNonNegativeMoney(String(commissionTotal ?? ""))) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["previewed_commission_missing_or_invalid"], order_submission_available: false };
+  }
   const available = preflight.balances[product.quote_currency_id];
-  if (!validNonNegativeMoney(available) ||
-      compareDecimalStrings(available, addDecimalStrings(quoteSize, "0") || quoteSize) < 0) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["insufficient_available_quote_balance"], order_submission_available: false };
+  const requiredQuote = addDecimalStrings(quoteSize, String(commissionTotal));
+  if (!validNonNegativeMoney(available) || !requiredQuote ||
+      compareDecimalStrings(available, requiredQuote) < 0) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["insufficient_available_quote_balance_for_order_and_fee"], order_submission_available: false };
   }
 
   let response;
