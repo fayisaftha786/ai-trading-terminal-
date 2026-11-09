@@ -629,6 +629,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
             risk = validate_risk_profile(db.get_risk())
             result = run_signal_backtest(
                 payload.candles, payload.higher_timeframe_candles,
+                higher_timeframe_ms=payload.higher_timeframe_interval_ms,
                 fee_bps=float(risk["fee_bps_per_side"]),
                 slippage_bps=float(risk["slippage_bps"]),
                 risk_per_trade_pct=float(risk["risk_per_trade_pct"]),
@@ -647,6 +648,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
             risk = validate_risk_profile(db.get_risk())
             result = run_signal_walk_forward(
                 payload.candles, payload.higher_timeframe_candles, payload.folds,
+                higher_timeframe_ms=payload.higher_timeframe_interval_ms,
                 fee_bps=float(risk["fee_bps_per_side"]),
                 slippage_bps=float(risk["slippage_bps"]),
                 risk_per_trade_pct=float(risk["risk_per_trade_pct"]),
