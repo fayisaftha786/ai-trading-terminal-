@@ -50,6 +50,10 @@ A temporary 60-minute preview is optional and requires the owner to accept Cloud
 
 The research tournament must reject malformed OHLCV rows, null/empty numeric fields, duplicate timestamps, off-grid timestamps and gaps instead of silently dropping bad rows and continuing on a partial sample. Final forced-liquidation fees and slippage must be included in the final equity-curve drawdown mark. These are research correctness controls; they do not enable trading or approve a strategy.
 
+## Phase 1 authentication hardening
+
+Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger instead of Worker-isolate memory. The ledger stores a one-way source-IP hash, allows at most eight attempts in a rolling ten-minute window, clears the source counter after successful authentication, and fails closed if the limiter is unavailable. Regression coverage must verify the threshold, source isolation and successful-login reset in the local Cloudflare runtime smoke test.
+
 ## Next verification after deployment
 
 - Confirm the Worker remains healthy and authentication rejects bad passwords/tokens.
