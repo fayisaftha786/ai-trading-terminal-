@@ -1,4 +1,4 @@
-from scripts.cloud_market_scan import compare_market_sources, market_is_fresh, ticker_age_ms
+from scripts.cloud_market_scan import compare_market_sources, market_is_fresh, ticker_age_ms, timeframes_are_aligned
 
 
 def test_market_is_fresh_requires_live_and_recent_timestamp():
@@ -27,7 +27,6 @@ def test_market_sources_must_match_provider_and_quote_currency():
     same_source = compare_market_sources(
         {"market_data_provider": "binance", "quote_currency": "USDT"},
         {"provider": "binance", "quote_currency": "USDT"},
-        "binance",
     )
     assert same_source["matched"] is True
     assert same_source["issues"] == []
@@ -35,7 +34,6 @@ def test_market_sources_must_match_provider_and_quote_currency():
     mismatched_provider = compare_market_sources(
         {"market_data_provider": "binance", "quote_currency": "USDT"},
         {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
-        "binance",
     )
     assert mismatched_provider["matched"] is False
     assert "provider_mismatch:ticker=binance,strategy=coinbase_public_fallback" in mismatched_provider["issues"]
@@ -44,7 +42,6 @@ def test_market_sources_must_match_provider_and_quote_currency():
     unknown_source = compare_market_sources(
         {"quote_currency": "USDT"},
         {"quote_currency": "USDT"},
-        None,
     )
     assert unknown_source["matched"] is False
     assert "ticker_provider_missing" in unknown_source["issues"]
@@ -55,6 +52,39 @@ def test_coinbase_fallback_is_consistent_when_both_ticker_and_candles_use_usd():
     result = compare_market_sources(
         {"market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
         {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
-        "binance",
     )
     assert result["matched"] is True
+
+
+
+def test_timeframes_require_confirmed_matching_directional_regimes():
+    aligned_up = {
+        "timeframe_confluence": "ALIGNED",
+    }
+    primary_up = {"regime": "UPTREND"}
+    higher_up = {"regime": "UPTREND"}
+    assert timeframes_are_aligned(aligned_up, primary_up, higher_up) is True
+
+    assert timeframes_are_aligned(
+        aligned_up,
+        {"regime": "UPTREND"},
+        {"regime": "DOWNTREND"},
+    ) is False
+
+    assert timeframes_are_aligned(
+        {"timeframe_confluence": "MIXED_OR_UNCONFIRMED"},
+        primary_up,
+        higher_up,
+    ) is False
+
+    assert timeframes_are_aligned(
+        aligned_up,
+        {"regime": "RANGE_OR_TRANSITION"},
+        {"regime": "RANGE_OR_TRANSITION"},
+    ) is False
+
+    assert timeframes_are_aligned(
+        aligned_up,
+        {"regime": "DATA_GAP"},
+        {"regime": "DATA_GAP"},
+    ) is False

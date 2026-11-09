@@ -48,14 +48,28 @@ def safe_float(value: Any) -> float | None:
     return number if number == number and abs(number) != float("inf") else None
 
 
+def timeframes_are_aligned(
+    analysis: dict[str, Any],
+    primary: dict[str, Any],
+    higher: dict[str, Any],
+) -> bool:
+    """Only call the scanner result aligned when both explicit trend regimes agree."""
+    primary_regime = primary.get("regime")
+    higher_regime = higher.get("regime")
+    return (
+        analysis.get("timeframe_confluence") == "ALIGNED"
+        and primary_regime == higher_regime
+        and primary_regime in {"UPTREND", "DOWNTREND"}
+    )
+
+
 def compare_market_sources(
     market: dict[str, Any],
     analysis: dict[str, Any],
-    default_ticker_provider: str | None = None,
 ) -> dict[str, Any]:
-    """Require ticker and candle analysis to use the same provider and quote currency."""
+    """Require explicit per-market ticker and candle source identity."""
     ticker_provider = str(
-        market.get("market_data_provider") or default_ticker_provider or ""
+        market.get("market_data_provider") or ""
     ).strip().lower()
     strategy_provider = str(
         analysis.get("provider") or analysis.get("market_data_provider") or ""
@@ -106,21 +120,31 @@ async def collect_scan() -> dict[str, Any]:
         fresh = market_is_fresh(market, now_ms)
         if isinstance(analysis_result, BaseException):
             analysis = {"status": "error", "error": str(analysis_result)[:200]}
-        else:
+        elif isinstance(analysis_result, dict):
             analysis = analysis_result
-        detail = analysis.get("analysis", {}) if isinstance(analysis, dict) else {}
-        higher_payload = analysis.get("higher_timeframe") or {} if isinstance(analysis, dict) else {}
-        higher = higher_payload.get("analysis", {}) if isinstance(higher_payload, dict) else {}
-        confirmation_timeframe = higher_payload.get("timeframe", "unknown") if isinstance(higher_payload, dict) else "unknown"
-        quality = analysis.get("data_quality", {}) if isinstance(analysis, dict) else {}
-        source_match = compare_market_sources(
-            market, analysis, tickers.get("exchange") if isinstance(tickers, dict) else settings.cex_exchange
-        )
+        else:
+            analysis = {"status": "error", "error": "strategy_provider_returned_non_object"}
+        detail = analysis.get("analysis", {})
+        if not isinstance(detail, dict):
+            detail = {}
+        higher_payload = analysis.get("higher_timeframe")
+        if not isinstance(higher_payload, dict):
+            higher_payload = {}
+        higher = higher_payload.get("analysis", {})
+        if not isinstance(higher, dict):
+            higher = {}
+        confirmation_timeframe = higher_payload.get("timeframe", "unknown")
+        quality = analysis.get("data_quality", {})
+        if not isinstance(quality, dict):
+            quality = {}
+        source_match = compare_market_sources(market, analysis)
+        timeframe_aligned = timeframes_are_aligned(analysis, detail, higher)
         analysis_ready = (
             fresh
             and analysis.get("status") == "live"
             and bool(quality.get("contiguous_closed_candles", False))
             and source_match["matched"]
+            and timeframe_aligned
         )
         safe_signal = detail.get("signal", "HOLD")
         if not analysis_ready:
@@ -132,6 +156,8 @@ async def collect_scan() -> dict[str, Any]:
             signal_block_reasons.append("strategy_data_unavailable")
         if not quality.get("contiguous_closed_candles", False):
             signal_block_reasons.append("candle_integrity_not_confirmed")
+        if not timeframe_aligned:
+            signal_block_reasons.append("timeframes_not_aligned_or_unconfirmed")
         bid = safe_float(market.get("bid"))
         ask = safe_float(market.get("ask"))
         mid = (bid + ask) / 2 if bid is not None and ask is not None and bid > 0 and ask >= bid else None
@@ -151,6 +177,7 @@ async def collect_scan() -> dict[str, Any]:
             "ticker_quote_currency": source_match["ticker_quote_currency"],
             "strategy_quote_currency": source_match["strategy_quote_currency"],
             "providers_match": source_match["matched"],
+            "timeframes_aligned": timeframe_aligned,
             "analysis_ready": analysis_ready,
             "signal_block_reasons": signal_block_reasons,
             "signal": safe_signal,
@@ -193,10 +220,10 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Exchange: {report['exchange']}",
         f"- Mode: `{report['mode']}`",
         f"- Fresh symbols with strategy data: {report['live_symbol_count']}/{len(report['results'])}",
-        f"- Provider/quote-consistent analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
+        f"- Source-, quote- and timeframe-verified analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
         "",
-        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | Spread (bps) |",
-        "|---|---:|---:|---|---:|---|---|---|---:|",
+        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | TF aligned | Spread (bps) |",
+        "|---|---:|---:|---|---:|---|---|---|---|---:|",
     ]
     for row in report["results"]:
         lines.append(
@@ -204,6 +231,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{row['last'] if row['last'] is not None else '—'} | {row['signal']} | "
             f"{row['score']} | {row['regime_1h']} | {row['confirmation_timeframe']} {row['regime_confirmation']} | "
             f"{'match' if row['providers_match'] else 'MISMATCH'} | "
+            f"{'yes' if row['timeframes_aligned'] else 'no'} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
         if row.get("error") or row.get("reason") or row.get("signal_block_reasons"):
@@ -216,7 +244,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "- Read-only public market data; no exchange credentials.",
         "- No real orders and no paper positions are created by this scheduled scanner.",
-        "- Stale ticker data, candle-integrity failures, provider mismatches or quote-currency mismatches are downgraded to HOLD.",
+        "- Stale ticker data, candle-integrity failures, provider mismatches, quote-currency mismatches or unconfirmed timeframe alignment are downgraded to HOLD.",
         "- A fallback provider may supply research candles, but its signals are blocked unless ticker and candle provider plus quote currency match.",
         "- GitHub scheduled runs are best-effort, not a continuous 24/7 trading server.",
         "",
