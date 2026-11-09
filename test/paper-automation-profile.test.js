@@ -10,11 +10,11 @@ import {
   shouldAutoResumeWatchdog
 } from "../src/paper-automation-profile.js";
 
-test("fresh paper automation profile starts with ten dollars and sequential limits", () => {
+test("fresh paper automation profile starts safely disabled with ten dollars and sequential limits", () => {
   const settings = migratePaperAutomationSettings(null, 0);
   assert.equal(settings.initial_capital_usd, 10);
   assert.equal(settings.peak_equity_usd, 10);
-  assert.equal(settings.auto_paper_enabled, true);
+  assert.equal(settings.auto_paper_enabled, false);
   assert.equal(settings.halted, false);
   assert.equal(settings.risk.max_open_positions, 1);
   assert.equal(settings.risk.max_position_notional_usd, 8);
@@ -23,7 +23,7 @@ test("fresh paper automation profile starts with ten dollars and sequential limi
   assert.equal(PAPER_AUTOMATION_RISK.max_daily_loss_pct, 1);
 });
 
-test("empty legacy paper ledger safely migrates from 100 to 10 dollars", () => {
+test("empty legacy paper ledger migrates from 100 to 10 dollars with automation disabled", () => {
   const settings = migratePaperAutomationSettings({
     initial_capital_usd: 100,
     peak_equity_usd: 100,
