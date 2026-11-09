@@ -695,7 +695,7 @@ export async function fetchProductSnapshot(
 
   try {
     primary = await fetchCoinbaseProductSnapshot(productRef, nowMs, cachedCandles, requestState);
-    if (snapshotIsEntryReady(primary)) return primary;
+    if (snapshotIsEntryReady(primary, Date.now())) return primary;
   } catch (error) {
     primaryError = error;
   }
@@ -714,7 +714,7 @@ export async function fetchProductSnapshot(
     backup.data_quality.failover_reason = primaryError
       ? "primary_provider_request_failed"
       : "primary_snapshot_incomplete";
-    if (snapshotIsEntryReady(backup)) return backup;
+    if (snapshotIsEntryReady(backup, Date.now())) return backup;
     if (!primary) return backup;
     // If the backup is also incomplete, retain the better fresh primary quote
     // for exit monitoring; entry readiness remains blocked by missing checks.
