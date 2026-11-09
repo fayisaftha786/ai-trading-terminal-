@@ -1,6 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchBitstampResearchHistory, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
+import {
+  coinbaseAdvancedErrorStatus,
+  coinbaseAdvancedStatus,
+  preflightCoinbaseAdvanced,
+  previewCoinbaseAdvancedLimitBuy
+} from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
@@ -25,6 +31,7 @@ function jsonResponse(data, status = 200) {
 export class TradingEngine extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    this.env = env;
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
     this.researchBackfillPromise = null;
@@ -262,6 +269,43 @@ export class TradingEngine extends DurableObject {
           },
           scan_diagnostics: diagnostics
         });
+      }
+      // Coinbase Advanced account preflight and order preview are deliberately
+      // separated from execution. There is no /api/live/execute route in this build.
+      if (request.method === "GET" && url.pathname === "/api/live/status") {
+        return jsonResponse(coinbaseAdvancedStatus(this.env));
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/preflight") {
+        const result = await preflightCoinbaseAdvanced(this.env);
+        return jsonResponse(result);
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/order-preview") {
+        let rawBody;
+        try { rawBody = await request.text(); } catch {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_request_body"], order_submission_available: false }, 400);
+        }
+        if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["request_too_large"], order_submission_available: false }, 413);
+        }
+        let body;
+        try { body = JSON.parse(rawBody); } catch {
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_json"], order_submission_available: false }, 400);
+        }
+        try {
+          const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
+            productId: body.product_id,
+            quoteSize: body.quote_size,
+            limitPrice: body.limit_price
+          });
+          return jsonResponse(result);
+        } catch (error) {
+          const code = typeof error?.code === "string" ? error.code : "coinbase_advanced_preview_failed";
+          this.logEvent("coinbase_advanced_preview_error", "Coinbase Advanced order preview failed", { code });
+          return jsonResponse({
+            status: "blocked", decision: "NO_ORDER", blockers: [code],
+            order_submission_available: false, live_trading_enabled: false
+          }, coinbaseAdvancedErrorStatus(error));
+        }
       }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
       if (request.method === "GET" && url.pathname === "/api/markets") return jsonResponse({ markets: this.getMarkets() });
