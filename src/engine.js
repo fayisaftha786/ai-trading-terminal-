@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
-import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "./strategy.js";
+import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
@@ -167,6 +167,23 @@ export class TradingEngine extends DurableObject {
         const allowedScanStatuses = new Set(["running", "completed", "partial", "unavailable", "error"]);
         const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
           ? runtime.last_scheduled_scan_status : "not_run";
+        const diagnostics = {
+          last_scan_status: runtime.last_scan_status || "not_started",
+          last_scan_age_ms: Number.isFinite(Number(runtime.last_scan_at_ms)) && Number(runtime.last_scan_at_ms) > 0
+            ? Math.max(0, nowMs - Number(runtime.last_scan_at_ms)) : null,
+          last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 160) : null,
+          last_scheduled_scan_error: runtime.last_scheduled_scan_error
+            ? String(runtime.last_scheduled_scan_error).slice(0, 160) : null,
+          healthy_market_count: Number(runtime.healthy_market_count) || 0,
+          expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
+          consecutive_unhealthy_scheduled_scans: Number(runtime.consecutive_unhealthy_scheduled_scans) || 0,
+          issues: (Array.isArray(runtime.market_feed_issues) ? runtime.market_feed_issues : [])
+            .slice(0, 6)
+            .map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
+            }))
+        };
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
@@ -176,10 +193,12 @@ export class TradingEngine extends DurableObject {
             last_alarm_at_ms: lastAlarmAtMs,
             last_alarm_age_ms: scheduler.ageMs,
             last_scheduled_scan_status: scanStatus,
+            last_scheduled_scan_error: diagnostics.last_scheduled_scan_error,
             last_healthy_scan_at_ms: lastHealthyAtMs,
             last_healthy_scan_age_ms: lastHealthyAtMs === null ? null : Math.max(0, nowMs - lastHealthyAtMs),
             next_alarm_at_ms: nextAlarmAtMs
-          }
+          },
+          scan_diagnostics: diagnostics
         });
       }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
@@ -267,9 +286,7 @@ export class TradingEngine extends DurableObject {
         const trade = this.getOpenTrades().find((item) => item.id === tradeId);
         if (!trade) return jsonResponse({ error: "open_paper_trade_not_found" }, 404);
         const market = this.getMarkets().find((item) => item.symbol === trade.symbol && item.status === "live");
-        const quoteTime = Date.parse(market?.ticker_time || "");
-        if (!Number.isFinite(quoteTime) || Date.now() - quoteTime < -5000 || Date.now() - quoteTime > MAX_QUOTE_AGE_MS ||
-            !Number.isFinite(market?.bid) || market.bid <= 0) {
+        if (!isFreshBidQuote(market, Date.now(), MAX_QUOTE_AGE_MS)) {
           return jsonResponse({ error: "fresh_bid_required_run_market_scan_first" }, 409);
         }
         const risk = { ...DEFAULT_RISK, ...(this.getState("settings")?.risk || {}) };
@@ -418,6 +435,7 @@ export class TradingEngine extends DurableObject {
           product: snapshot.product,
           status: "live",
           fetched_at_ms: snapshot.fetched_at_ms,
+          quote_received_at_ms: snapshot.quote_received_at_ms,
           ticker_time: snapshot.ticker_time,
           bid: snapshot.bid,
           ask: snapshot.ask,
@@ -434,13 +452,15 @@ export class TradingEngine extends DurableObject {
             ok: snapshot.one_hour_audit.ok,
             issues: snapshot.one_hour_audit.issues,
             valid_closed_bars: snapshot.one_hour_audit.valid_closed_bars,
-            missing_intervals: snapshot.one_hour_audit.missing_intervals
+            missing_intervals: snapshot.one_hour_audit.missing_intervals,
+            last_closed_candle_ms: snapshot.one_hour_audit.rows?.at(-1)?.time ?? null
           },
           six_hour_audit_summary: {
             ok: snapshot.six_hour_audit.ok,
             issues: snapshot.six_hour_audit.issues,
             valid_closed_bars: snapshot.six_hour_audit.valid_closed_bars,
-            missing_intervals: snapshot.six_hour_audit.missing_intervals
+            missing_intervals: snapshot.six_hour_audit.missing_intervals,
+            last_closed_candle_ms: snapshot.six_hour_audit.rows?.at(-1)?.time ?? null
           },
           primary,
           higher,
@@ -627,7 +647,8 @@ export class TradingEngine extends DurableObject {
       expected_market_count: marketFeed.expected_market_count,
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
-      last_entry_results: entryResults.slice(0, 10)
+      last_entry_results: entryResults.slice(0, 10),
+      market_feed_issues: marketFeed.issues.slice(0, 12)
     };
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
