@@ -126,6 +126,30 @@ function parseBookSide(levels) {
   return total;
 }
 
+/**
+ * Refresh only the Coinbase L2 book after slower candle/history work has completed.
+ * Keeps the strict 15s entry freshness gate without repeating ticker/candle requests.
+ */
+export async function fetchCoinbaseOrderBook(product, requestState = DEFAULT_REQUEST_STATE) {
+  const productId = typeof product === "string" ? product : product?.product;
+  if (typeof productId !== "string" || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(productId)) {
+    const error = new Error("invalid_coinbase_product_for_order_book"); error.status = 400; throw error;
+  }
+  const book = await getJson("/products/" + encodeURIComponent(productId) + "/book?level=2", requestState);
+  const bids = Array.isArray(book?.bids) ? book.bids : [];
+  const asks = Array.isArray(book?.asks) ? book.asks : [];
+  const bestBid = Number(bids[0]?.[0]);
+  const bestAsk = Number(asks[0]?.[0]);
+  const bidDepth = parseBookSide(bids);
+  const askDepth = parseBookSide(asks);
+  if (![bestBid, bestAsk, bidDepth, askDepth].every(Number.isFinite) || bestBid <= 0 || bestAsk < bestBid || bidDepth < 0 || askDepth < 0) {
+    const error = new Error("coinbase_order_book_failed_validation"); error.status = 502; throw error;
+  }
+  return { bid: bestBid, ask: bestAsk, bid_depth_quote: bidDepth, ask_depth_quote: askDepth,
+    book_retrieved_at_ms: Date.now(), book_age_ms: 0,
+    book_sequence: book?.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence) };
+}
+
 function convertCandles(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.map((row) => {
