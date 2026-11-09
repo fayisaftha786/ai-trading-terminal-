@@ -12,6 +12,7 @@ on:
       - "package.json"
       - ".github/workflows/cloudflare-paper-validation.yml"
       - ".github/workflows/deploy-cloudflare-worker.yml"
+      - ".github/workflows/production-paper-watchdog.yml"
   push:
     branches: [main]
     paths:
@@ -22,6 +23,7 @@ on:
       - "package.json"
       - ".github/workflows/cloudflare-paper-validation.yml"
       - ".github/workflows/deploy-cloudflare-worker.yml"
+      - ".github/workflows/production-paper-watchdog.yml"
   workflow_dispatch:
 
 permissions:
