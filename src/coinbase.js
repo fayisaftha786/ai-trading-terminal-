@@ -150,6 +150,55 @@ export async function fetchCoinbaseOrderBook(product, requestState = DEFAULT_REQ
     book_sequence: book?.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence) };
 }
 
+/**
+ * Refresh only a Bitstamp USD SPOT L2 book for a market whose selected
+ * provider is already Bitstamp. Keep exchange event-time validation strict.
+ */
+export async function fetchBitstampOrderBook(product, requestState = DEFAULT_REQUEST_STATE) {
+  const pair = BITSTAMP_PAIRS[product];
+  if (!pair) {
+    const error = new Error("invalid_bitstamp_product_for_order_book");
+    error.code = "invalid_bitstamp_product_for_order_book";
+    error.status = 400;
+    throw error;
+  }
+  const state = bitstampRequestState(requestState);
+  const book = await getBitstampJson("/order_book/" + pair + "/?group=1", state);
+  const retrievedAtMs = Date.now();
+  const eventTimeMs = Number(book?.timestamp) * 1000;
+  const eventAgeMs = retrievedAtMs - eventTimeMs;
+  if (!Number.isFinite(eventTimeMs) || eventTimeMs <= 0 ||
+      eventAgeMs < -1000 || eventAgeMs > 15000) {
+    const error = new Error("bitstamp_order_book_timestamp_invalid_or_stale");
+    error.code = "provider_timestamp_invalid_or_stale";
+    error.status = 502;
+    throw error;
+  }
+  const bids = Array.isArray(book?.bids) ? book.bids : [];
+  const asks = Array.isArray(book?.asks) ? book.asks : [];
+  const bestBid = Number(bids[0]?.[0]);
+  const bestAsk = Number(asks[0]?.[0]);
+  const bidDepth = parseBookSide(bids);
+  const askDepth = parseBookSide(asks);
+  if (![bestBid, bestAsk, bidDepth, askDepth].every(Number.isFinite) ||
+      bestBid <= 0 || bestAsk < bestBid || bidDepth < 0 || askDepth < 0) {
+    const error = new Error("bitstamp_order_book_failed_validation");
+    error.code = "order_book_failed_validation";
+    error.status = 502;
+    throw error;
+  }
+  return {
+    bid: bestBid,
+    ask: bestAsk,
+    bid_depth_quote: bidDepth,
+    ask_depth_quote: askDepth,
+    book_retrieved_at_ms: retrievedAtMs,
+    book_event_time_ms: eventTimeMs,
+    book_age_ms: 0,
+    book_sequence: null
+  };
+}
+
 function convertCandles(raw) {
   if (!Array.isArray(raw)) return [];
   return raw.map((row) => {
