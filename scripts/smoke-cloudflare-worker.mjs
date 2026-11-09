@@ -62,6 +62,10 @@ try {
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
   assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
+  assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
+  assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
+  assert.equal(health.scan_diagnostics.expected_market_count, 3);
+  assert.deepEqual(health.scan_diagnostics.issues, []);
   assert.equal(health.scheduler.status, "starting", "scheduler must be explicit before its first alarm");
   assert.equal(health.scheduler.last_alarm_age_ms, null, "alarm age must be null before the first alarm");
   assert.equal(health.scheduler.last_scheduled_scan_status, "not_run");
