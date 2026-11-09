@@ -316,10 +316,16 @@ export class TradingEngine extends DurableObject {
         if (prior) return jsonResponse({ status: "duplicate_or_existing_order", order: prior }, 409);
         const active = records.filter((item) => ["SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED", "PARTIALLY_FILLED", "CANCEL_QUEUED"].includes(item.status));
         const status = coinbaseAdvancedStatus(this.env);
-        if (!status.order_submission_available || active.length >= status.max_open_orders) {
+        const utcDayStart = new Date();
+        utcDayStart.setUTCHours(0, 0, 0, 0);
+        const ordersToday = records.filter((item) => Number(item.created_at_ms) >= utcDayStart.getTime()).length;
+        if (!status.order_submission_available || active.length >= status.max_open_orders ||
+            !status.max_daily_orders || ordersToday >= status.max_daily_orders) {
           return jsonResponse({
             status: "blocked",
-            blockers: [...status.blockers, ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : [])],
+            blockers: [...status.blockers,
+              ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : []),
+              ...(!status.max_daily_orders || ordersToday >= status.max_daily_orders ? ["maximum_daily_order_count_reached"] : [])],
             order_submission_available: false,
             live_trading_enabled: false,
             automatic_live_entries_enabled: false
