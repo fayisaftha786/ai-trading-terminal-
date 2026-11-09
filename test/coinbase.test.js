@@ -446,3 +446,84 @@ test("both market-data providers unavailable returns explicit combined provider 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather than mixing venues", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const interval1h = 3600000;
+  const interval6h = 21600000;
+  const last1h = Math.floor(now / interval1h) * interval1h - interval1h;
+  const last6h = Math.floor(now / interval6h) * interval6h - interval6h;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    calls.push(parsed.hostname + path);
+
+    if (parsed.hostname === "api.exchange.coinbase.com") {
+      if (path === "/products/SOL-USD/ticker") {
+        return jsonResponse({
+          bid: "100", ask: "100.01", price: "100",
+          volume: "25000", time: new Date(Date.now()).toISOString()
+        });
+      }
+      if (path === "/products/SOL-USD/book?level=2") {
+        return jsonResponse({ message: "order book temporarily unavailable" }, 503);
+      }
+      if (path.includes("/candles?")) {
+        return jsonResponse({ message: "candle history temporarily unavailable" }, 503);
+      }
+      return jsonResponse({ message: "unexpected primary endpoint" }, 404);
+    }
+
+    if (parsed.hostname !== "www.bitstamp.net") {
+      return jsonResponse({ message: "unexpected host" }, 404);
+    }
+    if (path === "/api/v2/ticker/solusd/") {
+      return jsonResponse({
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        bid: "99.99", ask: "100.01", last: "100",
+        volume: "25000"
+      });
+    }
+    if (path === "/api/v2/order_book/solusd/?group=1") return jsonResponse(makeBitstampBook());
+    if (path.includes("step=3600")) {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval1h, last1h) }
+      });
+    }
+    if (path.includes("step=21600")) {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval6h, last6h) }
+      });
+    }
+    return jsonResponse({ message: "unexpected secondary endpoint" }, 404);
+  };
+
+  try {
+    const snapshot = await fetchProductSnapshot(
+      { symbol: "SOL/USD", product: "SOL-USD" },
+      now,
+      {},
+      createCoinbaseRequestState()
+    );
+
+    assert.equal(snapshot.status, "live");
+    assert.equal(snapshot.market_data_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.ticker_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.book_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.one_hour_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.six_hour_provider, "bitstamp_spot");
+    assert.equal(snapshot.data_quality.failover_reason, "primary_snapshot_incomplete");
+    assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
+    assert.equal(snapshot.data_quality.book_status, "available");
+    assert.equal(snapshot.one_hour_audit.ok, true);
+    assert.equal(snapshot.six_hour_audit.ok, true);
+    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 4);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
