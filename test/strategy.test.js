@@ -256,3 +256,28 @@ test("fresh local ticker retrieval remains usable for paper exits when last trad
   const futureEvent = { ...market, ticker_time: new Date(now + 6000).toISOString() };
   assert.equal(isFreshBidQuote(futureEvent, now), false);
 });
+
+
+test("candidate gate accepts a fresh received quote even when the last trade is older", () => {
+  const now = Date.now();
+  const market = {
+    status: "live",
+    ticker_time: new Date(now - 5 * 60 * 1000).toISOString(),
+    quote_received_at_ms: now - 1000,
+    bid: 100, ask: 100.01, last: 100,
+    quote_volume_usd: 5000000,
+    bid_depth_quote: 10000, ask_depth_quote: 10000,
+    book_retrieved_at_ms: now - 1000
+  };
+  const primary = {
+    signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000,
+    atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10
+  };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const result = assessCandidate({
+    market, primary, higher, nowMs: now,
+    costs: { feeBpsPerSide: 15, slippageBps: 10 }
+  });
+  assert.equal(result.eligible, true);
+});
