@@ -43,6 +43,13 @@ async function sha256(value) {
   return new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(value)));
 }
 
+async function keyedFingerprint(value, secret) {
+  const key = await crypto.subtle.importKey(
+    "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value)));
+}
+
 async function sign(payload, secret) {
   const key = await crypto.subtle.importKey(
     "raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
@@ -91,7 +98,7 @@ async function login(request, env) {
   const password = String(body.password || "");
   if (username.length > 128 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
   const sourceIp = request.headers.get("cf-connecting-ip") || "unknown";
-  const ipHash = toBase64Url(await sha256(sourceIp));
+  const ipHash = toBase64Url(await keyedFingerprint(sourceIp, env.SESSION_SECRET));
   const engineId = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
   const engine = env.TRADING_ENGINE.get(engineId);
   const rateLimitUrl = "https://internal/auth/login-attempts";
