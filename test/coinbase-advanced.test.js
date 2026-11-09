@@ -193,7 +193,13 @@ test("list fills normalizes exchange records, filters by order and paginates", a
     entry_id: entryId, trade_id: tradeId, order_id: "order-test-1", product_id: "BTC-USD",
     side: "BUY", trade_type: "FILL", trade_time: "2026-11-09T12:00:00.000Z",
     sequence_timestamp: "2026-11-09T12:00:00.100Z", price: "100000.00",
-    size: "0.00010", commission: "0.01", liquidity_indicator: "MAKER", size_in_quote: false
+    size: "0.00010", commission: "0.01", liquidity_indicator: "MAKER", size_in_quote: false,
+    commission_detail_total: {
+      total_commission: "0.01", gst_commission: "0.001",
+      withholding_commission: "0", client_commission: "0.009"
+    },
+    fillSource: "FILL_SOURCE_EXAMPLE",
+    order_data_source: "ORDER_DATA_SOURCE_EXAMPLE"
   });
   const fake = mockApi(env, {
     fillsPages: [
@@ -207,6 +213,15 @@ test("list fills normalizes exchange records, filters by order and paginates", a
   assert.equal(result.pagination_complete, true);
   assert.equal(result.fills[0].entry_id, "entry-1");
   assert.equal(result.fills[0].commission, "0.01");
+  assert.equal(result.fills[0].commission_currency, null, "never infer a currency absent from the fill payload");
+  assert.equal(result.fills[0].commission_currency_source, "not_exposed_by_fill_schema");
+  assert.deepEqual(result.fills[0].commission_detail_total, {
+    total_commission: "0.01", gst_commission: "0.001",
+    withholding_commission: "0", client_commission: "0.009",
+    venue_commission: null, regulatory_commission: null, clearing_commission: null
+  });
+  assert.equal(result.fills[0].fill_source, "FILL_SOURCE_EXAMPLE");
+  assert.equal(result.fills[0].order_data_source, "ORDER_DATA_SOURCE_EXAMPLE");
   assert.ok(fake.calls.every((call) => call.path.includes("order_ids=order-test-1")));
 });
 
