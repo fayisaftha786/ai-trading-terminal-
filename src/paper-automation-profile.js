@@ -27,6 +27,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
     ? Number(tradeCount) : 0;
   const base = {
     initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
+    trading_mode: "demo",
     risk: { ...PAPER_AUTOMATION_RISK },
     auto_paper_enabled: false,
     auto_paper_resume_after_watchdog: false,
