@@ -582,6 +582,23 @@ function sanitizeOrder(order) {
     average_filled_price: validNonNegativeMoney(String(order.average_filled_price ?? "")) ? String(order.average_filled_price) : null,
     filled_value: validNonNegativeMoney(String(order.filled_value ?? "")) ? String(order.filled_value) : null,
     total_fees: validNonNegativeMoney(String(order.total_fees ?? "")) ? String(order.total_fees) : null,
+    total_fees_native: order.total_fees_native && typeof order.total_fees_native === "object" &&
+      validNonNegativeMoney(String(order.total_fees_native.value ?? "")) &&
+      typeof order.total_fees_native.currency === "string" &&
+      /^[A-Z0-9]{2,12}$/.test(order.total_fees_native.currency)
+      ? { value: String(order.total_fees_native.value), currency: order.total_fees_native.currency } : null,
+    total_value_after_fees_native: order.total_value_after_fees_native &&
+      typeof order.total_value_after_fees_native === "object" &&
+      validNonNegativeMoney(String(order.total_value_after_fees_native.value ?? "")) &&
+      typeof order.total_value_after_fees_native.currency === "string" &&
+      /^[A-Z0-9]{2,12}$/.test(order.total_value_after_fees_native.currency)
+      ? { value: String(order.total_value_after_fees_native.value), currency: order.total_value_after_fees_native.currency } : null,
+    commission_detail_total: order.commission_detail_total && typeof order.commission_detail_total === "object"
+      ? Object.fromEntries(["total_commission", "gst_commission", "withholding_commission",
+        "client_commission", "venue_commission", "regulatory_commission", "clearing_commission"]
+        .map((key) => [key, validNonNegativeMoney(String(order.commission_detail_total[key] ?? ""))
+          ? String(order.commission_detail_total[key]) : null]))
+      : null,
     completion_percentage: validNonNegativeMoney(String(order.completion_percentage ?? "")) ? String(order.completion_percentage) : "0",
     created_time: typeof order.created_time === "string" ? order.created_time : null,
     last_update_time: typeof order.last_update_time === "string" ? order.last_update_time : null,
@@ -786,6 +803,15 @@ function sanitizeFill(fill) {
     Number.isFinite(Date.parse(fill.sequence_timestamp)) ? fill.sequence_timestamp : null;
   const liquidity = typeof fill.liquidity_indicator === "string"
     ? fill.liquidity_indicator.slice(0, 40) : null;
+  // The public fill schema reports a commission amount but does not specify
+  // its currency. Preserve explicit fee components if supplied; never infer
+  // that this amount is denominated in quote or base currency.
+  const commissionDetail = fill.commission_detail_total && typeof fill.commission_detail_total === "object"
+    ? Object.fromEntries(["total_commission", "gst_commission", "withholding_commission",
+      "client_commission", "venue_commission", "regulatory_commission", "clearing_commission"]
+      .map((key) => [key, validNonNegativeMoney(String(fill.commission_detail_total[key] ?? ""))
+        ? String(fill.commission_detail_total[key]) : null]))
+    : null;
   return {
     entry_id: entryId,
     trade_id: typeof fill.trade_id === "string" ? fill.trade_id.slice(0, 160) : null,
@@ -798,6 +824,12 @@ function sanitizeFill(fill) {
     price,
     size,
     commission,
+    commission_currency: typeof fill.commission_currency === "string" && /^[A-Z0-9]{2,12}$/.test(fill.commission_currency)
+      ? fill.commission_currency : null,
+    commission_currency_source: typeof fill.commission_currency === "string" ? "exchange_explicit_field" : "not_exposed_by_fill_schema",
+    commission_detail_total: commissionDetail,
+    fill_source: typeof fill.fillSource === "string" ? fill.fillSource.slice(0, 80) : null,
+    order_data_source: typeof fill.order_data_source === "string" ? fill.order_data_source.slice(0, 80) : null,
     liquidity_indicator: liquidity,
     size_in_quote: fill.size_in_quote === true
   };

@@ -428,12 +428,12 @@ export class TradingEngine extends DurableObject {
         const limit = Math.max(1, Math.min(200, Number.parseInt(url.searchParams.get("limit") || "100", 10) || 100));
         const rows = clientOrderId
           ? this.sql.exec(
-              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms " +
+              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms,raw_json " +
               "FROM live_fills WHERE client_order_id=? ORDER BY trade_time DESC,entry_id LIMIT ?",
               clientOrderId, limit
             ).toArray()
           : this.sql.exec(
-              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms " +
+              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms,raw_json " +
               "FROM live_fills ORDER BY trade_time DESC,entry_id LIMIT ?",
               limit
             ).toArray();
@@ -441,7 +441,19 @@ export class TradingEngine extends DurableObject {
           ? Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills WHERE client_order_id=?", clientOrderId).toArray()[0]?.count || 0)
           : Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills").toArray()[0]?.count || 0);
         return jsonResponse({
-          fills: rows.map((row) => ({ ...row, size_in_quote: Number(row.size_in_quote) === 1 })),
+          fills: rows.map((row) => {
+            let audit = {};
+            try { audit = JSON.parse(row.raw_json || "{}"); } catch { audit = {}; }
+            return {
+              ...row,
+              size_in_quote: Number(row.size_in_quote) === 1,
+              commission_currency: audit.commission_currency ?? null,
+              commission_currency_source: audit.commission_currency_source || "not_exposed_by_fill_schema",
+              commission_detail_total: audit.commission_detail_total ?? null,
+              fill_source: audit.fill_source ?? null,
+              order_data_source: audit.order_data_source ?? null
+            };
+          }),
           count,
           limit,
           has_more: count > limit,

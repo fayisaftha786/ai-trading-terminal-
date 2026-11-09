@@ -254,7 +254,8 @@ async function refreshLiveOrders(){
   $("liveDetails").textContent=JSON.stringify({
     orders:rows,
     actual_exchange_fill_ledger:ledger,
-    accounting_note:"Exchange fill records and raw commissions are shown. Realized P&L is intentionally not calculated until fee-currency and FIFO inventory accounting are verified."
+    accounting_note:"Exchange fill quantities, fee breakdowns and any explicitly reported fee currency are shown. Coinbase's fill response does not expose a commission currency in its documented schema, so the app never assumes quote/base currency. Realized P&L remains unavailable until fee denomination and FIFO inventory are verifiable.",
+    fee_currency_warning:"A commission amount without a confirmed currency is not sufficient for accurate net P&L."
   },null,2);
 }
 async function loadLiveStatus(){
