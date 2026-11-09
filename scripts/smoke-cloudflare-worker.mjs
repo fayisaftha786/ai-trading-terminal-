@@ -32,6 +32,14 @@ async function request(path, options = {}) {
   });
 }
 
+async function loginFrom(ip, username, candidatePassword) {
+  return request("/api/auth/login", {
+    method: "POST",
+    headers: { "cf-connecting-ip": ip },
+    body: JSON.stringify({ username, password: candidatePassword })
+  });
+}
+
 try {
   let ready = false;
   const deadline = Date.now() + 45000;
@@ -73,14 +81,28 @@ try {
   const anonymousTournament = await request("/api/research/tournament");
   assert.equal(anonymousTournament.status, 401, "strategy tournament must require authentication");
 
-  const loginResponse = await request("/api/auth/login", {
-    method: "POST",
-    body: JSON.stringify({ username: "admin", password })
-  });
-  assert.equal(loginResponse.status, 200, "valid owner login must succeed");
+  const blockedIp = "192.0.2.10";
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const failedLogin = await loginFrom(blockedIp, "admin", "wrong-password");
+    assert.equal(failedLogin.status, 401, "the first eight failed attempts must be evaluated");
+  }
+  const blockedLogin = await loginFrom(blockedIp, "admin", "wrong-password");
+  assert.equal(blockedLogin.status, 429, "the ninth login attempt inside ten minutes must be throttled");
+
+  const successfulIp = "192.0.2.11";
+  const loginResponse = await loginFrom(successfulIp, "admin", password);
+  assert.equal(loginResponse.status, 200, "valid owner login must succeed from a separate source");
   const login = await loginResponse.json();
   assert.equal(login.token_type, "Bearer");
   assert.ok(login.access_token);
+
+  // A successful login resets that source's failed-attempt history.
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const failedLogin = await loginFrom(successfulIp, "admin", "wrong-password");
+    assert.equal(failedLogin.status, 401, "a successful login must clear prior failed attempts");
+  }
+  const blockedAfterFailures = await loginFrom(successfulIp, "admin", "wrong-password");
+  assert.equal(blockedAfterFailures.status, 429, "the source must be throttled after eight new failures");
 
   const auth = { authorization: "Bearer " + login.access_token };
   const dashboardResponse = await request("/api/dashboard", { headers: auth });
