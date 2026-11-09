@@ -833,6 +833,8 @@ export async function listCoinbaseAdvancedFills(
   let cursor = "";
   let pages = 0;
   let paginationComplete = true;
+  let proofTokenRequired = false;
+  const seenCursors = new Set();
   for (let page = 0; page < pageCount; page += 1) {
     const query = new URLSearchParams({ limit: String(pageLimit) });
     if (selectedOrderId) query.append("order_ids", selectedOrderId);
@@ -848,6 +850,10 @@ export async function listCoinbaseAdvancedFills(
       throw error;
     }
     pages += 1;
+    if (payload.proof_token_required === true) {
+      proofTokenRequired = true;
+      paginationComplete = false;
+    }
     for (const rawFill of payload.fills) {
       const fill = sanitizeFill(rawFill);
       if (!fill) {
@@ -865,19 +871,22 @@ export async function listCoinbaseAdvancedFills(
         fills.push(fill);
       }
     }
+    if (proofTokenRequired) break;
     const nextCursor = typeof payload.cursor === "string" ? payload.cursor : "";
     if (!nextCursor) break;
-    if (nextCursor === cursor || page === pageCount - 1) {
+    if (seenCursors.has(nextCursor) || page === pageCount - 1) {
       paginationComplete = false;
       break;
     }
+    seenCursors.add(nextCursor);
     cursor = nextCursor;
   }
   return {
     fills,
     count: fills.length,
     pages,
-    pagination_complete: paginationComplete,
+    pagination_complete: paginationComplete && !proofTokenRequired,
+    proof_token_required: proofTokenRequired,
     query: { order_id: selectedOrderId || null, product_id: selectedProductId || null }
   };
 }
