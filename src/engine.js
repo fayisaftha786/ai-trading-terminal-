@@ -14,7 +14,7 @@ import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearch
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
-import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog } from "./paper-automation-profile.js";
+import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -536,6 +536,40 @@ export class TradingEngine extends DurableObject {
         this.setState("settings", state);
         this.logEvent("paper_automation_setting", body.enabled ? "Automatic paper entries enabled by owner" : "Automatic paper entries disabled by owner");
         return jsonResponse({ enabled: state.auto_paper_enabled, halted: state.halted, mode: "paper_only" });
+      }
+      if (request.method === "POST" && url.pathname === "/api/automation/capital-review") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_json" }, 400); }
+        const settings = this.getState("settings") || {};
+        const tradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count);
+        const openPositions = this.getOpenTrades().length;
+        const review = reviewLegacyPaperCapital(settings, {
+          action: body?.action,
+          confirmed: body?.confirmed,
+          tradeCount,
+          openPositions
+        });
+        if (!review.ok) {
+          const status = review.reason === "capital_review_action_invalid" ? 400 : 409;
+          return jsonResponse({ error: review.reason }, status);
+        }
+        this.setState("settings", review.settings);
+        this.logEvent(
+          "paper_capital_review",
+          "Existing virtual starting capital accepted; historical trades preserved and auto-entry remains OFF",
+          {
+            initial_capital_usd: review.settings.initial_capital_usd,
+            historical_trade_count: tradeCount,
+            paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version
+          }
+        );
+        return jsonResponse({
+          status: "reviewed",
+          initial_capital_usd: review.settings.initial_capital_usd,
+          historical_trades_preserved: true,
+          auto_paper_enabled: false,
+          halted: !!review.settings.halted
+        });
       }
       if (request.method === "POST" && url.pathname === "/api/automation/kill-switch") {
         const state = this.getState("settings");
@@ -1974,6 +2008,7 @@ export class TradingEngine extends DurableObject {
       halted: !!settings.halted,
       halt_reason: settings.halt_reason || null,
       capital_setup_required: !!settings.capital_setup_required,
+      capital_setup_required_reason: settings.capital_setup_required_reason || null,
       continuous_monitoring: true,
       automatic_watchdog_recovery: true,
       daily_cycle_limit: cycleAllowance.limit,
