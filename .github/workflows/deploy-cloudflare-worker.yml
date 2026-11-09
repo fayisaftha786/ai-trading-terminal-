@@ -76,7 +76,7 @@ jobs:
                     binanceTestnetDisabled: health.binance_testnet_enabled === false
                   };
                   console.log("Deployment verification:", JSON.stringify({ checks, deployment_commit_sha: health.deployment_commit_sha, worker_version: health.worker_version }));
-        if (Object.values(checks).every(Boolean)) {
+                  if (Object.values(checks).every(Boolean)) {
                     console.log("Deployed Worker revision and PAPER-only safety verified.");
                     return;
                   }
