@@ -56,7 +56,7 @@ def test_strategy_lab_rejects_higher_timeframe_data_from_the_future():
     higher = _bars(150, FOUR_HOURS_MS, BASE_MS - 296 * HOUR_MS)
 
     result = strategy_lab.evaluate_strategy_candidates(
-        primary, higher, higher_interval_ms=FOUR_HOURS_MS, now_ms=now_ms
+        primary, higher, higher_interval_ms=FOUR_HOURS_MS, now_ms=now_ms + 6 * HOUR_MS
     )
 
     assert result["status"] == "blocked"
