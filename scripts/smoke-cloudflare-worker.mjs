@@ -277,6 +277,10 @@ try {
   assert.match(staticHtml, /id="realModeBtn"/);
   assert.match(staticHtml, /Live market monitor/);
   assert.match(staticHtml, /id="marketChart"/);
+  assert.match(staticHtml, /Portfolio equity curve/);
+  assert.match(staticHtml, /id="equityChart"/);
+  assert.match(staticHtml, /renderEquityHistory/);
+  assert.match(staticHtml, /equity_history/);
   assert.match(staticHtml, /display-only market prices/);
   assert.match(staticHtml, /api\/market\/candles/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
