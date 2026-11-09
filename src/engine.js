@@ -5,7 +5,10 @@ import {
   coinbaseAdvancedErrorStatus,
   coinbaseAdvancedStatus,
   preflightCoinbaseAdvanced,
-  previewCoinbaseAdvancedLimitBuy
+  previewCoinbaseAdvancedLimitBuy,
+  submitCoinbaseAdvancedLimitBuy,
+  reconcileCoinbaseAdvancedOrder,
+  cancelCoinbaseAdvancedOrder
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
@@ -279,6 +282,113 @@ export class TradingEngine extends DurableObject {
           order_submission_available: false,
           automatic_live_entries_enabled: false
         }, 423);
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        let rawBody;
+        try { rawBody = await request.text(); } catch {
+          return jsonResponse({ status: "blocked", blockers: ["invalid_request_body"] }, 400);
+        }
+        if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+          return jsonResponse({ status: "blocked", blockers: ["request_too_large"] }, 413);
+        }
+        let body;
+        try { body = JSON.parse(rawBody); } catch {
+          return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400);
+        }
+        const clientOrderId = body?.client_order_id;
+        if (body?.confirm_real_order !== true ||
+            typeof clientOrderId !== "string" ||
+            !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId)) {
+          return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_and_client_order_id_required"] }, 400);
+        }
+        const records = this.getState("coinbase_live_orders") || [];
+        const prior = records.find((item) => item.client_order_id === clientOrderId);
+        if (prior) return jsonResponse({ status: "duplicate_or_existing_order", order: prior }, 409);
+        const active = records.filter((item) => ["SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED", "PARTIALLY_FILLED", "CANCEL_QUEUED"].includes(item.status));
+        const status = coinbaseAdvancedStatus(this.env);
+        if (!status.order_submission_available || active.length >= status.max_open_orders) {
+          return jsonResponse({ status: "blocked", blockers: [...status.blockers, ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : [])], order_submission_available: false }, 423);
+        }
+        const record = {
+          client_order_id: clientOrderId,
+          product_id: String(body.product_id || "").toUpperCase(),
+          side: "BUY",
+          status: "SUBMITTING",
+          created_at_ms: Date.now(),
+          updated_at_ms: Date.now(),
+          exchange_order_id: null
+        };
+        records.unshift(record);
+        this.setState("coinbase_live_orders", records.slice(0, 100));
+        try {
+          const result = await submitCoinbaseAdvancedLimitBuy(this.env, {
+            productId: body.product_id,
+            quoteSize: body.quote_size,
+            limitPrice: body.limit_price,
+            commissionTotal: body.commission_total,
+            previewId: body.preview_id,
+            clientOrderId
+          });
+          Object.assign(record, result, { updated_at_ms: Date.now() });
+          const current = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", current.map((item) => item.client_order_id === clientOrderId ? record : item).slice(0, 100));
+          this.logEvent("coinbase_live_order_submit", "Coinbase live LIMIT order submission result", {
+            client_order_id: clientOrderId, status: record.status, product_id: record.product_id,
+            exchange_order_id: record.exchange_order_id || null
+          });
+          return jsonResponse({ ...result, client_order_id: clientOrderId }, result.status === "blocked" ? 423 : 200);
+        } catch (error) {
+          record.status = error?.ambiguousSubmission === true ? "UNKNOWN" : "REJECTED";
+          record.error_code = typeof error?.code === "string" ? error.code : "coinbase_live_order_submission_failed";
+          record.updated_at_ms = Date.now();
+          const current = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", current.map((item) => item.client_order_id === clientOrderId ? record : item).slice(0, 100));
+          this.logEvent("coinbase_live_order_submit_error", "Coinbase live order submission failed or became ambiguous", {
+            client_order_id: clientOrderId, status: record.status, error_code: record.error_code
+          });
+          return jsonResponse({ status: record.status, decision: "RECONCILE_BEFORE_RETRY", client_order_id: clientOrderId, error_code: record.error_code }, 502);
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/orders") {
+        const records = this.getState("coinbase_live_orders") || [];
+        return jsonResponse({ orders: records.slice(0, 100), count: records.length });
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/reconcile") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
+        const records = this.getState("coinbase_live_orders") || [];
+        const record = records.find((item) => item.client_order_id === body?.client_order_id);
+        if (!record) return jsonResponse({ status: "blocked", blockers: ["local_order_not_found"] }, 404);
+        try {
+          const result = await reconcileCoinbaseAdvancedOrder(this.env, {
+            productId: record.product_id,
+            clientOrderId: record.client_order_id,
+            exchangeOrderId: record.exchange_order_id || undefined,
+            createdAtMs: record.created_at_ms
+          });
+          Object.assign(record, result.found ? result.order : {}, {
+            status: result.status,
+            last_reconciled_at_ms: Date.now(),
+            updated_at_ms: Date.now()
+          });
+          const latest = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", latest.map((item) => item.client_order_id === record.client_order_id ? record : item).slice(0, 100));
+          return jsonResponse({ ...result, client_order_id: record.client_order_id });
+        } catch (error) {
+          return jsonResponse({ status: "UNKNOWN", found: false, blockers: [typeof error?.code === "string" ? error.code : "order_reconciliation_failed"] }, 502);
+        }
+      }
+      if (request.method === "POST" && url.pathname === "/api/live/cancel") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
+        const records = this.getState("coinbase_live_orders") || [];
+        const record = records.find((item) => item.client_order_id === body?.client_order_id);
+        if (!record || !record.exchange_order_id) return jsonResponse({ status: "blocked", blockers: ["known_exchange_order_id_required"] }, 409);
+        const result = await cancelCoinbaseAdvancedOrder(this.env, { exchangeOrderId: record.exchange_order_id });
+        record.status = result.status;
+        record.updated_at_ms = Date.now();
+        this.setState("coinbase_live_orders", records.slice(0, 100));
+        return jsonResponse(result);
       }
       if (request.method === "GET" && url.pathname === "/api/live/status") {
         return jsonResponse(coinbaseAdvancedStatus(this.env));
