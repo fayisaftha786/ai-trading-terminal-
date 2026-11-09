@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -12,7 +12,7 @@ import {
   listCoinbaseAdvancedFills
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, shouldRunScheduledMarketScan, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
@@ -20,7 +20,8 @@ import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 
-const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
+const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scans stay deliberately slower.
+const BOOK_REFRESH_INTERVAL_MS = 10 * 1000; // Keep L2 observations inside the strict 15s entry window.
 const MAX_QUOTE_AGE_MS = 120000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
 
@@ -116,7 +117,7 @@ export class TradingEngine extends DurableObject {
   async ensureAlarm() {
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm === null) {
-      const dueAt = Date.now() + 30000;
+      const dueAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = dueAt;
       this.setState("runtime", runtime);
@@ -235,6 +236,21 @@ export class TradingEngine extends DurableObject {
           // the persisted quotes. Current snapshot health is reported separately below.
           last_scan_healthy_market_count: Number(runtime.healthy_market_count) || 0,
           last_scan_expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
+          last_book_refresh_at_ms: Number(runtime.last_book_refresh_at_ms) > 0
+            ? Number(runtime.last_book_refresh_at_ms) : null,
+          last_book_refresh_age_ms: Number(runtime.last_book_refresh_at_ms) > 0
+            ? Math.max(0, nowMs - Number(runtime.last_book_refresh_at_ms)) : null,
+          last_book_refresh_status: runtime.last_book_refresh_status || "not_started",
+          last_book_refresh_success_count: Number(runtime.last_book_refresh_success_count) || 0,
+          last_book_refresh_failed_count: Number(runtime.last_book_refresh_failed_count) || 0,
+          last_book_refresh_skipped_count: Number(runtime.last_book_refresh_skipped_count) || 0,
+          last_book_refresh_healthy_market_count: Number(runtime.last_book_refresh_healthy_market_count) || 0,
+          last_book_refresh_expected_market_count: Number(runtime.last_book_refresh_expected_market_count) || PRODUCTS.length,
+          last_book_refresh_issues: (Array.isArray(runtime.last_book_refresh_issues)
+            ? runtime.last_book_refresh_issues : []).slice(0, PRODUCTS.length).map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
+            })),
           current_market_feed: {
             status: currentMarketStatus,
             freshness_state: marketFeedFreshness.state,
@@ -278,6 +294,7 @@ export class TradingEngine extends DurableObject {
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
        schedule_seconds: SCAN_INTERVAL_MS / 1000,
+          book_refresh_seconds: BOOK_REFRESH_INTERVAL_MS / 1000,
           live_trading_enabled: false, binance_testnet_enabled: false,
           market_data_status: currentMarketStatus,
           scheduler: {
@@ -963,6 +980,46 @@ export class TradingEngine extends DurableObject {
   async alarm() {
     const invokedAtMs = Date.now();
     const startingRuntime = this.getState("runtime") || {};
+    const fullScanDue = shouldRunScheduledMarketScan(
+      startingRuntime.last_scheduled_scan_at_ms,
+      invokedAtMs,
+      SCAN_INTERVAL_MS
+    );
+
+    // Frequent alarms maintain L2 freshness independently from the heavier
+    // strategy/candle scan. They do not alter scheduled-scan health counters.
+    if (!fullScanDue) {
+      const runtime = this.getState("runtime") || {};
+      runtime.last_scheduled_alarm_at_ms = invokedAtMs;
+      this.setState("runtime", runtime);
+      try {
+        await runAfterActiveScan(
+          () => this.scanPromise || this.researchBackfillPromise,
+          () => this.refreshOrderBooksOnly()
+        );
+      } catch (error) {
+        const current = this.getState("runtime") || {};
+        current.last_book_refresh_at_ms = Date.now();
+        current.last_book_refresh_status = "error";
+        current.last_book_refresh_failed_count = PRODUCTS.length;
+        current.last_book_refresh_issues = [{
+          symbol: null,
+          reason: typeof error?.code === "string" ? error.code.slice(0, 100) : "book_refresh_cycle_failed"
+        }];
+        this.setState("runtime", current);
+        this.logEvent("order_book_refresh_error", "Scheduled L2-only market refresh failed", {
+          reason: current.last_book_refresh_issues[0].reason
+        });
+      } finally {
+        const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
+        const current = this.getState("runtime") || {};
+        current.next_alarm_at_ms = nextAt;
+        this.setState("runtime", current);
+        await this.ctx.storage.setAlarm(nextAt);
+      }
+      return;
+    }
+
     const previousScheduledScanStatus = startingRuntime.last_scheduled_scan_status || "not_run";
     const previousScheduledScanError = startingRuntime.last_scheduled_scan_error || null;
     startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
@@ -970,7 +1027,8 @@ export class TradingEngine extends DurableObject {
     startingRuntime.last_scheduled_scan_error = null;
     this.setState("runtime", startingRuntime);
     const priorRuntime = this.getState("runtime") || {};
-    const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
+    const cycleKey = String(priorRuntime.next_alarm_at_ms ||
+      Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
       const result = await runAfterActiveScan(
         () => this.scanPromise || this.researchBackfillPromise,
@@ -999,9 +1057,6 @@ export class TradingEngine extends DurableObject {
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
       } else if (runtime.last_scheduled_scan_status === "running") {
-        // A duplicate alarm can arrive while another scheduled run is active.
-        // Preserve the completed run's status if it finished while this alarm
-        // waited; otherwise restore the status from before this duplicate alarm.
         runtime.last_scheduled_scan_status = previousScheduledScanStatus;
         runtime.last_scheduled_scan_error = previousScheduledScanError;
       }
@@ -1052,9 +1107,7 @@ export class TradingEngine extends DurableObject {
         consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
       });
     } finally {
-      // This performs read-only order/fill reconciliation only. It never
-      // creates, edits or cancels orders. With no credentials or no active
-      // local orders, it exits without contacting Coinbase.
+      // Reconciliation is read-only; it never creates, edits or cancels orders.
       try {
         await this.reconcileOpenCoinbaseLiveOrders("scheduled_alarm");
       } catch (error) {
@@ -1062,7 +1115,7 @@ export class TradingEngine extends DurableObject {
           error_code: typeof error?.code === "string" ? error.code : "live_order_reconciliation_failed"
         });
       }
-      const nextAt = Date.now() + SCAN_INTERVAL_MS;
+      const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = nextAt;
       this.setState("runtime", runtime);
@@ -1913,6 +1966,126 @@ export class TradingEngine extends DurableObject {
   getMarkets() {
     return this.sql.exec("SELECT data_json FROM market_snapshots ORDER BY symbol").toArray()
       .map((row) => { try { return JSON.parse(row.data_json); } catch { return { status: "error" }; } });
+  }
+
+  /**
+   * Refresh only L2 books between slower strategy/candle scans. This method
+   * never recalculates entry signals or opens positions. Each book must come
+   * from the exact provider already selected for that market.
+   */
+  async refreshOrderBooksOnly() {
+    const markets = this.getMarkets();
+    const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
+    const coinbaseState = createCoinbaseRequestState();
+    const requestState = { ...coinbaseState, bitstamp: { ...coinbaseState.bitstamp } };
+    const issues = [];
+    let refreshed = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (const product of PRODUCTS) {
+      const market = bySymbol.get(product.symbol);
+      if (!market || market.status !== "live") {
+        skipped += 1;
+        issues.push({ symbol: product.symbol, reason: "market_snapshot_unavailable" });
+        continue;
+      }
+
+      const provider = market.market_data_provider;
+      try {
+        let book;
+        if (provider === "coinbase_exchange") {
+          book = await fetchCoinbaseOrderBook(market.product, requestState);
+        } else if (provider === "bitstamp_spot") {
+          book = await fetchBitstampOrderBook(market.product, requestState);
+        } else {
+          skipped += 1;
+          issues.push({ symbol: product.symbol, reason: "market_data_provider_unsupported" });
+          continue;
+        }
+
+        const retrievedAtMs = Number(book?.book_retrieved_at_ms);
+        if (!Number.isFinite(retrievedAtMs) || retrievedAtMs <= 0 ||
+            retrievedAtMs > Date.now() + 1000 ||
+            ![book.bid, book.ask, book.bid_depth_quote, book.ask_depth_quote].every(Number.isFinite) ||
+            book.bid <= 0 || book.ask < book.bid ||
+            book.bid_depth_quote < 0 || book.ask_depth_quote < 0) {
+          throw new Error("order_book_failed_validation");
+        }
+
+        market.bid = book.bid;
+        market.ask = book.ask;
+        market.bid_depth_quote = book.bid_depth_quote;
+        market.ask_depth_quote = book.ask_depth_quote;
+        market.book_retrieved_at_ms = retrievedAtMs;
+        market.book_event_time_ms = Number.isFinite(book.book_event_time_ms)
+          ? book.book_event_time_ms : null;
+        market.book_age_ms = Math.max(0, Date.now() - retrievedAtMs);
+        market.book_sequence = Number.isSafeInteger(book.book_sequence) ? book.book_sequence : null;
+        market.quote_received_at_ms = retrievedAtMs;
+        market.spread_bps = ((book.ask - book.bid) / ((book.ask + book.bid) / 2)) * 10000;
+        market.data_quality = {
+          ...(market.data_quality || {}),
+          book_provider: provider,
+          book_status: "available",
+          book_error: null,
+          book_freshness_source: provider === "bitstamp_spot"
+            ? "bitstamp_exchange_order_book_timestamp"
+            : "coinbase_local_l2_retrieval_time",
+          quote_freshness_source: "local_order_book_response_time_for_exit_marking"
+        };
+        this.saveMarket(market, "live");
+        refreshed += 1;
+      } catch (error) {
+        failed += 1;
+        const status = Number(error?.status);
+        const errorCode = typeof error?.code === "string" && /^[a-z0-9_]{1,80}$/.test(error.code)
+          ? error.code
+          : status === 429 ? "provider_rate_limited"
+            : status >= 500 ? "provider_server_error"
+              : "order_book_refresh_failed";
+        market.data_quality = {
+          ...(market.data_quality || {}),
+          book_provider: provider,
+          book_status: "provider_error",
+          book_error: errorCode
+        };
+        this.saveMarket(market, "live");
+        issues.push({ symbol: product.symbol, reason: errorCode });
+      }
+    }
+
+    const refreshedMarkets = this.getMarkets();
+    const feed = assessMarketUniverse(
+      refreshedMarkets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
+    );
+    const status = failed === 0 && skipped === 0 ? "completed"
+      : refreshed > 0 ? "partial" : "unavailable";
+
+    // Existing PAPER positions get a fresh-book exit check at this faster cadence.
+    // The provider lock is retained; this path has no entry or live-order code.
+    const settings = this.getState("settings") || {};
+    const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const markBySymbol = this.buildPositionLockedBidMarks(refreshedMarkets, Date.now());
+    const exits = this.monitorExits(markBySymbol, risk, Date.now());
+    this.portfolio(markBySymbol, risk, Date.now());
+
+    const runtime = this.getState("runtime") || {};
+    runtime.last_book_refresh_at_ms = Date.now();
+    runtime.last_book_refresh_status = status;
+    runtime.last_book_refresh_success_count = refreshed;
+    runtime.last_book_refresh_failed_count = failed;
+    runtime.last_book_refresh_skipped_count = skipped;
+    runtime.last_book_refresh_healthy_market_count = feed.healthy_market_count;
+    runtime.last_book_refresh_expected_market_count = feed.expected_market_count;
+    runtime.last_book_refresh_issues = issues.slice(0, PRODUCTS.length).map((issue) => ({
+      symbol: issue.symbol,
+      reason: String(issue.reason || "unknown").slice(0, 100)
+    }));
+    runtime.last_book_refresh_exits = exits;
+    this.setState("runtime", runtime);
+
+    return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits };
   }
 
   getOpenTrades() {
