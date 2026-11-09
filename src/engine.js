@@ -1487,7 +1487,7 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
-    const marks = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
+    const marks = this.buildPositionLockedBidMarks(markets, Date.now());
     const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now());
     return {
       mode: "paper_only", live_trading_enabled: false, binance_testnet_enabled: false,
