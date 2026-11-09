@@ -17,7 +17,7 @@ The older Python/FastAPI backend, Render Blueprint and Binance Testnet documenta
 - Package: `app.aitradingterminal.debug`, min SDK 26, target SDK 35.
 - GitHub Release: https://github.com/fayisaftha786/ai-trading-terminal-/releases/tag/v0.7.1-debug
 - Android v0.7.1 APK release commit: `369aaac4d3d5191e8a0648a675c3dc5327301bbb` (the APK release is older than current source).
-- Current GitHub `main` as of 2026-11-09: `b9e67f2eb2ef00f69a19ec4667c562f7a7ea7a23`.
+- Base GitHub `main` at the start of this Phase 1 update: `b9e67f2eb2ef00f69a19ec4667c562f7a7ea7a23`.
 - Main-branch CI built and verified the installable debug APK and published it to GitHub Releases.
 - The code has passed backend/release checks, Worker validation/local smoke tests and Android build/signature/metadata checks.
 - Physical device installation and live Cloudflare deployment remain unverified.
