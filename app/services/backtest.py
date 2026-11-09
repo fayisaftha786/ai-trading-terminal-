@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from statistics import mean, pstdev
 from typing import Any
 
-from app.services.strategy import ema
+from app.services.strategy import candle_integrity_report, ema
 
 
 def _validate(candles: list[list[float]]) -> list[list[float]]:
@@ -432,6 +432,31 @@ def _signal_backtest_metrics(
     }
 
 
+def _strict_signal_history(
+    candles: list[list[float]],
+    higher_timeframe_candles: list[list[float]],
+    higher_timeframe_ms: int,
+) -> tuple[list[list[float]], list[list[float]]]:
+    """Audit the raw research inputs before _validate can discard bad or duplicate rows."""
+    if not isinstance(candles, list) or not isinstance(higher_timeframe_candles, list):
+        raise ValueError("Signal backtest candle histories must be arrays")
+    if higher_timeframe_ms not in {14_400_000, 21_600_000}:
+        raise ValueError("Higher timeframe must be an explicitly supported 4h or 6h interval")
+    primary_quality = candle_integrity_report(candles, 3_600_000)
+    higher_quality = candle_integrity_report(higher_timeframe_candles, higher_timeframe_ms)
+    if not primary_quality["is_clean"]:
+        raise ValueError(
+            "Signal backtest rejected raw primary OHLCV history before normalization "
+            f"({primary_quality})"
+        )
+    if not higher_quality["is_clean"]:
+        raise ValueError(
+            "Signal backtest rejected raw higher-timeframe OHLCV history before normalization "
+            f"({higher_quality})"
+        )
+    return _validate(candles), _validate(higher_timeframe_candles)
+
+
 def run_signal_backtest(
     candles: list[list[float]],
     higher_timeframe_candles: list[list[float]],
@@ -446,8 +471,9 @@ def run_signal_backtest(
     take_profit_pct: float = 2.0,
     enforce_net_reward_risk: bool = True,
 ) -> dict[str, Any]:
-    rows = _validate(candles)
-    higher_rows = _validate(higher_timeframe_candles)
+    rows, higher_rows = _strict_signal_history(
+        candles, higher_timeframe_candles, higher_timeframe_ms
+    )
     return _signal_backtest_metrics(
         rows, higher_rows, fee_bps=fee_bps, slippage_bps=slippage_bps,
         start_index=start_index, higher_timeframe_ms=higher_timeframe_ms,
@@ -470,8 +496,9 @@ def run_signal_walk_forward(
     stop_loss_pct: float = 1.0,
     take_profit_pct: float = 2.0,
 ) -> dict[str, Any]:
-    rows = _validate(candles)
-    higher_rows = _validate(higher_timeframe_candles)
+    rows, higher_rows = _strict_signal_history(
+        candles, higher_timeframe_candles, higher_timeframe_ms
+    )
     if folds < 2 or folds > 6:
         raise ValueError("Folds must be between 2 and 6")
     warmup = 180
