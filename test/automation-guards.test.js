@@ -276,3 +276,20 @@ test("market-universe gate uses recent local quote receipt while preserving exch
   const futureEvent = { ...market, ticker_time: new Date(NOW + 6000).toISOString() };
   assert.ok(assessMarketUniverse([futureEvent], ["BTC/USD"], NOW).issues[0].reason.includes("ticker_stale"));
 });
+
+
+test("provider snapshot failures report the provider reason and skip quote/order-book noise", () => {
+  const failed = {
+    symbol: "SOL/USD",
+    status: "error",
+    error_code: "provider_rate_limited",
+    bid: null,
+    ask: null,
+    ticker_time: null
+  };
+  const result = assessMarketUniverse([failed], ["SOL/USD"], NOW);
+  assert.equal(result.healthy, false);
+  assert.deepEqual(result.issues, [
+    { symbol: "SOL/USD", reason: "provider_unavailable:provider_rate_limited" }
+  ]);
+});
