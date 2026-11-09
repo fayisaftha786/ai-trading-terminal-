@@ -781,6 +781,9 @@ export async function listCoinbaseAdvancedFills(
     if (!Array.isArray(payload.fills)) {
       throw new Error("coinbase_advanced_fills_response_invalid");
     }
+    if (payload.proof_token_required === true) {
+      throw new Error("coinbase_advanced_fills_proof_token_required");
+    }
     for (const fill of payload.fills) {
       if (!fill || typeof fill !== "object" || !ids.includes(String(fill.order_id || ""))) continue;
       const price = String(fill.price ?? "");
