@@ -185,6 +185,129 @@ function strategySignal(name, bar, feature, index) {
   return null;
 }
 
+/**
+ * Compare final indicator values and strategy signals across different startup
+ * history lengths. This is a Freqtrade-style recursive-indicator sensitivity
+ * diagnostic; it never authorizes a PAPER entry.
+ */
+export function runRecursiveWarmupAnalysis({
+  candles1h,
+  candles6h,
+  tolerancePct = 0.05,
+  rsiTolerancePoints = 1
+}) {
+  const oneHourInput = normalizeBars(candles1h, HOUR_MS);
+  const sixHourInput = normalizeBars(candles6h, SIX_HOUR_MS);
+  if (oneHourInput.issues.length || sixHourInput.issues.length) {
+    return {
+      status: "invalid_history",
+      issues_1h: oneHourInput.issues,
+      issues_6h: sixHourInput.issues
+    };
+  }
+
+  const oneHour = oneHourInput.rows;
+  const sixHour = sixHourInput.rows;
+  const configurations = [
+    { one_hour_bars: 150, six_hour_bars: 50 },
+    { one_hour_bars: 160, six_hour_bars: 80 },
+    { one_hour_bars: 300, six_hour_bars: 100 },
+    { one_hour_bars: 600, six_hour_bars: 150 },
+    { one_hour_bars: 1000, six_hour_bars: 220 },
+    { one_hour_bars: 3500, six_hour_bars: 650 }
+  ].filter((config) =>
+    oneHour.length >= config.one_hour_bars &&
+    sixHour.length >= config.six_hour_bars
+  );
+
+  if (configurations.length < 2) {
+    return {
+      status: "insufficient_warmup_history",
+      available_1h_bars: oneHour.length,
+      available_6h_bars: sixHour.length,
+      configurations_tested: configurations.length,
+      configurations_required: 2
+    };
+  }
+
+  const strategyNames = ["trend_continuation", "range_mean_reversion", "breakout_continuation"];
+  const samples = configurations.map((config) => {
+    const bars1h = oneHour.slice(-config.one_hour_bars);
+    const bars6h = sixHour.slice(-config.six_hour_bars);
+    const lastFeature = features(bars1h, bars6h).at(-1);
+    return {
+      ...config,
+      indicators: {
+        ema20: lastFeature.ema20,
+        ema50: lastFeature.ema50,
+        rsi14: lastFeature.rsi14,
+        atr14: lastFeature.atr14
+      },
+      signals: Object.fromEntries(strategyNames.map((name) => [
+        name,
+        Boolean(strategySignal(name, bars1h.at(-1), lastFeature, bars1h.length - 1))
+      ]))
+    };
+  });
+
+  const reference = samples.at(-1);
+  const deviations = samples.slice(0, -1).map((sample) => {
+    const priceDeviations = ["ema20", "ema50", "atr14"].map((key) => {
+      const base = Number(reference.indicators[key]);
+      const value = Number(sample.indicators[key]);
+      return Number.isFinite(base) && Math.abs(base) > 1e-12 && Number.isFinite(value)
+        ? Math.abs((value / base) - 1) * 100 : Number.POSITIVE_INFINITY;
+    });
+    const rsiDeviation = Number.isFinite(reference.indicators.rsi14) &&
+      Number.isFinite(sample.indicators.rsi14)
+      ? Math.abs(sample.indicators.rsi14 - reference.indicators.rsi14)
+      : Number.POSITIVE_INFINITY;
+    return {
+      one_hour_bars: sample.one_hour_bars,
+      six_hour_bars: sample.six_hour_bars,
+      max_price_indicator_deviation_pct: Math.max(...priceDeviations),
+      rsi_deviation_points: rsiDeviation,
+      signal_mismatches: strategyNames.filter((name) =>
+        sample.signals[name] !== reference.signals[name]
+      )
+    };
+  });
+
+  const maxPriceDeviation = Math.max(...deviations.map((row) =>
+    row.max_price_indicator_deviation_pct
+  ));
+  const maxRsiDeviation = Math.max(...deviations.map((row) =>
+    row.rsi_deviation_points
+  ));
+  const signalMismatches = deviations.reduce((sum, row) =>
+    sum + row.signal_mismatches.length, 0
+  );
+  const stable = maxPriceDeviation <= tolerancePct &&
+    maxRsiDeviation <= rsiTolerancePoints &&
+    signalMismatches === 0;
+
+  return {
+    status: "research_only",
+    stable,
+    signal_consistency: signalMismatches === 0,
+    reference_window: {
+      one_hour_bars: reference.one_hour_bars,
+      six_hour_bars: reference.six_hour_bars
+    },
+    configurations_tested: samples.length,
+    max_price_indicator_deviation_pct: Number(maxPriceDeviation.toFixed(6)),
+    max_rsi_deviation_points: Number(maxRsiDeviation.toFixed(6)),
+    signal_mismatches: signalMismatches,
+    tolerances: {
+      price_indicator_deviation_pct: tolerancePct,
+      rsi_deviation_points: rsiTolerancePoints
+    },
+    comparisons: deviations,
+    reference_signals: reference.signals,
+    caveat: "Startup-window stability is a sensitivity check, not proof of strategy profitability or absence of all look-ahead bias."
+  };
+}
+
 function metrics(trades, equityCurve, initialEquity, finalEquity) {
   const wins = trades.filter((trade) => trade.netPnl > 0);
   const losses = trades.filter((trade) => trade.netPnl < 0);
