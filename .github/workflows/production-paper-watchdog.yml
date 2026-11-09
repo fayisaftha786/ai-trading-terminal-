@@ -49,7 +49,7 @@ jobs:
           ')"
           test -n "$expected_main_sha" || { echo "::error::Could not resolve current main commit SHA."; exit 1; }
           export EXPECTED_MAIN_SHA="$expected_main_sha"
-          printf 'Expected main commit: %s\\n' "$EXPECTED_MAIN_SHA"
+          printf 'Expected main commit: %s\n' "$EXPECTED_MAIN_SHA"
           printf '%s' "$response" | node -e '
             let raw = "";
             process.stdin.setEncoding("utf8");
