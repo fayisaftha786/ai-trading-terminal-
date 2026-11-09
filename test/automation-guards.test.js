@@ -17,6 +17,7 @@ function healthyMarket(symbol) {
   return {
     symbol,
     status: "live",
+    market_data_provider: "coinbase_exchange",
     ticker_time: new Date(NOW - 1000).toISOString(),
     bid: 100,
     ask: 100.01,
@@ -29,6 +30,12 @@ function healthyMarket(symbol) {
     },
     six_hour_audit_summary: {
       ok: true, valid_closed_bars: 150, issues: [], last_closed_candle_ms: NOW - (2 * 21600000)
+    },
+    data_quality: {
+      ticker_provider: "coinbase_exchange",
+      book_provider: "coinbase_exchange",
+      one_hour_provider: "coinbase_exchange",
+      six_hour_provider: "coinbase_exchange"
     }
   };
 }
@@ -294,4 +301,18 @@ test("provider snapshot failures report the provider reason and skip quote/order
   assert.deepEqual(result.issues, [
     { symbol: "SOL/USD", reason: "provider_unavailable:provider_rate_limited" }
   ]);
+});
+
+
+test("market-universe gate rejects mixed or missing data-provider provenance", () => {
+  const symbol = "BTC/USD";
+  const mixed = healthyMarket(symbol);
+  mixed.data_quality.six_hour_provider = "bitstamp_spot";
+  const mixedResult = assessMarketUniverse([mixed], [symbol], NOW);
+  assert.ok(mixedResult.issues[0].reason.includes("market_data_provider_mismatch"));
+
+  const missing = healthyMarket(symbol);
+  delete missing.market_data_provider;
+  const missingResult = assessMarketUniverse([missing], [symbol], NOW);
+  assert.ok(missingResult.issues[0].reason.includes("market_data_provider_missing"));
 });
