@@ -273,8 +273,12 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     bookError = providerErrorCode(error);
   }
 
+  const cachedOneMinute = Array.isArray(cachedCandles.one_minute) ? cachedCandles.one_minute : [];
+  const cachedFiveMinute = Array.isArray(cachedCandles.five_minute) ? cachedCandles.five_minute : [];
   const cachedOneHour = Array.isArray(cachedCandles.one_hour) ? cachedCandles.one_hour : [];
   const cachedSixHour = Array.isArray(cachedCandles.six_hour) ? cachedCandles.six_hour : [];
+  const cachedOneMinuteAudit = cachedOneMinute.length ? auditCandles(cachedOneMinute, 60000, nowMs, 150) : null;
+  const cachedFiveMinuteAudit = cachedFiveMinute.length ? auditCandles(cachedFiveMinute, 300000, nowMs, 150) : null;
   const cachedOneHourAudit = cachedOneHour.length
     ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
   const cachedSixHourAudit = cachedSixHour.length
@@ -282,6 +286,16 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
 
   // Keep provider requests sequential: getJson shares one pacing/cooldown
   // state, and parallel timeframe refreshes could bypass the 350ms request gap.
+  const oneMinuteResult = await loadCandleHistory({
+    product, timeframeSeconds: 60, intervalMs: 60000,
+    cachedRows: cachedOneMinute, cachedAudit: cachedOneMinuteAudit,
+    requestState, nowMs, maxStaleMs: 180000
+  });
+  const fiveMinuteResult = await loadCandleHistory({
+    product, timeframeSeconds: 300, intervalMs: 300000,
+    cachedRows: cachedFiveMinute, cachedAudit: cachedFiveMinuteAudit,
+    requestState, nowMs, maxStaleMs: 420000
+  });
   const oneHourResult = await loadCandleHistory({
     product, timeframeSeconds: 3600, intervalMs: 3600000,
     cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
@@ -293,6 +307,8 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     requestState, nowMs, maxStaleMs: 25200000
   });
 
+  const oneMinuteAudit = oneMinuteResult.audit;
+  const fiveMinuteAudit = fiveMinuteResult.audit;
   const oneHourAudit = oneHourResult.audit;
   const sixHourAudit = sixHourResult.audit;
   const bidDepth = book ? parseBookSide(book.bids) : null;
@@ -320,12 +336,16 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     quote_volume_usd: Number.isFinite(quoteVolume) && quoteVolume >= 0 ? quoteVolume : null,
     bid_depth_quote: bidDepth,
     ask_depth_quote: askDepth,
+    one_minute_audit: oneMinuteAudit,
+    five_minute_audit: fiveMinuteAudit,
     one_hour_audit: oneHourAudit,
     six_hour_audit: sixHourAudit,
     data_quality: {
       market_data_provider: "coinbase_exchange",
       ticker_provider: "coinbase_exchange",
       book_provider: "coinbase_exchange",
+      one_minute_provider: "coinbase_exchange",
+      five_minute_provider: "coinbase_exchange",
       one_hour_provider: "coinbase_exchange",
       six_hour_provider: "coinbase_exchange",
       ticker_status: "available",
@@ -335,6 +355,8 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
       quote_volume_source: volumeSource,
       book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
       book_error: bookError,
+      one_minute: { ok: oneMinuteAudit.ok, issues: oneMinuteAudit.issues, bars: oneMinuteAudit.valid_closed_bars },
+      five_minute: { ok: fiveMinuteAudit.ok, issues: fiveMinuteAudit.issues, bars: fiveMinuteAudit.valid_closed_bars },
       one_hour: {
         ok: oneHourAudit.ok,
         issues: oneHourAudit.issues,
@@ -345,6 +367,12 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
         issues: sixHourAudit.issues,
         bars: sixHourAudit.valid_closed_bars
       },
+      one_minute_source: oneMinuteResult.source,
+      five_minute_source: fiveMinuteResult.source,
+      one_minute_refresh_status: oneMinuteResult.refresh_status,
+      five_minute_refresh_status: fiveMinuteResult.refresh_status,
+      one_minute_refresh_error: oneMinuteResult.refresh_error,
+      five_minute_refresh_error: fiveMinuteResult.refresh_error,
       one_hour_source: oneHourResult.source,
       six_hour_source: sixHourResult.source,
       one_hour_refresh_status: oneHourResult.refresh_status,
@@ -690,13 +718,27 @@ async function fetchBitstampProductSnapshot(
   }
 
   const bitstampCache = cachedCandles?.bitstamp || {};
+  const cachedOneMinute = Array.isArray(bitstampCache.one_minute) ? bitstampCache.one_minute : [];
+  const cachedFiveMinute = Array.isArray(bitstampCache.five_minute) ? bitstampCache.five_minute : [];
   const cachedOneHour = Array.isArray(bitstampCache.one_hour) ? bitstampCache.one_hour : [];
   const cachedSixHour = Array.isArray(bitstampCache.six_hour) ? bitstampCache.six_hour : [];
+  const cachedOneMinuteAudit = cachedOneMinute.length ? auditCandles(cachedOneMinute, 60000, nowMs, 150) : null;
+  const cachedFiveMinuteAudit = cachedFiveMinute.length ? auditCandles(cachedFiveMinute, 300000, nowMs, 150) : null;
   const cachedOneHourAudit = cachedOneHour.length
     ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
   const cachedSixHourAudit = cachedSixHour.length
     ? auditCandles(cachedSixHour, 21600 * 1000, nowMs, 150) : null;
 
+  const oneMinuteResult = await loadBitstampCandleHistory({
+    symbol, pair, timeframeSeconds: 60, intervalMs: 60000,
+    cachedRows: cachedOneMinute, cachedAudit: cachedOneMinuteAudit,
+    requestState: bitstampState, nowMs, maxStaleMs: 180000
+  });
+  const fiveMinuteResult = await loadBitstampCandleHistory({
+    symbol, pair, timeframeSeconds: 300, intervalMs: 300000,
+    cachedRows: cachedFiveMinute, cachedAudit: cachedFiveMinuteAudit,
+    requestState: bitstampState, nowMs, maxStaleMs: 420000
+  });
   const oneHourResult = await loadBitstampCandleHistory({
     symbol, pair, timeframeSeconds: 3600, intervalMs: 3600000,
     cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
@@ -732,12 +774,16 @@ async function fetchBitstampProductSnapshot(
     quote_volume_usd: Number.isFinite(quoteVolume) && quoteVolume >= 0 ? quoteVolume : null,
     bid_depth_quote: bidDepth,
     ask_depth_quote: askDepth,
+    one_minute_audit: oneMinuteResult.audit,
+    five_minute_audit: fiveMinuteResult.audit,
     one_hour_audit: oneHourResult.audit,
     six_hour_audit: sixHourResult.audit,
     data_quality: {
       market_data_provider: "bitstamp_spot",
       ticker_provider: "bitstamp_spot",
       book_provider: "bitstamp_spot",
+      one_minute_provider: "bitstamp_spot",
+      five_minute_provider: "bitstamp_spot",
       one_hour_provider: "bitstamp_spot",
       six_hour_provider: "bitstamp_spot",
       ticker_status: "available",
@@ -748,6 +794,8 @@ async function fetchBitstampProductSnapshot(
       quote_volume_source: "bitstamp_ticker_24h_base_volume_times_last_price",
       book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
       book_error: bookError,
+      one_minute: { ok: oneMinuteResult.audit.ok, issues: oneMinuteResult.audit.issues, bars: oneMinuteResult.audit.valid_closed_bars },
+      five_minute: { ok: fiveMinuteResult.audit.ok, issues: fiveMinuteResult.audit.issues, bars: fiveMinuteResult.audit.valid_closed_bars },
       one_hour: {
         ok: oneHourResult.audit.ok,
         issues: oneHourResult.audit.issues,
@@ -758,6 +806,12 @@ async function fetchBitstampProductSnapshot(
         issues: sixHourResult.audit.issues,
         bars: sixHourResult.audit.valid_closed_bars
       },
+      one_minute_source: oneMinuteResult.source,
+      five_minute_source: fiveMinuteResult.source,
+      one_minute_refresh_status: oneMinuteResult.refresh_status,
+      five_minute_refresh_status: fiveMinuteResult.refresh_status,
+      one_minute_refresh_error: oneMinuteResult.refresh_error,
+      five_minute_refresh_error: fiveMinuteResult.refresh_error,
       one_hour_source: oneHourResult.source,
       six_hour_source: sixHourResult.source,
       one_hour_refresh_status: oneHourResult.refresh_status,
