@@ -30,7 +30,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet ex
 
 ## Current source and validation state
 
-- Main Git commit: `6bc50ed254bcf3ab181cd162ba8883d8c7230a10`.
+- Main Git commit at the 2026-11-09 audit: `ec1b48ec28205df092e8dc2a4ef9a39f28ca5ee4`.
 - PR #62 (same-provider Bitstamp failover and provider diagnostics) is merged.
 - PR #63 (lock PAPER position valuation and exits to the entry venue) is merged.
 - Their GitHub validation pipelines passed syntax checks, unit tests, Wrangler dry-run and local Durable Object/authentication/kill-switch smoke coverage.
