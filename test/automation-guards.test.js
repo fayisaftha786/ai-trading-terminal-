@@ -3,8 +3,11 @@ import assert from "node:assert/strict";
 import {
   assessMarketUniverse,
   advanceUnhealthyScanStreak,
+  assessAdaptiveRisk,
+  assessLossCooldown,
   deriveSchedulerStatus,
-  shouldHaltPaperAutomation
+  shouldHaltPaperAutomation,
+  updateTrailingStop
 } from "../src/automation-guards.js";
 
 const NOW = Date.parse("2026-11-08T12:00:00.000Z");
@@ -152,4 +155,86 @@ test("scheduler heartbeat is independent of manual scans and reports missed alar
     lastScheduledScanStatus: "running",
     nowMs: NOW
   }).status, "running");
+});
+
+
+test("loss cooldown pauses after two or three consecutive realised losses and resets on a non-loss", () => {
+  const twoLosses = [
+    { pnl_usd: -0.3, closed_at_ms: NOW - 60_000 },
+    { pnl_usd: -0.2, closed_at_ms: NOW - 90_000 },
+    { pnl_usd: 0.4, closed_at_ms: NOW - 120_000 }
+  ];
+  const two = assessLossCooldown(twoLosses, NOW);
+  assert.equal(two.blocked, true);
+  assert.equal(two.lossStreak, 2);
+  assert.equal(two.reason, "two_loss_cooldown_4h");
+  assert.equal(two.remainingMs, (4 * 60 * 60 * 1000) - 60_000);
+
+  const three = assessLossCooldown([
+    { pnl_usd: -0.1, closed_at_ms: NOW - 60_000 },
+    { pnl_usd: -0.2, closed_at_ms: NOW - 90_000 },
+    { pnl_usd: -0.3, closed_at_ms: NOW - 120_000 }
+  ], NOW);
+  assert.equal(three.blocked, true);
+  assert.equal(three.lossStreak, 3);
+  assert.equal(three.reason, "three_loss_cooldown_12h");
+
+  assert.deepEqual(assessLossCooldown([
+    { pnl_usd: 0.01, closed_at_ms: NOW - 1000 },
+    { pnl_usd: -0.2, closed_at_ms: NOW - 2000 }
+  ], NOW), { blocked: false, lossStreak: 0, remainingMs: 0, reason: null });
+  assert.equal(assessLossCooldown(twoLosses, NOW + 5 * 60 * 60 * 1000).blocked, false);
+});
+
+test("loss cooldown fails closed for malformed recent loss records", () => {
+  assert.equal(assessLossCooldown([
+    { pnl_usd: -1, closed_at_ms: "invalid" },
+    { pnl_usd: -1, closed_at_ms: NOW - 2000 }
+  ], NOW).reason, "loss_cooldown_timestamp_invalid");
+  assert.equal(assessLossCooldown([{ pnl_usd: "bad", closed_at_ms: NOW }], NOW).reason, "recent_trade_result_invalid");
+});
+
+test("adaptive risk only scales down and pauses at high drawdown", () => {
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 0, lossStreak: 0 }).multiplier, 1);
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 1.5, lossStreak: 0 }).multiplier, 0.75);
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 2.5, lossStreak: 0 }).multiplier, 0.5);
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 3.5, lossStreak: 0 }).multiplier, 0.25);
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 0.2, lossStreak: 2 }).multiplier, 0.5);
+  assert.equal(assessAdaptiveRisk({ drawdownPct: 0.2, lossStreak: 3 }).multiplier, 0.25);
+  assert.deepEqual(assessAdaptiveRisk({ drawdownPct: 4, lossStreak: 0 }), {
+    allowed: false, multiplier: 0, reason: "preemptive_drawdown_pause"
+  });
+  assert.equal(assessAdaptiveRisk({ drawdownPct: null, lossStreak: 0 }).allowed, false);
+});
+
+test("cost-aware trailing stop activates only after a profit buffer and never loosens", () => {
+  const dormant = updateTrailingStop({
+    entryPrice: 100, currentStop: 99, previousHighWater: 100,
+    currentBid: 101.9, roundTripCostBps: 55
+  });
+  assert.equal(dormant.ok, true);
+  assert.equal(dormant.active, false);
+  assert.equal(dormant.stopLoss, 99);
+
+  const activated = updateTrailingStop({
+    entryPrice: 100, currentStop: 99, previousHighWater: 100,
+    currentBid: 102.1, roundTripCostBps: 55
+  });
+  assert.equal(activated.active, true);
+  assert.ok(activated.stopLoss > 100);
+  assert.ok(activated.stopLoss < 102.1);
+
+  const pullback = updateTrailingStop({
+    entryPrice: 100, currentStop: activated.stopLoss,
+    previousHighWater: activated.highWaterBid, currentBid: 100.5,
+    roundTripCostBps: 55
+  });
+  assert.equal(pullback.stopLoss, activated.stopLoss);
+  assert.equal(pullback.highWaterBid, activated.highWaterBid);
+});
+
+test("trailing stop rejects invalid prices and cost assumptions", () => {
+  assert.equal(updateTrailingStop({
+    entryPrice: 0, currentStop: 99, currentBid: 100
+  }).ok, false);
 });
