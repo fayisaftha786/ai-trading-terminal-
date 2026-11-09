@@ -10,7 +10,29 @@ main{max-width:1120px;margin:auto;padding:22px 16px 48px}.top{display:flex;justi
 button{border:1px solid var(--line);background:#19243b;color:var(--text);padding:10px 14px;border-radius:10px;font-weight:750;cursor:pointer}.live-input{background:#070d1a;color:var(--text);border:1px solid var(--line);padding:9px;border-radius:8px;font:inherit;max-width:180px}button.primary{background:var(--purple);color:#100e20;border-color:var(--purple)}button.danger{background:#46202d;border-color:#76394b;color:#ffdbe2}button:disabled{opacity:.5;cursor:not-allowed}
 .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:14px 0}.card,.panel{background:linear-gradient(160deg,var(--panel),var(--panel2));border:1px solid var(--line);border-radius:16px;padding:16px;min-width:0}.label{font-size:11px;letter-spacing:.08em;color:var(--muted);font-weight:800}.value{font-size:24px;font-weight:850;margin-top:5px;overflow-wrap:anywhere}.panel{margin-top:14px}.panel h2{font-size:17px;margin:0 0 12px}.row{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}.tag{border:1px solid var(--line);padding:4px 8px;border-radius:999px;font-size:11px;font-weight:850;color:var(--muted)}.tag.good{color:var(--green);border-color:#28654f}.tag.bad{color:var(--red);border-color:#704051}
 .table-wrap{overflow:auto}table{width:100%;border-collapse:collapse;min-width:660px}th,td{text-align:left;padding:10px 9px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--muted);font-size:11px;letter-spacing:.08em}.positive{color:var(--green)}.negative{color:var(--red)}
-.note{background:#171f35;border:1px solid #35415e;padding:12px 14px;border-radius:12px;color:#c4cee3;font-size:13px}.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{font-size:13px;color:var(--muted)}.events{display:grid;gap:8px}.event{border-bottom:1px solid var(--line);padding:8px 0;font-size:13px}.login{max-width:390px;margin:12vh auto;padding:24px}.login label{display:grid;gap:5px;margin:12px 0;color:var(--muted);font-size:13px}.login input{background:#070d1a;color:var(--text);border:1px solid var(--line);padding:12px;border-radius:9px;font:inherit}.hidden{display:none!important}.mode-switch{display:flex;gap:10px;flex-wrap:wrap}.mode-switch button{min-width:170px}.mode-switch button.active{background:var(--purple);border-color:var(--purple);color:#100e20}.mode-note{margin-top:10px}.footer{font-size:12px;color:var(--muted);margin:18px 0}
+.note{background:#171f35;border:1px solid #35415e;padding:12px 14px;border-radius:12px;color:#c4cee3;font-size:13px}.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center}.status{font-size:13px;color:var(--muted)}.events{display:grid;gap:8px}.event{border-bottom:1px solid var(--line);padding:8px 0;font-size:13px}.login{max-width:390px;margin:12vh auto;padding:24px}.login label{display:grid;gap:5px;margin:12px 0;color:var(--muted);font-size:13px}.login input{background:#070d1a;color:var(--text);border:1px solid var(--line);padding:12px;border-radius:9px;font:inherit}.hidden{display:none!important}.mode-switch{display:flex;gap:10px;flex-wrap:wrap}.mode-switch button{min-width:170px}.mode-switch button.active{background:var(--purple);border-color:var(--purple);color:#100e20}.mode-note{margin-top:10px}
+.ticker-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:14px 0}
+.ticker-card{background:linear-gradient(145deg,#121d34,#0b1425);border:1px solid #2b3b59;border-radius:16px;padding:16px;min-width:0;position:relative;overflow:hidden}
+.ticker-card:after{content:"";position:absolute;inset:auto -28px -62px auto;width:150px;height:150px;border-radius:50%;background:radial-gradient(circle,#9a88ff22,transparent 70%);pointer-events:none}
+.ticker-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.ticker-symbol{font-size:13px;font-weight:850;letter-spacing:.08em}
+.ticker-price{font-size:clamp(22px,3vw,30px);font-weight:900;letter-spacing:-.04em;margin:14px 0 3px;font-variant-numeric:tabular-nums}
+.ticker-change{font-size:12px;font-weight:800}
+.ticker-meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}
+.ticker-meta span{display:block;color:var(--muted);font-size:10px;letter-spacing:.06em;text-transform:uppercase}
+.ticker-meta strong{display:block;font-size:12px;margin-top:3px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.feed-pill{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:3px 7px;color:var(--muted);white-space:nowrap}
+.feed-pill.live{color:var(--green);border-color:#28654f}
+.feed-pill.stale{color:#ffca77;border-color:#775d34}
+.feed-pill.offline{color:var(--red);border-color:#704051}
+.chart-toolbar{display:flex;gap:9px;flex-wrap:wrap;align-items:center}
+.chart-toolbar select{background:#070d1a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font:inherit}
+.chart-shell{background:#0a1222;border:1px solid var(--line);border-radius:14px;padding:10px;overflow:hidden;margin-top:12px}
+.chart-shell svg{display:block;width:100%;height:auto;min-height:180px}
+.chart-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:8px}
+.chart-empty{min-height:180px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;padding:20px}
+@media(max-width:760px){.ticker-grid{grid-template-columns:1fr}.ticker-card{padding:14px}.ticker-meta{gap:12px}}
+.footer{font-size:12px;color:var(--muted);margin:18px 0}
 @media(max-width:760px){main{padding:14px 10px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand{font-size:20px}.value{font-size:20px}}
 </style></head>
 <body><main>
@@ -25,6 +47,18 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
     <button id="realModeBtn" type="button" aria-pressed="false">REAL · Coinbase account</button>
   </div>
   <p id="modeNote" class="note mode-note">DEMO uses Coinbase public market data with a separate virtual balance and simulated BUY/SELL ledger. No real funds are moved. Paper auto-entry stays OFF until you explicitly enable it.</p>
+</section>
+<section class="panel" id="liveMarketPanel">
+  <div class="row"><div><h2>Live market monitor</h2><div class="muted">Coinbase Exchange ticker stream · display-only market prices</div></div><span id="marketFeedState" class="feed-pill">CONNECTING</span></div>
+  <div class="ticker-grid">
+    <article class="ticker-card"><div class="ticker-head"><span class="ticker-symbol">BTC / USD</span><span id="feedBTC" class="feed-pill">WAITING</span></div><div id="priceBTC" class="ticker-price">—</div><div id="changeBTC" class="ticker-change muted">24h change —</div><div class="ticker-meta"><div><span>Best bid</span><strong id="bidBTC">—</strong></div><div><span>Best ask</span><strong id="askBTC">—</strong></div><div><span>24h high / low</span><strong id="rangeBTC">—</strong></div><div><span>Base volume</span><strong id="volumeBTC">—</strong></div></div></article>
+    <article class="ticker-card"><div class="ticker-head"><span class="ticker-symbol">ETH / USD</span><span id="feedETH" class="feed-pill">WAITING</span></div><div id="priceETH" class="ticker-price">—</div><div id="changeETH" class="ticker-change muted">24h change —</div><div class="ticker-meta"><div><span>Best bid</span><strong id="bidETH">—</strong></div><div><span>Best ask</span><strong id="askETH">—</strong></div><div><span>24h high / low</span><strong id="rangeETH">—</strong></div><div><span>Base volume</span><strong id="volumeETH">—</strong></div></div></article>
+    <article class="ticker-card"><div class="ticker-head"><span class="ticker-symbol">SOL / USD</span><span id="feedSOL" class="feed-pill">WAITING</span></div><div id="priceSOL" class="ticker-price">—</div><div id="changeSOL" class="ticker-change muted">24h change —</div><div class="ticker-meta"><div><span>Best bid</span><strong id="bidSOL">—</strong></div><div><span>Best ask</span><strong id="askSOL">—</strong></div><div><span>24h high / low</span><strong id="rangeSOL">—</strong></div><div><span>Base volume</span><strong id="volumeSOL">—</strong></div></div></article>
+  </div>
+  <div class="row"><h2>Market price history</h2><div class="chart-toolbar"><select id="chartSymbol" aria-label="Chart market"><option value="BTC/USD">BTC / USD</option><option value="ETH/USD">ETH / USD</option><option value="SOL/USD">SOL / USD</option></select><select id="chartTimeframe" aria-label="Chart timeframe"><option value="3600">1 hour</option><option value="21600">6 hours</option><option value="300">5 minutes</option><option value="60">1 minute</option></select><button id="chartReload" type="button">Refresh chart</button></div></div>
+  <div class="chart-shell"><div id="chartLoading" class="chart-empty">Loading verified closed-candle history…</div><svg id="marketChart" viewBox="0 0 1000 320" role="img" aria-label="Coinbase historical candlestick chart" class="hidden"></svg></div>
+  <div class="chart-foot"><span id="chartSource">Source: Coinbase Exchange archived closed candles</span><span id="chartUpdated">Waiting for chart data</span></div>
+  <p class="note">Streaming ticker prices are display-only and do not feed the strategy or execute trades. The chart uses validated, closed Coinbase candles from the research archive. WebSocket disconnection, stale timestamps or missing candles are shown explicitly; no synthetic prices are generated.</p>
 </section>
 <div class="grid">
 <article class="card"><div class="label">PAPER EQUITY</div><div class="value" id="equity">$10.00</div><div class="muted">Simulated USD</div></article>
@@ -73,8 +107,139 @@ const $=(id)=>document.getElementById(id);let token=sessionStorage.getItem("att_
 const money=(value)=>"$"+Number(value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=(value)=>String(value??"").replace(/[&<>"']/g,(char)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 async function api(path,options={}){const headers={"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(options.headers||{})};const response=await fetch(path,{...options,headers,cache:"no-store"});let data={};try{data=await response.json()}catch{}if(response.status===401){token="";sessionStorage.removeItem("att_cf_token");showLogin();throw new Error("Session expired. Sign in again.");}if(!response.ok)throw new Error(data.detail||data.error||"Request failed ("+response.status+")");return data;}
-function showLogin(){$("app").classList.add("hidden");$("login").classList.remove("hidden");}let currentTradingMode="demo";
-function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();}
+let marketSocket=null;
+let marketReconnectTimer=null;
+let marketReconnectDelay=1000;
+let marketTickerSeenAt=Object.create(null);
+const marketProductCodes={ "BTC-USD":"BTC","ETH-USD":"ETH","SOL-USD":"SOL" };
+function setFeedState(label,tone=""){
+  $("marketFeedState").textContent=label;
+  $("marketFeedState").className="feed-pill "+tone;
+}
+function setTickerCardState(code,label,tone=""){
+  const el=$("feed"+code);el.textContent=label;el.className="feed-pill "+tone;
+}
+function closeMarketFeed(){
+  if(marketReconnectTimer){clearTimeout(marketReconnectTimer);marketReconnectTimer=null;}
+  if(marketSocket){const socket=marketSocket;marketSocket=null;socket.onclose=null;socket.close();}
+  setFeedState("DISCONNECTED","offline");
+}
+function connectMarketFeed(){
+  if(!token||document.hidden||marketSocket)return;
+  setFeedState("CONNECTING");
+  try{
+    const socket=new WebSocket("wss://ws-feed.exchange.coinbase.com");
+    marketSocket=socket;
+    socket.onopen=()=>{
+      if(marketSocket!==socket)return;
+      marketReconnectDelay=1000;
+      socket.send(JSON.stringify({type:"subscribe",product_ids:["BTC-USD","ETH-USD","SOL-USD"],channels:["ticker","heartbeat"]}));
+      setFeedState("SUBSCRIBED");
+    };
+    socket.onmessage=(event)=>{
+      if(marketSocket!==socket)return;
+      let message;try{message=JSON.parse(event.data);}catch{return;}
+      if(message.type!=="ticker"||!marketProductCodes[message.product_id])return;
+      const code=marketProductCodes[message.product_id];
+      const price=Number(message.price),open=Number(message.open_24h);
+      if(!Number.isFinite(price)||price<=0)return;
+      marketTickerSeenAt[code]=Date.now();
+      $("price"+code).textContent=money(price);
+      const change=Number.isFinite(open)&&open>0?((price/open)-1)*100:null;
+      const changeEl=$("change"+code);
+      changeEl.textContent=change==null?"24h change unavailable":"24h "+(change>=0?"+":"")+change.toFixed(2)+"%";
+      changeEl.className="ticker-change "+(change==null?"muted":change>=0?"positive":"negative");
+      $("bid"+code).textContent=Number.isFinite(Number(message.best_bid))?money(Number(message.best_bid)):"—";
+      $("ask"+code).textContent=Number.isFinite(Number(message.best_ask))?money(Number(message.best_ask)):"—";
+      const high=Number(message.high_24h),low=Number(message.low_24h);
+      $("range"+code).textContent=Number.isFinite(high)&&Number.isFinite(low)?money(high)+" / "+money(low):"—";
+      const volume=Number(message.volume_24h);
+      $("volume"+code).textContent=Number.isFinite(volume)?volume.toLocaleString(undefined,{maximumFractionDigits:2}):"—";
+      setTickerCardState(code,"LIVE","live");
+      const stamp=Date.parse(message.time);
+      $("marketFeedState").textContent="LIVE · "+(Number.isFinite(stamp)?new Date(stamp).toLocaleTimeString():"TICKER");
+      $("marketFeedState").className="feed-pill live";
+    };
+    socket.onerror=()=>{if(marketSocket===socket)socket.close();};
+    socket.onclose=()=>{
+      if(marketSocket!==socket)return;
+      marketSocket=null;
+      setFeedState("RECONNECTING","stale");
+      for(const code of Object.values(marketProductCodes))setTickerCardState(code,"RECONNECTING","stale");
+      if(token&&!document.hidden){
+        marketReconnectTimer=setTimeout(()=>{marketReconnectTimer=null;connectMarketFeed();},marketReconnectDelay);
+        marketReconnectDelay=Math.min(30000,marketReconnectDelay*2);
+      }
+    };
+  }catch{
+    marketSocket=null;setFeedState("UNAVAILABLE","offline");
+  }
+}
+function updateTickerFreshness(){
+  const now=Date.now();let fresh=0;
+  for(const code of Object.values(marketProductCodes)){
+    const seen=Number(marketTickerSeenAt[code]||0);
+    const age=seen?now-seen:Infinity;
+    if(age<=20000){fresh++;setTickerCardState(code,"LIVE","live");}
+    else setTickerCardState(code,seen?"STALE":"WAITING",seen?"stale":"");
+  }
+  if(fresh===3)setFeedState("LIVE · 3/3","live");
+  else if(marketSocket&&marketSocket.readyState===WebSocket.OPEN)setFeedState("PARTIAL · "+fresh+"/3",fresh?"stale":"");
+  else if(!marketSocket)setFeedState("RECONNECTING","stale");
+}
+function renderMarketChart(data){
+  const svg=$("marketChart"),loading=$("chartLoading"),bars=Array.isArray(data.bars)?data.bars:[];
+  if(!bars.length){svg.classList.add("hidden");loading.classList.remove("hidden");loading.textContent="No validated closed candles are archived for this market/timeframe yet. Run a market scan and try again.";return;}
+  const width=1000,height=320,left=76,right=18,top=16,bottom=44,volumeHeight=42;
+  const highs=bars.map(b=>Number(b.high)).filter(Number.isFinite),lows=bars.map(b=>Number(b.low)).filter(Number.isFinite);
+  const max=Math.max(...highs),min=Math.min(...lows),span=Math.max(max-min,Math.abs(max)*0.0001,0.00000001);
+  const yTop=top,yBottom=height-bottom-volumeHeight;
+  const y=value=>yBottom-((Number(value)-min)/span)*(yBottom-yTop);
+  const plotWidth=width-left-right,step=plotWidth/bars.length,candleWidth=Math.max(2,Math.min(9,step*0.62));
+  const maxVolume=Math.max(1,...bars.map(b=>Number(b.volume)||0));
+  const grid=Array.from({length:5},(_,i)=>{
+    const value=max-(span*i/4),yy=y(value);
+    return '<line x1="'+left+'" y1="'+yy.toFixed(2)+'" x2="'+(width-right)+'" y2="'+yy.toFixed(2)+'" stroke="#26334d" stroke-width="1"/><text x="'+(left-10)+'" y="'+(yy+4).toFixed(2)+'" fill="#9eacc7" font-size="11" text-anchor="end">'+esc(money(value))+'</text>';
+  }).join("");
+  const candles=bars.map((bar,index)=>{
+    const x=left+(index+0.5)*step,open=Number(bar.open),close=Number(bar.close),high=Number(bar.high),low=Number(bar.low),volume=Math.max(0,Number(bar.volume)||0);
+    if(![open,close,high,low].every(Number.isFinite))return "";
+    const rising=close>=open,color=rising?"#49d7a2":"#ff6f82";
+    const bodyTop=Math.min(y(open),y(close)),bodyHeight=Math.max(1.5,Math.abs(y(open)-y(close)));
+    const volumeBar=(volume/maxVolume)*(volumeHeight-5);
+    return '<line x1="'+x.toFixed(2)+'" y1="'+y(high).toFixed(2)+'" x2="'+x.toFixed(2)+'" y2="'+y(low).toFixed(2)+'" stroke="'+color+'" stroke-width="1.5"/><rect x="'+(x-candleWidth/2).toFixed(2)+'" y="'+bodyTop.toFixed(2)+'" width="'+candleWidth.toFixed(2)+'" height="'+bodyHeight.toFixed(2)+'" rx="1" fill="'+color+'"/><rect x="'+(x-candleWidth/2).toFixed(2)+'" y="'+(height-bottom-volumeBar).toFixed(2)+'" width="'+candleWidth.toFixed(2)+'" height="'+volumeBar.toFixed(2)+'" fill="'+color+'" opacity=".48"/>';
+  }).join("");
+  const first=new Date(bars[0].time).toLocaleString(),last=new Date(bars[bars.length-1].time).toLocaleString();
+  svg.innerHTML='<rect x="0" y="0" width="1000" height="320" rx="10" fill="#0a1222"/>'+grid+'<line x1="'+left+'" y1="'+(height-bottom-volumeHeight)+'" x2="'+(width-right)+'" y2="'+(height-bottom-volumeHeight)+'" stroke="#26334d"/>'+candles+'<text x="'+left+'" y="'+(height-12)+'" fill="#9eacc7" font-size="11">'+esc(first)+'</text><text x="'+(width-right)+'" y="'+(height-12)+'" fill="#9eacc7" font-size="11" text-anchor="end">'+esc(last)+'</text>';
+  loading.classList.add("hidden");svg.classList.remove("hidden");
+  $("chartSource").textContent="Coinbase Exchange · validated closed candles · "+String(data.count)+" bars · "+String(data.timeframe_seconds/60)+"m";
+  const age=data.latest_age_ms==null?null:Math.floor(data.latest_age_ms/60000);
+  $("chartUpdated").textContent="Latest closed bar "+(age==null?"unknown":age+"m ago")+" · "+new Date(data.retrieved_at_ms).toLocaleTimeString();
+}
+async function loadMarketChart(){
+  const symbol=$("chartSymbol").value,timeframe=$("chartTimeframe").value;
+  $("chartReload").disabled=true;$("chartReload").textContent="Loading…";
+  $("chartLoading").classList.remove("hidden");$("chartLoading").textContent="Loading Coinbase candle archive…";
+  $("marketChart").classList.add("hidden");
+  try{
+    const data=await api("/api/market/candles?symbol="+encodeURIComponent(symbol)+"&timeframe="+encodeURIComponent(timeframe)+"&limit=72");
+    renderMarketChart(data);
+  }catch(error){
+    $("chartLoading").textContent="Chart unavailable: "+error.message;
+    $("chartLoading").classList.remove("hidden");
+  }finally{$("chartReload").disabled=false;$("chartReload").textContent="Refresh chart";}
+}
+$("chartSymbol").addEventListener("change",loadMarketChart);
+$("chartTimeframe").addEventListener("change",loadMarketChart);
+$("chartReload").addEventListener("click",loadMarketChart);
+document.addEventListener("visibilitychange",()=>{
+  if(document.hidden)closeMarketFeed();
+  else if(token){connectMarketFeed();updateTickerFreshness();}
+});
+setInterval(updateTickerFreshness,3000);
+
+function showLogin(){closeMarketFeed();$("app").classList.add("hidden");$("login").classList.remove("hidden");}let currentTradingMode="demo";
+function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();connectMarketFeed();loadMarketChart();}
 $("loginForm").addEventListener("submit",async(event)=>{event.preventDefault();$("loginError").textContent="Signing in…";try{const response=await fetch("/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({username:$("username").value,password:$("password").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Sign-in failed");token=data.access_token;sessionStorage.setItem("att_cf_token",token);$("password").value="";showApp();await refresh();}catch(error){$("loginError").textContent=error.message;}});
 $("logout").addEventListener("click",()=>{token="";sessionStorage.removeItem("att_cf_token");showLogin();});
 
