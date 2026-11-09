@@ -1,4 +1,11 @@
-export function assessMarketUniverse(markets, expectedSymbols, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+export function assessMarketUniverse(
+  markets,
+  expectedSymbols,
+  nowMs = Date.now(),
+  maxQuoteAgeMs = 120000,
+  maxOrderBookAgeMs = 15000,
+  minimumOrderBookDepthQuote = 5000
+) {
   const rows = Array.isArray(markets) ? markets : [];
   const expected = Array.isArray(expectedSymbols) ? expectedSymbols : [];
   const bySymbol = new Map(rows.map((market) => [market?.symbol, market]));
@@ -29,6 +36,18 @@ export function assessMarketUniverse(markets, expectedSymbols, nowMs = Date.now(
     if (![market.bid, market.ask, market.last].every((value) => Number.isFinite(value) && value > 0) ||
         market.ask < market.bid) {
       marketIssues.push("invalid_or_crossed_quote");
+    }
+
+    const bookRetrievedAtMs = Number(market.book_retrieved_at_ms);
+    const bookAgeMs = nowMs - bookRetrievedAtMs;
+    if (!Number.isFinite(bookRetrievedAtMs) || bookAgeMs < -1000 || bookAgeMs > maxOrderBookAgeMs) {
+      marketIssues.push("orderbook_snapshot_stale_or_missing");
+    }
+    const bidDepthQuote = Number(market.bid_depth_quote);
+    const askDepthQuote = Number(market.ask_depth_quote);
+    if (![bidDepthQuote, askDepthQuote].every(Number.isFinite) ||
+        Math.min(bidDepthQuote, askDepthQuote) < minimumOrderBookDepthQuote) {
+      marketIssues.push("orderbook_depth_unavailable_or_low");
     }
 
     for (const [timeframe, audit] of [
