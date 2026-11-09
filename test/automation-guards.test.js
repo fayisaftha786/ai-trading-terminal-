@@ -625,5 +625,5 @@ test("market feed freshness explains normal snapshot expiry without changing ent
     lastScheduledExpectedMarketCount: 3,
     lastScheduledScanAgeMs: null,
     staleAfterMs: 270000
-  }).state, "scheduled_scan_overdue");
+  }).state, "not_yet_verified");
 });
