@@ -36,23 +36,23 @@ A further PAPER entry hardening fix was merged in PR #28 (main commit `99532b93b
 
 **Not verified:** physical installation on the owner's Vivo device, exact deployed Cloudflare Git commit (the version tag is blank), repeat 15-minute alarm cadence, regional Coinbase access from that account or a forward paper-trading sample.
 
-## Latest market scan — 2026-11-09 04:24:09 UTC
+## Latest market scan — 2026-11-09 04:26:14 UTC
 
-The GitHub scheduled read-only scanner used public Binance data on current main commit `0d54d15209828393cd9ee457e98abae9b2c40111`:
+The GitHub scheduled read-only scanner used public Binance data on current main commit `b9e67f2eb2ef00f69a19ec4667c562f7a7ea7a23`:
 
 | Symbol | Data | Last | Signal | Score | 1H regime | 6H regime | Spread |
 |---|---|---:|---|---:|---|---|---:|
-| BTC/USDT | Live | $74,860.92 | HOLD | 40 | DOWNTREND | DOWNTREND | 0.0013 bps |
-| ETH/USDT | Live | $2,139.50 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.0467 bps |
-| SOL/USDT | Live | $87.29 | HOLD | 40 | DOWNTREND | DOWNTREND | 2.2910 bps |
+| BTC/USDT | Live | $74,935.52 | HOLD | 40 | DOWNTREND | DOWNTREND | 0.0013 bps |
+| ETH/USDT | Live | $2,142.81 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.5134 bps |
+| SOL/USDT | Live | $87.50 | HOLD | 40 | DOWNTREND | DOWNTREND | 2.2860 bps |
 
-All three markets were fresh and had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. SOL's ticker age was approximately -742 ms (exchange timestamp slightly ahead of runner clock), within the scanner's documented 5-second clock-skew tolerance; the raw age remains visible. Future timestamps beyond that tolerance are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
+All three markets were fresh and had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. Ticker ages ranged from approximately -183 ms to -550 ms (exchange timestamps slightly ahead of the runner clock), within the scanner's documented 5-second clock-skew tolerance; raw ages remain visible. Future timestamps beyond that tolerance are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
 
 ## Cloud backend status
 
-**Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. The `worker_version.tag` is blank, so the exact current-main revision is still **unverified**. The public response now includes scheduler telemetry and at the latest check reported `scheduler.status=healthy`, `last_scheduled_scan_status=completed`, and an alarm/healthy-scan age of approximately 8.5 minutes. This confirms a recent scheduled cycle, but a second observation is still needed to confirm recurring 15-minute cadence.
+**Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. The `worker_version.tag` is blank, so the exact current-main revision is still **unverified**. A live health check at 2026-11-09 04:46:35 UTC reported `scheduler.status=healthy`, `last_scheduled_scan_status=completed`, last-alarm age 67.9 seconds, last healthy scan age 63.8 seconds and next alarm at 05:00:31 UTC. The Worker version timestamp was 04:29:42 UTC, but its commit tag remains blank; another alarm observation is needed to establish recurring cadence.
 
-Current GitHub `main`: `0d54d15209828393cd9ee457e98abae9b2c40111`. Main has passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
+Base GitHub `main` at the start of this Phase 1 update: `b9e67f2eb2ef00f69a19ec4667c562f7a7ea7a23`. This revision had passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
 
 The previous GitHub Actions deployment attempt passed source checks, all 25 Worker unit tests and Wrangler dry-run build, then stopped at the credential check because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` were empty. The recommended phone-only route is Cloudflare Dashboard → Workers & Pages → GitHub integration; this can create its own deployment authorization and avoids requiring those two GitHub Actions secrets. The owner must still sign in, connect the repository, and configure Cloudflare runtime secrets `ADMIN_PASSWORD` (16+ characters) and `SESSION_SECRET` (32+ characters). Never share them in chat or commit them.
 

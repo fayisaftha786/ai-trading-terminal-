@@ -17,14 +17,14 @@ The older Python/FastAPI backend, Render Blueprint and Binance Testnet documenta
 - Package: `app.aitradingterminal.debug`, min SDK 26, target SDK 35.
 - GitHub Release: https://github.com/fayisaftha786/ai-trading-terminal-/releases/tag/v0.7.1-debug
 - Android v0.7.1 APK release commit: `369aaac4d3d5191e8a0648a675c3dc5327301bbb` (the APK release is older than current source).
-- Current GitHub `main` as of 2026-11-09: `0d54d15209828393cd9ee457e98abae9b2c40111`.
+- Base GitHub `main` at the start of this Phase 1 update: `b9e67f2eb2ef00f69a19ec4667c562f7a7ea7a23`.
 - Main-branch CI built and verified the installable debug APK and published it to GitHub Releases.
 - The code has passed backend/release checks, Worker validation/local smoke tests and Android build/signature/metadata checks.
 - Physical device installation and live Cloudflare deployment remain unverified.
 
 ## Cloudflare deployment — owner-controlled steps
 
-The public Worker URL currently responds and its health response reports scheduler `healthy` with the last scheduled scan `completed`. The `worker_version.tag` remains blank, so the exact current GitHub `main` revision is not yet proven deployed. The owner must:
+A live health check at 2026-11-09 04:46:35 UTC reported scheduler `healthy`, the last scheduled scan `completed`, last-alarm age 67.9 seconds and next alarm at 05:00:31 UTC. The Worker version timestamp was 04:29:42 UTC, but `worker_version.tag` remains blank, so the exact deployed GitHub revision is not yet proven. The owner must:
 
 1. Sign in to or create a Cloudflare account and choose the Free plan only.
 2. Read and accept Cloudflare's current Terms of Service and Privacy Policy directly with Cloudflare.
@@ -45,6 +45,10 @@ A temporary 60-minute preview is optional and requires the owner to accept Cloud
 - These values are research assumptions for simulated execution. They are not guaranteed execution levels or recommendations for live capital.
 - Alarm cadence is approximate and subject to platform limits, quota, network failures and delays. A simulated stop is not an exchange-native protective order.
 - Cloudflare Free has request, CPU, storage and SQL quotas. It is not unlimited continuous compute. Do not upgrade to a paid plan under a ₹0 budget; halt rather than bypass a quota or safety failure.
+
+## Phase 1 research-integrity hardening
+
+The research tournament must reject malformed OHLCV rows, null/empty numeric fields, duplicate timestamps, off-grid timestamps and gaps instead of silently dropping bad rows and continuing on a partial sample. Final forced-liquidation fees and slippage must be included in the final equity-curve drawdown mark. These are research correctness controls; they do not enable trading or approve a strategy.
 
 ## Next verification after deployment
 
