@@ -32,6 +32,24 @@ jobs:
             sleep 5
           done
           test -n "$response" || { echo "::error::Production Worker health endpoint is unreachable."; exit 1; }
+          expected_main_sha="$(curl --fail --silent --show-error --max-time 15 https://api.github.com/repos/fayisaftha786/ai-trading-terminal-/commits/main | node -e '
+            let raw = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", chunk => { raw += chunk; });
+            process.stdin.on("end", () => {
+              try {
+                const commit = JSON.parse(raw);
+                if (!/^[0-9a-f]{40}$/.test(commit.sha || "")) throw new Error("main commit SHA unavailable");
+                process.stdout.write(commit.sha);
+              } catch (error) {
+                console.error(error.message);
+                process.exitCode = 1;
+              }
+            });
+          ')"
+          test -n "$expected_main_sha" || { echo "::error::Could not resolve current main commit SHA."; exit 1; }
+          export EXPECTED_MAIN_SHA="$expected_main_sha"
+          printf 'Expected main commit: %s\\n' "$EXPECTED_MAIN_SHA"
           printf '%s' "$response" | node -e '
             let raw = "";
             process.stdin.setEncoding("utf8");
@@ -48,7 +66,7 @@ jobs:
                   liveTradingDisabled: health.live_trading_enabled === false,
                   binanceTestnetDisabled: health.binance_testnet_enabled === false,
                   workerVersionIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
-                  deployedCommitTagPresent: /^[0-9a-f]{40}$/.test(health.worker_version?.tag || ""),
+                  deployedCommitMatchesMain: health.worker_version?.tag === process.env.EXPECTED_MAIN_SHA,
                   schedulerHeartbeatFresh: validAge(scheduler.last_alarm_age_ms),
                   schedulerNotStale: ["healthy", "running"].includes(scheduler.status),
                   lastScheduledScanHealthy: ["completed", "running"].includes(scheduler.last_scheduled_scan_status),
