@@ -280,14 +280,6 @@ export class TradingEngine extends DurableObject {
       // Coinbase Advanced account preflight and order preview are deliberately
       // separated from execution. There is no /api/live/execute route in this build.
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
-        return jsonResponse({
-          error: "live_order_executor_not_implemented_or_approved",
-          live_trading_enabled: false,
-          order_submission_available: false,
-          automatic_live_entries_enabled: false
-        }, 423);
-      }
-      if (request.method === "POST" && url.pathname === "/api/live/execute") {
         const executionStatus = coinbaseAdvancedStatus(this.env);
         if (!executionStatus.order_submission_available) {
           return jsonResponse({
@@ -309,8 +301,13 @@ export class TradingEngine extends DurableObject {
         try { body = JSON.parse(rawBody); } catch {
           return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400);
         }
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real") {
+          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"], order_submission_available: false }, 409);
+        }
+        const side = String(body?.side || "BUY").toUpperCase();
         const clientOrderId = body?.client_order_id;
-        if (body?.confirm_real_order !== true ||
+        if (!["BUY", "SELL"].includes(side) || body?.confirm_real_order !== true ||
             typeof clientOrderId !== "string" ||
             !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId)) {
           return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_and_client_order_id_required"] }, 400);
@@ -338,7 +335,7 @@ export class TradingEngine extends DurableObject {
         const record = {
           client_order_id: clientOrderId,
           product_id: String(body.product_id || "").toUpperCase(),
-          side: "BUY",
+          side,
           status: "SUBMITTING",
           created_at_ms: Date.now(),
           updated_at_ms: Date.now(),
@@ -349,7 +346,9 @@ export class TradingEngine extends DurableObject {
         try {
           const result = await submitCoinbaseAdvancedLimitBuy(this.env, {
             productId: body.product_id,
+            side,
             quoteSize: body.quote_size,
+            baseSize: body.base_size,
             limitPrice: body.limit_price,
             commissionTotal: body.commission_total,
             previewId: body.preview_id,
@@ -432,7 +431,7 @@ export class TradingEngine extends DurableObject {
             connection_status: live.credentials_configured ? "credentials_configured_preflight_required" : "not_configured",
             account_preflight_available: live.account_preflight_available,
             order_preview_available: live.order_preview_available,
-            order_submission_available: false,
+            order_submission_available: live.order_submission_available,
             live_trading_enabled: false,
             automatic_live_entries_enabled: false,
             withdrawal_permission_required: false,
@@ -493,7 +492,9 @@ export class TradingEngine extends DurableObject {
         try {
           const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
             productId: body.product_id,
+            side: body.side || "BUY",
             quoteSize: body.quote_size,
+            baseSize: body.base_size,
             limitPrice: body.limit_price
           });
           return jsonResponse(result);
