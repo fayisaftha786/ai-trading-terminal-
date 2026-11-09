@@ -231,8 +231,8 @@ try {
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);
   assert.doesNotMatch(staticHtml, /Confirm guarded real order/);
-  assert.match(staticHtml, /Automatic PAPER entries start OFF/);
-  assert.match(staticHtml, /client_order_id/);
+  assert.match(staticHtml, /Preview LIMIT order only/);
+  assert.match(staticHtml, /Live order submission unavailable/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
 
