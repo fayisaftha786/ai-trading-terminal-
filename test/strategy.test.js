@@ -456,13 +456,21 @@ test("BTC-led market context requires fresh breadth and blocks risk-off regimes"
   assert.equal(riskOff.mode, "RISK_OFF");
   assert.equal(riskOff.allowed_for_long_entries, false);
 
-  const highVol = assessCrossMarketContext([
+  const isolatedAltVolatility = assessCrossMarketContext([
     row("BTC/USD", "UPTREND", "UPTREND"),
-    row("ETH/USD", "HIGH_VOLATILITY", "UPTREND"),
+    row("ETH/USD", "UPTREND", "HIGH_VOLATILITY"),
     row("SOL/USD", "UPTREND", "UPTREND")
   ], now);
-  assert.equal(highVol.mode, "RISK_OFF");
-  assert.equal(highVol.reason, "market_volatility_expansion");
+  assert.equal(isolatedAltVolatility.mode, "RISK_ON");
+  assert.equal(isolatedAltVolatility.allowed_for_long_entries, true);
+
+  const broadVolatility = assessCrossMarketContext([
+    row("BTC/USD", "UPTREND", "UPTREND"),
+    row("ETH/USD", "HIGH_VOLATILITY", "UPTREND"),
+    row("SOL/USD", "UPTREND", "HIGH_VOLATILITY")
+  ], now);
+  assert.equal(broadVolatility.mode, "RISK_OFF");
+  assert.equal(broadVolatility.reason, "market_volatility_expansion");
 
   const stale = assessCrossMarketContext([
     row("BTC/USD", "UPTREND", "UPTREND"),
@@ -496,4 +504,30 @@ test("production candidate gate enforces BTC-led market context when supplied", 
   assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs, marketContext: blocked }).reason,
     "cross_market_context_unavailable");
   assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs, marketContext: riskOn }).eligible, true);
+});
+
+
+test("live timeframe analysis reacts to ATR percentile expansion before the absolute 8% threshold", () => {
+  const interval = 3600000;
+  const now = Date.now();
+  const lastClosed = Math.floor(now / interval) * interval - interval;
+  const candles = Array.from({ length: 220 }, (_, index) => {
+    const close = 100 + index * 0.05;
+    const range = index < 190 ? 0.12 : 1.1;
+    return {
+      time: lastClosed - ((219 - index) * interval),
+      open: close - 0.01,
+      high: close + range,
+      low: close - range,
+      close,
+      volume: 1000 + (index % 5) * 10
+    };
+  });
+  const audit = auditCandles(candles, interval, now, 150);
+  assert.equal(audit.ok, true);
+  const result = analyzeTimeframe(audit);
+  assert.ok(result.atr_pct < 8, "test must remain below the absolute emergency threshold");
+  assert.equal(result.regime, "HIGH_VOLATILITY");
+  assert.equal(result.volatility_expanded, true);
+  assert.ok(result.atr_expansion_ratio >= 1.8 || result.atr_percentile_lookback >= 90);
 });
