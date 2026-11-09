@@ -22,8 +22,8 @@ The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet ex
 ## PAPER ledger, exits and risk
 
 - Every PAPER trade records its entry data provider. Position valuation, simulated stops/targets, trailing exits and manual close are locked to that provider. Legacy positions without provenance are treated as Coinbase positions. If the entry provider is unavailable, the position is unmarked rather than valued against a different exchange.
-- Initial virtual equity is USD 100. Baseline entry risk is 0.25%; total exposure is capped at 20%; maximum open positions is 3; daily entries are capped at 3; each symbol has a 4-hour cooldown.
-- Simulated stop/target defaults are 1% and 3%; estimated fees are 15 bps per side and slippage is 10 bps. Daily, weekly and overall drawdown limits are separate guards.
+- Initial virtual equity is USD 10; reserve USD 2; maximum position notional USD 8; one open position; up to five completed BUY→SELL cycles per UTC day. Entry risk is 1% of equity, daily loss guard 1%, weekly loss guard 4%, total drawdown stop 5%, and each symbol has a 4-hour cooldown.
+- Simulated stop-loss is 1%; take-profit is dynamic and cost/ATR-aware. Estimated fees are 60 bps per side plus 10 bps slippage per side. Daily, weekly and overall drawdown limits are separate guards.
 - Adaptive risk reduces position size as drawdown/loss streaks rise. Consecutive losses, data-quality streaks, stale scheduler heartbeat and total drawdown can latch-stop new entries.
 - The kill switch disables new entries while scheduled monitoring continues. Reset requires no open PAPER positions and never silently turns auto-entry back on.
 - The 15-minute production / proposed 90-second exit monitor is simulated, not an exchange-native protective order. Gaps and outages can make simulated fills materially worse than the trigger.
