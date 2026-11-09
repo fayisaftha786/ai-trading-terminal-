@@ -236,6 +236,9 @@ try {
   assert.ok(tournament.assets.every((asset) => asset.exploratory.ok === false));
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
   assert.equal(settingsAfterResearch.enabled, false, "read-only research must not enable PAPER automation by itself");
+  const analyticsBeforeTrades = await request("/api/analytics", { headers: auth }).then((r) => r.json());
+  assert.equal(analyticsBeforeTrades.execution_audit.sample_count, 0);
+  assert.equal(analyticsBeforeTrades.execution_audit.average_entry_spread_bps, null);
 
   const unnecessaryCapitalReview = await request("/api/automation/capital-review", {
     method: "POST", headers: auth,
@@ -292,6 +295,8 @@ try {
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);
   assert.match(staticHtml, /id="runTournament"/);
+  assert.match(staticHtml, /Modeled execution audit/);
+  assert.match(staticHtml, /MODELED PAPER EXECUTION/);
   assert.match(staticHtml, /Paper equity curve/);
   assert.match(staticHtml, /Actual stored portfolio snapshots/);
   assert.match(staticHtml, /renderEquityHistory\(x\.equity_history\|\|\[\]\)/);
