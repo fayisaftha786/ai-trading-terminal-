@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   runStrategyTournament, runWalkForwardResearch, resolveLongBarExit,
-  runTradeOrderMonteCarlo
+  runTradeOrderMonteCarlo, runRecursiveWarmupAnalysis
 } from "../src/strategy-tournament.js";
 
 function makeSeries(count, intervalMs, start, drift = 0.02, wave = 0.8) {
@@ -194,4 +194,52 @@ test("Monte Carlo trade-order and moving-block analysis is deterministic and sam
 test("invalid Monte Carlo inputs fail closed", () => {
   assert.equal(runTradeOrderMonteCarlo([0.1, Number.NaN], {}).status, "invalid_inputs");
   assert.equal(runTradeOrderMonteCarlo(Array(30).fill(0.1), { iterations: 20 }).status, "invalid_inputs");
+});
+
+
+test("backtest results at a fixed cutoff are invariant to candles that occur later", () => {
+  const short1h = makeSeries(700, 3600000, 0, 0.04, 1.1);
+  const short6h = makeSeries(120, 21600000, 0, 0.2, 1.7);
+  const full1h = makeSeries(1100, 3600000, 0, 0.04, 1.1);
+  const full6h = makeSeries(190, 21600000, 0, 0.2, 1.7);
+
+  const prefix = runStrategyTournament({
+    candles1h: short1h, candles6h: short6h, startIndex: 100
+  });
+  const withFutureData = runStrategyTournament({
+    candles1h: full1h, candles6h: full6h, startIndex: 100, endIndex: 700
+  });
+
+  assert.equal(prefix.ok, true);
+  assert.equal(withFutureData.ok, true);
+  assert.deepEqual(withFutureData.strategies, prefix.strategies,
+    "future OHLCV rows must not alter entries, exits or scores before the fixed cutoff");
+  assert.deepEqual(withFutureData.benchmark, prefix.benchmark);
+});
+
+test("recursive warmup analysis compares final indicators and signal consistency across startup windows", () => {
+  const oneHour = makeSeries(1100, 3600000, 0, 0.03, 1.4);
+  const sixHour = makeSeries(240, 21600000, 0, 0.15, 1.9);
+  const result = runRecursiveWarmupAnalysis({
+    candles1h: oneHour,
+    candles6h: sixHour
+  });
+
+  assert.equal(result.status, "research_only");
+  assert.equal(result.configurations_tested, 5);
+  assert.ok(Number.isFinite(result.max_price_indicator_deviation_pct));
+  assert.ok(Number.isFinite(result.max_rsi_deviation_points));
+  assert.equal(typeof result.signal_consistency, "boolean");
+  assert.equal(result.comparisons.length, 4);
+  assert.ok(result.reference_window.one_hour_bars > 0);
+  assert.ok(result.caveat.includes("not proof"));
+});
+
+test("recursive warmup analysis remains inconclusive when fewer than two startup windows exist", () => {
+  const result = runRecursiveWarmupAnalysis({
+    candles1h: makeSeries(150, 3600000, 0),
+    candles6h: makeSeries(50, 21600000, 0)
+  });
+  assert.equal(result.status, "insufficient_warmup_history");
+  assert.equal(result.configurations_tested, 1);
 });
