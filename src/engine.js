@@ -876,10 +876,27 @@ export class TradingEngine extends DurableObject {
 
     const intervalMs = timeframeSeconds * 1000;
     const rows = audit.rows.slice(-retentionBars);
+    const previousLastValue = this.sql.exec(
+      "SELECT MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
+      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
+      exchange, product, timeframeSeconds
+    ).toArray()[0]?.last_candle_ms;
+    const previousLast = previousLastValue == null ? null
+      : (Number.isFinite(Number(previousLastValue)) ? Number(previousLastValue) : null);
+    const newRows = previousLast === null
+      ? rows
+      : rows.filter((row) => Number(row.time) > previousLast);
+
+    const gapCount = countMissingArchiveBars(previousLast, newRows, intervalMs);
+    if (gapCount === null) return { stored: 0, status: "archive_gap_alignment_error" };
+
     let inserted = 0;
+    // Only add candles newer than this provider's archive cursor. A normal scan
+    // therefore writes at most the newly closed bars, not the full 160–200 bar
+    // window on every 15-minute cycle.
     const batchSize = 8;
-    for (let offset = 0; offset < rows.length; offset += batchSize) {
-      const batch = rows.slice(offset, offset + batchSize);
+    for (let offset = 0; offset < newRows.length; offset += batchSize) {
+      const batch = newRows.slice(offset, offset + batchSize);
       const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
       const values = batch.flatMap((row) => [
         exchange, product, timeframeSeconds, row.time,
@@ -892,7 +909,7 @@ export class TradingEngine extends DurableObject {
       ).toArray().length;
     }
 
-    const latest = rows.at(-1)?.time;
+    const latest = newRows.at(-1)?.time ?? previousLast;
     if (Number.isFinite(latest)) {
       const cutoff = latest - ((retentionBars - 1) * intervalMs);
       this.sql.exec(
@@ -900,7 +917,12 @@ export class TradingEngine extends DurableObject {
         exchange, product, timeframeSeconds, cutoff
       );
     }
-    return { stored: inserted, bars_count: Math.min(retentionBars, rows.length), status: "clean" };
+    return {
+      stored: inserted,
+      bars_count: Math.min(retentionBars, rows.length),
+      missing_intervals_since_previous_archive: gapCount,
+      status: "clean"
+    };
   }
 
   researchTournament() {
