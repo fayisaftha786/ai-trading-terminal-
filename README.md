@@ -38,7 +38,7 @@ GitHub Actions also runs a separate read-only market scanner using public Binanc
 
 A HOLD result is intentional when the configured strategy filters do not align. The strategy score is deterministic and uncalibrated; it is not a probability or a forecast.
 
-The read-only scanner now reports ticker and candle-analysis providers plus their quote currencies separately. It downgrades signals to HOLD unless both feeds match exactly, preventing a Binance USDT ticker from being paired with Coinbase USD candles during fallback.
+The read-only scanner now reports the configured exchange separately from the actual market-data adapter (including Coinbase fallback), and reports ticker and candle-analysis providers plus their quote currencies per market. It downgrades signals to HOLD unless both feeds match exactly, preventing a Binance USDT ticker from being paired with Coinbase USD candles during fallback.
 
 ## Strategy research lab
 
