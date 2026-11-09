@@ -31,7 +31,14 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 .chart-shell svg{display:block;width:100%;height:auto;min-height:180px}
 .chart-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:11px;margin-top:8px}
 .chart-empty{min-height:180px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px;padding:20px}
-.performance-chart{margin:14px 0 16px;padding:16px;background:linear-gradient(145deg,#0c1527,#0a1220);border:1px solid var(--line);border-radius:16px}.performance-chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.performance-chart-title{font-size:14px;font-weight:850}.performance-chart-meta{font-size:11px;color:var(--muted)}.performance-chart svg{display:block;width:100%;height:auto;min-height:190px;margin-top:8px}.performance-chart-empty{min-height:190px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px}.performance-chart-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:11px}.performance-chart-grid{stroke:#26364d;stroke-width:1;stroke-dasharray:4 6}.performance-chart-line{fill:none;stroke:#9a88ff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.performance-chart-area{fill:url(#equityFill)}.performance-chart-dot{fill:#56b4e9;stroke:#e7edfa;stroke-width:2}
+.performance-chart{margin:14px 0 16px;padding:16px;background:linear-gradient(145deg,#0c1527,#0a1220);border:1px solid var(--line);border-radius:16px}.performance-chart-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap}.performance-chart-title{font-size:14px;font-weight:850}.performance-chart-meta{font-size:11px;color:var(--muted)}.performance-chart svg{display:block;width:100%;height:auto;min-height:190px;margin-top:8px}.performance-chart-empty{min-height:190px;display:grid;place-items:center;text-align:center;color:var(--muted);font-size:13px}.performance-chart-foot{display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;color:var(--muted);font-size:11px}.coinbase-connect-shell{margin:16px 0;padding:16px;border:1px solid #30405f;border-radius:17px;background:radial-gradient(circle at 95% 0%,#5348a31c,transparent 34%),linear-gradient(145deg,#101c32,#0b1425)}
+.coinbase-connect-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:14px}.coinbase-connect-top h3{font-size:17px;margin:3px 0}.coinbase-connect-top p{font-size:12px;margin:0}.connection-sync{display:grid;justify-items:end;gap:5px}.connection-sync small{color:var(--muted);font-size:11px}
+.connection-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.connection-tile{display:flex;gap:9px;align-items:flex-start;padding:11px;border:1px solid #283854;border-radius:12px;background:#0a1324;min-width:0}.connection-tile strong{display:block;font-size:12px}.connection-tile small{display:block;color:var(--muted);font-size:10px;line-height:1.4;margin-top:3px;overflow-wrap:anywhere}
+.connection-dot{width:8px;height:8px;flex:0 0 8px;border-radius:50%;margin-top:4px;background:#71809b}.connection-dot.good{background:var(--green);box-shadow:0 0 0 3px #49d7a21b}.connection-dot.bad{background:var(--red);box-shadow:0 0 0 3px #ff6f821b}.connection-dot.pending{background:#71809b}
+.connection-data-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.connection-data-card{padding:12px;border:1px solid #283854;border-radius:12px;background:#0b1425;min-width:0}.balance-grid{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px}.balance-pill{padding:7px 10px;border:1px solid #30405f;border-radius:9px;background:#111d32;font-size:12px;font-variant-numeric:tabular-nums}.balance-pill strong{display:block;font-size:14px}.balance-pill small{display:block;color:var(--muted);font-size:10px}.product-list{font-size:12px;line-height:1.8;margin:7px 0}.product-chip{display:inline-block;margin:2px 5px 2px 0;padding:3px 8px;border:1px solid #28654f;border-radius:999px;color:var(--green);background:#49d7a20b}.connection-footnote{font-size:11px;color:var(--muted);margin:11px 0 0}
+#liveProduct{min-width:170px}
+@media(max-width:760px){.connection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.connection-data-grid{grid-template-columns:1fr}.coinbase-connect-shell{padding:12px}.connection-tile{padding:9px}}
+.performance-chart-grid{stroke:#26364d;stroke-width:1;stroke-dasharray:4 6}.performance-chart-line{fill:none;stroke:#9a88ff;stroke-width:3;stroke-linecap:round;stroke-linejoin:round}.performance-chart-area{fill:url(#equityFill)}.performance-chart-dot{fill:#56b4e9;stroke:#e7edfa;stroke-width:2}
 @media(max-width:760px){.ticker-grid{grid-template-columns:1fr}.ticker-card{padding:14px}.ticker-meta{gap:12px}}
 .footer{font-size:12px;color:var(--muted);margin:18px 0}
 @media(max-width:760px){main{padding:14px 10px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand{font-size:20px}.value{font-size:20px}}
@@ -69,9 +76,24 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <section class="panel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note" id="riskPeriodDetails">Daily and weekly risk baselines will appear after the first verified portfolio valuation.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
 
 <section class="panel" id="realModePanel"><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
-<p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View + Trade permissions, with Transfer disabled. Configure COINBASE_ADVANCED_API_KEY, COINBASE_ADVANCED_API_SECRET, COINBASE_ADVANCED_ORDER_ENABLED=true, an explicit spot allowlist, a small quote cap, and strict open/daily order limits as Worker secrets. Do not enable this until you have verified the account, region eligibility, balances and the exact order preview.</p><p class="note">Every preview is bound server-side to its exact product, side, size, limit price and fee. It expires after 60 seconds and can authorize only one confirmation; the submit request cannot change the previewed order details.</p>
-<div class="controls"><button id="livePreflight" type="button">Check account &amp; permissions</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
-<div class="controls"><label>SPOT product ID<br><input class="live-input" id="liveProduct" maxlength="48" placeholder="Select an eligible product"></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
+<p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View + Trade permissions, with Transfer disabled. Configure COINBASE_ADVANCED_API_KEY, COINBASE_ADVANCED_API_SECRET, COINBASE_ADVANCED_ORDER_ENABLED=true, an explicit spot allowlist, a small quote cap, and strict open/daily order limits as Worker secrets. Do not enable this until you have verified the account, region eligibility, balances and the exact order preview.</p><p class="note">Every preview is bound server-side to its exact product, side, size, limit price and fee. It expires after 60 seconds and can authorize only one manual confirmation; the submit request cannot change the previewed order details. Real-money auto-entry is not enabled.</p>
+<div class="coinbase-connect-shell">
+<div class="coinbase-connect-top"><div><div class="eyebrow">SECURE EXCHANGE LINK</div><h3>Coinbase connection center</h3><p class="muted">Server-side CDP authentication · read-only account sync · guarded manual orders</p></div><div class="connection-sync"><span class="feed-pill" id="coinbaseSyncState">NOT CHECKED</span><small id="coinbaseLastSync">No authenticated account check yet</small></div></div>
+<div class="connection-grid" id="coinbaseConnectionGrid">
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Worker credentials</strong><small>Waiting for secure configuration</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>API authentication</strong><small>Preflight not run</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>View permission</strong><small>Not verified</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Trade permission</strong><small>Not verified</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Transfer disabled</strong><small>Not verified</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Spot products</strong><small>Not verified</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Available balances</strong><small>Not verified</small></div></div>
+<div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Manual execution guard</strong><small>Locked until every check passes</small></div></div>
+</div>
+<div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE EXCHANGE BALANCES</div><div id="coinbaseBalances" class="balance-grid"><span class="muted">Run account preflight to retrieve spendable balances.</span></div></div><div class="connection-data-card"><div class="label">APPROVED SPOT PRODUCTS</div><div id="coinbaseProducts" class="product-list">Products appear after successful account and market checks.</div><div class="muted" id="coinbaseLimits">Order cap and daily/open-order limits are not verified.</div></div></div>
+<p class="connection-footnote">Account and balance status refresh automatically every 5 minutes while REAL mode is selected and the dashboard is open. This is read-only synchronization: it never places, changes or cancels an order. API keys stay in Cloudflare Worker Secrets; this page never asks for your private key.</p>
+</div>
+<div class="controls"><button id="livePreflight" type="button">Verify / refresh Coinbase account</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
+<div class="controls"><label>SPOT product<br><select class="live-input" id="liveProduct"><option value="">Run account preflight first</option></select></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
 <pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Configure CDP credentials only through Cloudflare Worker secrets; never paste them into chat or the browser.</pre></section>
 <section class="panel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
 <section class="panel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
@@ -258,20 +280,203 @@ async function refreshLiveOrders(){
     fee_currency_warning:"A commission amount without a confirmed currency is not sufficient for accurate net P&L."
   },null,2);
 }
+let coinbaseStaticStatus=null;
+let coinbasePreflightResult=null;
+let coinbasePreflightAtMs=0;
+let coinbasePreflightInFlight=null;
+const COINBASE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
+
+function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePreflightResult,checkedAtMs=coinbasePreflightAtMs){
+  const permissions=result?.permissions||null;
+  const hasPreflight=!!permissions&&result?.status!=="provider_check_failed";
+  const ready=result?.status==="preflight_ready_for_manual_order_preview";
+  const products=Array.isArray(result?.products)?result.products:[];
+  const eligible=Array.isArray(result?.eligible_products)?result.eligible_products:[];
+  const balances=result?.balances&&typeof result.balances==="object"?result.balances:{};
+  const configured=status?.credentials_configured===true;
+  const checks=[
+    {title:"Worker credentials",detail:configured?"CDP key and private key are present in Worker Secrets":"Add CDP credentials only in Cloudflare Worker Secrets",ok:configured,known:true},
+    {title:"API authentication",detail:hasPreflight?"Coinbase key authenticated successfully":configured?"Authenticated preflight not completed":"Waiting for secure credentials",ok:hasPreflight,known:configured},
+    {title:"View permission",detail:hasPreflight?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasPreflight},
+    {title:"Trade permission",detail:hasPreflight?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasPreflight},
+    {title:"Transfer disabled",detail:hasPreflight?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasPreflight},
+    {title:"Spot products",detail:hasPreflight?(eligible.length?eligible.length+" eligible product(s)":products.length+" checked · none eligible"):"Not verified",ok:ready&&eligible.length>0,known:hasPreflight},
+    {title:"Available balances",detail:hasPreflight?(Object.keys(balances).length?Object.keys(balances).length+" currency balance(s) loaded":"No eligible balances returned"):"Not verified",ok:hasPreflight&&Object.keys(balances).length>0,known:hasPreflight},
+    {title:"Manual execution guard",detail:result?.order_submission_available===true?"Manual order path passed dynamic preflight":"Locked until Trade permission, Worker switch, allowlist, quote cap and order limits pass",ok:result?.order_submission_available===true,known:hasPreflight}
+  ];
+  const grid=$("coinbaseConnectionGrid");
+  if(grid){
+    grid.replaceChildren();
+    for(const item of checks){
+      const tile=document.createElement("div");
+      tile.className="connection-tile";
+      const dot=document.createElement("span");
+      dot.className="connection-dot "+(!item.known?"pending":item.ok?"good":"bad");
+      const copy=document.createElement("div");
+      const title=document.createElement("strong");
+      title.textContent=item.title;
+      const detail=document.createElement("small");
+      detail.textContent=item.detail;
+      copy.append(title,detail);
+      tile.append(dot,copy);
+      grid.append(tile);
+    }
+  }
+  const syncState=$("coinbaseSyncState");
+  const syncTime=$("coinbaseLastSync");
+  if(syncState){
+    syncState.textContent=!configured?"NOT CONFIGURED":!hasPreflight?"PREFLIGHT REQUIRED":ready?"ACCOUNT VERIFIED": "CHECKS BLOCKED";
+    syncState.className="feed-pill "+(!configured||!hasPreflight?"stale":ready?"live":"offline");
+  }
+  if(syncTime){
+    syncTime.textContent=checkedAtMs?("Last read-only sync · "+new Date(checkedAtMs).toLocaleString()):"No authenticated account check yet";
+  }
+  const balanceBox=$("coinbaseBalances");
+  if(balanceBox){
+    balanceBox.replaceChildren();
+    const rows=Object.entries(balances).filter(([currency,value])=>/^[A-Z0-9]{2,12}$/.test(currency)&&/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(String(value)));
+    if(!hasPreflight||!rows.length){
+      const empty=document.createElement("span");
+      empty.className="muted";
+      empty.textContent=hasPreflight?"No available eligible currency balances were returned.":"Run account preflight to retrieve spendable balances.";
+      balanceBox.append(empty);
+    }else{
+      for(const [currency,value] of rows){
+        const pill=document.createElement("div");
+        pill.className="balance-pill";
+        const amount=document.createElement("strong");
+        amount.textContent=String(value);
+        const label=document.createElement("small");
+        label.textContent=currency+" · available";
+        pill.append(amount,label);
+        balanceBox.append(pill);
+      }
+    }
+  }
+  const productBox=$("coinbaseProducts");
+  if(productBox){
+    productBox.replaceChildren();
+    if(!hasPreflight||!eligible.length){
+      const empty=document.createElement("span");
+      empty.className="muted";
+      empty.textContent=hasPreflight?"No allowlisted SPOT product passed current account checks.":"Products appear after successful account and market checks.";
+      productBox.append(empty);
+    }else{
+      for(const productId of eligible){
+        const chip=document.createElement("span");
+        chip.className="product-chip";
+        chip.textContent=String(productId);
+        productBox.append(chip);
+      }
+    }
+  }
+  const limits=$("coinbaseLimits");
+  if(limits){
+    const caps=[];
+    if(status?.max_order_quote_configured) caps.push("max quote "+String(status.max_order_quote));
+    else caps.push("quote cap missing");
+    caps.push("open orders "+String(status?.max_open_orders??"—"));
+    caps.push("daily orders "+String(status?.max_daily_orders??"—"));
+    caps.push("execution switch "+(status?.order_execution_configured?"ON":"OFF"));
+    limits.textContent=caps.join(" · ");
+  }
+  const summary=[];
+  summary.push(configured?"Server-side credentials configured":"Server-side credentials missing");
+  summary.push(status?.allowed_products_configured?"product allowlist set":"product allowlist missing");
+  summary.push(status?.max_order_quote_configured?"quote cap "+String(status.max_order_quote):"quote cap missing");
+  if(hasPreflight&&Array.isArray(result.blockers)&&result.blockers.length)summary.push(...result.blockers);
+  else if(ready)summary.push(eligible.join(", "));
+  $("liveSummary").textContent=summary.join(" · ");
+  const submitReady=result?.order_submission_available===true&&permissions?.can_trade===true&&ready;
+  $("liveState").textContent=submitReady?"ACCOUNT VERIFIED · MANUAL ORDER PREVIEW READY"
+    :ready?"ACCOUNT READ-ONLY VERIFIED · ORDER GUARD LOCKED"
+      :hasPreflight?"COINBASE CHECKS BLOCKED":configured?"ACCOUNT PREFLIGHT REQUIRED":"LIVE ORDERS LOCKED · SETUP REQUIRED";
+  $("liveState").className="tag "+(submitReady?"good":"bad");
+  $("livePreview").disabled=!ready||eligible.length===0;
+  $("liveSubmit").disabled=true;
+  if(currentTradingMode==="real"){
+    $("modeBadge").textContent=submitReady?"REAL SELECTED · MANUAL CONFIRMATION":"REAL SELECTED · ORDERS LOCKED";
+    $("modeBadge").className="tag "+(submitReady?"good":"bad");
+  }
+  const select=$("liveProduct");
+  if(select){
+    const previous=select.value;
+    select.replaceChildren();
+    const options=hasPreflight?eligible:[];
+    if(!options.length){
+      const option=document.createElement("option");
+      option.value="";
+      option.textContent=hasPreflight?"No eligible allowlisted SPOT product":"Verify Coinbase account first";
+      select.append(option);
+    }else{
+      for(const productId of options){
+        const option=document.createElement("option");
+        option.value=String(productId);
+        option.textContent=String(productId);
+        select.append(option);
+      }
+      select.value=options.includes(previous)?previous:options[0];
+    }
+    select.disabled=!options.length;
+  }
+}
+
+async function runCoinbasePreflight({silent=false,force=false}={}){
+  if(coinbasePreflightInFlight)return coinbasePreflightInFlight;
+  if(!token||currentTradingMode!=="real")return null;
+  if(!force&&coinbasePreflightResult&&Date.now()-coinbasePreflightAtMs<COINBASE_ACCOUNT_SYNC_INTERVAL_MS)return coinbasePreflightResult;
+  coinbasePreflightInFlight=(async()=>{
+    if(!silent){
+      $("livePreflight").disabled=true;
+      $("livePreflight").textContent="Verifying account…";
+    }
+    try{
+      const result=await api("/api/live/preflight",{method:"POST",body:"{}"});
+      coinbasePreflightResult=result;
+      coinbasePreflightAtMs=Date.now();
+      renderCoinbaseConnection(coinbaseStaticStatus,result,coinbasePreflightAtMs);
+      $("liveDetails").textContent=JSON.stringify({
+        status:result.status,
+        permissions:result.permissions,
+        eligible_products:result.eligible_products||[],
+        products:result.products||[],
+        balances:result.balances||{},
+        blockers:result.blockers||[],
+        account_count:result.account_count??null,
+        account_pagination_complete:result.account_pagination_complete??null,
+        order_submission_available:result.order_submission_available===true,
+        live_trading_enabled:false,
+        automatic_live_entries_enabled:false,
+        sync_mode:"read_only_account_preflight"
+      },null,2);
+      return result;
+    }catch(error){
+      coinbasePreflightResult={status:"provider_check_failed",blockers:[error.message],permissions:null};
+      coinbasePreflightAtMs=Date.now();
+      renderCoinbaseConnection(coinbaseStaticStatus,coinbasePreflightResult,coinbasePreflightAtMs);
+      $("liveDetails").textContent="Coinbase account preflight failed: "+error.message;
+      throw error;
+    }finally{
+      if(!silent){
+        $("livePreflight").disabled=false;
+        $("livePreflight").textContent="Verify / refresh Coinbase account";
+      }
+      coinbasePreflightInFlight=null;
+    }
+  })();
+  return coinbasePreflightInFlight;
+}
+
 async function loadLiveStatus(){
   try{
     const status=await api("/api/live/status");
-    $("liveState").textContent=status.order_submission_configured?"ACCOUNT PREFLIGHT REQUIRED":"LIVE ORDERS LOCKED · SETUP REQUIRED";
-    $("liveState").className="tag "+(status.order_submission_configured?"good":"bad");
-    $("liveSummary").textContent=(status.credentials_configured?"CDP credentials configured":"CDP credentials not configured")+
-      " · allowlist "+(status.allowed_products_configured?"set":"missing")+
-      " · quote cap "+(status.max_order_quote_configured?String(status.max_order_quote):"missing")+
-      " · fresh Trade-permission preflight required";
-    $("livePreview").disabled=!status.order_preview_available;
+    coinbaseStaticStatus=status;
+    renderCoinbaseConnection(status,coinbasePreflightResult,coinbasePreflightAtMs);
     $("liveSubmit").disabled=true;
     livePreviewResult=null;
   }catch(error){
-    $("liveState").textContent="PREFLIGHT UNAVAILABLE";
+    coinbaseStaticStatus=null;
+    $("liveState").textContent="CONNECTION STATUS UNAVAILABLE";
     $("liveState").className="tag bad";
     $("liveSummary").textContent=error.message;
     $("livePreview").disabled=true;
@@ -299,8 +504,13 @@ async function loadTradingMode(){
     $("autoToggle").disabled=!demo||automation.halted||automation.capital_setup_required;
     $("autoToggle").title=demo?"Paper-only automatic entries. No real funds are used.":"Switch back to DEMO before enabling paper auto-entry.";
     $("realModeBtn").title=state.real?.order_submission_available===true
-      ?"Real order route reported available; confirm safety review before proceeding."
+      ?"Manual spot orders only after fresh Coinbase preflight, preview and explicit confirmation."
       :"Manual spot orders require configured CDP Trade permission, execution secret, balance, preview and explicit confirmation.";
+    if(!demo&&state.real?.connection_status==="credentials_configured_preflight_required"){
+      await runCoinbasePreflight({silent:true}).catch(()=>null);
+    }else if(demo){
+      $("liveSubmit").disabled=true;
+    }
   }catch(error){
     $("modeBadge").textContent="MODE STATUS UNAVAILABLE";
     $("modeBadge").className="tag bad";
@@ -327,20 +537,11 @@ async function selectTradingMode(mode){
 $("demoModeBtn").addEventListener("click",()=>selectTradingMode("demo"));
 $("realModeBtn").addEventListener("click",()=>selectTradingMode("real"));
 $("livePreflight").addEventListener("click",async()=>{
-  $("livePreflight").disabled=true;$("livePreflight").textContent="Checking…";
   try{
-    const result=await api("/api/live/preflight",{method:"POST",body:"{}"});
-    $("liveDetails").textContent=JSON.stringify(result,null,2);
-    const ready=result.status==="preflight_ready_for_manual_order_preview";
-    const submitReady=ready&&result.order_submission_available===true&&result.permissions?.can_trade===true;
-    $("liveState").textContent=submitReady?"TRADE PREFLIGHT READY · PREVIEW REQUIRED":ready?"VIEW PREFLIGHT READY · TRADE PERMISSION REQUIRED":"LIVE LOCKED · "+String(result.status||"BLOCKED").toUpperCase();
-    $("liveState").className="tag "+(submitReady?"good":"bad");
-    if(currentTradingMode==="real")$("modeBadge").textContent=submitReady?"REAL SELECTED · MANUAL CONFIRMATION":"REAL SELECTED · ORDERS LOCKED";
-    $("liveSummary").textContent=(result.eligible_products||[]).join(", ")||((result.blockers||[]).join(" · ")||"No eligible product");
-    $("livePreview").disabled=!ready;
-    if(ready&&result.eligible_products?.length&&!$("liveProduct").value)$("liveProduct").value=result.eligible_products[0];
-  }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
-  finally{$("livePreflight").disabled=false;$("livePreflight").textContent="Check account & permissions";}
+    await runCoinbasePreflight({force:true});
+  }catch(error){
+    $("liveSummary").textContent="Account refresh failed · "+error.message;
+  }
 });
 function clearLivePreview(){
   livePreviewResult=null;
@@ -393,6 +594,8 @@ $("liveSubmit").addEventListener("click",async()=>{
     $("liveState").textContent=result.status==="PENDING"?"ORDER ACCEPTED · RECONCILE STATUS":"ORDER RESULT · CHECK DETAILS";
     $("liveState").className="tag "+(result.status==="PENDING"?"good":"bad");
     await refreshLiveOrders();
+    coinbasePreflightAtMs=0;
+    await runCoinbasePreflight({silent:true,force:true}).catch(()=>null);
   }catch(error){livePreviewResult=null;$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
   finally{$("liveSubmit").disabled=true;$("liveSubmit").textContent="Confirm & submit REAL order";}
 });
@@ -553,4 +756,19 @@ async function runTournament(){
 }
 $("runTournament").addEventListener("click",runTournament);
 async function boot(){try{const healthResponse=await fetch("/api/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Backend health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
+setInterval(()=>{
+  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true){
+    runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
+      $("coinbaseSyncState").textContent="SYNC FAILED";
+      $("coinbaseSyncState").className="feed-pill offline";
+      $("coinbaseLastSync").textContent="Account refresh failed · "+error.message;
+    });
+  }
+},COINBASE_ACCOUNT_SYNC_INTERVAL_MS);
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true&&
+     (!coinbasePreflightAtMs||Date.now()-coinbasePreflightAtMs>=COINBASE_ACCOUNT_SYNC_INTERVAL_MS)){
+    runCoinbasePreflight({silent:true}).catch(()=>{});
+  }
+});
 </script></body></html>
