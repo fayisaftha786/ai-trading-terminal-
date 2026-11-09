@@ -132,3 +132,99 @@ export function deriveSchedulerStatus({
   };
   return { status: statuses[lastScheduledScanStatus] || "unknown", ageMs };
 }
+
+
+/**
+ * Pause new paper entries after a short run of consecutive realised losses.
+ * The latest closed trade must be first in the supplied array.
+ */
+export function assessLossCooldown(recentClosedTrades, nowMs = Date.now()) {
+  const rows = Array.isArray(recentClosedTrades) ? recentClosedTrades.slice(0, 3) : [];
+  let lossStreak = 0;
+  for (const row of rows) {
+    const pnl = Number(row?.pnl_usd);
+    if (!Number.isFinite(pnl)) {
+      return { blocked: true, lossStreak, remainingMs: null, reason: "recent_trade_result_invalid" };
+    }
+    if (pnl < 0) lossStreak += 1;
+    else break;
+  }
+  if (lossStreak < 2) {
+    return { blocked: false, lossStreak, remainingMs: 0, reason: null };
+  }
+  const lastClosedAt = Number(rows[0]?.closed_at_ms);
+  if (!Number.isFinite(lastClosedAt) || lastClosedAt <= 0 ||
+      !Number.isFinite(nowMs) || lastClosedAt > nowMs + 5000) {
+    return { blocked: true, lossStreak, remainingMs: null, reason: "loss_cooldown_timestamp_invalid" };
+  }
+  const cooldownMs = lossStreak >= 3 ? 12 * 60 * 60 * 1000 : 4 * 60 * 60 * 1000;
+  const remainingMs = Math.max(0, cooldownMs - Math.max(0, nowMs - lastClosedAt));
+  return {
+    blocked: remainingMs > 0,
+    lossStreak,
+    remainingMs,
+    reason: remainingMs > 0
+      ? (lossStreak >= 3 ? "three_loss_cooldown_12h" : "two_loss_cooldown_4h")
+      : null
+  };
+}
+
+/**
+ * Reduce PAPER risk as drawdown or recent losses increase; never increase
+ * above the configured base risk. At 4% drawdown, block new entries early.
+ */
+export function assessAdaptiveRisk({ drawdownPct, lossStreak = 0 }) {
+  if (!Number.isFinite(drawdownPct) || drawdownPct < 0) {
+    return { allowed: false, multiplier: 0, reason: "drawdown_unavailable" };
+  }
+  if (drawdownPct >= 4) {
+    return { allowed: false, multiplier: 0, reason: "preemptive_drawdown_pause" };
+  }
+  let multiplier = drawdownPct >= 3 ? 0.25
+    : drawdownPct >= 2 ? 0.5
+      : drawdownPct >= 1 ? 0.75 : 1;
+  const losses = Number.isSafeInteger(lossStreak) && lossStreak > 0 ? lossStreak : 0;
+  if (losses >= 3) multiplier = Math.min(multiplier, 0.25);
+  else if (losses >= 2) multiplier = Math.min(multiplier, 0.5);
+  return {
+    allowed: true,
+    multiplier,
+    reason: multiplier < 1 ? "adaptive_risk_reduced" : null
+  };
+}
+
+/**
+ * Cost-aware long trailing stop. The stop can only move upward, never loosen.
+ * It is intentionally a simulated PAPER exit rule, not an exchange-native stop.
+ */
+export function updateTrailingStop({
+  entryPrice,
+  currentStop,
+  previousHighWater,
+  currentBid,
+  roundTripCostBps = 0
+}) {
+  if (![entryPrice, currentStop, currentBid, roundTripCostBps].every(Number.isFinite) ||
+      entryPrice <= 0 || currentStop <= 0 || currentBid <= 0 || roundTripCostBps < 0) {
+    return { ok: false, reason: "trailing_stop_inputs_invalid" };
+  }
+  const previousHigh = Number.isFinite(previousHighWater) && previousHighWater > 0
+    ? previousHighWater : entryPrice;
+  const highWaterBid = Math.max(entryPrice, previousHigh, currentBid);
+  const costPct = roundTripCostBps / 100;
+  const activationPct = Math.max(2, (costPct * 2) + 0.75);
+  const distancePct = Math.max(0.9, costPct + 0.35);
+  const active = highWaterBid >= entryPrice * (1 + activationPct / 100);
+  const candidateStop = active ? highWaterBid * (1 - distancePct / 100) : currentStop;
+  const stopLoss = Math.max(currentStop, candidateStop);
+  const changed = highWaterBid > previousHigh + 1e-10 || stopLoss > currentStop + 1e-10;
+  return {
+    ok: true,
+    active,
+    changed,
+    highWaterBid,
+    stopLoss,
+    activationPct,
+    distancePct
+  };
+}
