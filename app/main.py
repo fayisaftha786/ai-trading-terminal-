@@ -28,6 +28,7 @@ from app.services.risk import safe_cost_assumptions, validate_risk_profile
 from app.services.testnet import (BinanceSpotTestnet, TestnetOrderRejected,
                                    TestnetOrderUncertain, TestnetUnavailable)
 from app.services.strategy import analyze_candles, score_solana_token
+from app.services.strategy_lab import evaluate_strategy_candidates
 from app.services.workers import WorkerManager
 from app.settings import Settings, settings
 from app.storage import Storage
@@ -667,9 +668,20 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
 
     @app.get("/api/strategies/multi/{symbol:path}")
     async def analyze_market(symbol: str, timeframe: str = "1h", limit: int = 300) -> dict[str, Any]:
-        result = await market_data.cex_strategy_data(symbol, timeframe=timeframe, limit=limit)
+        if not symbol.strip() or len(symbol) > 40:
+            raise HTTPException(status_code=422, detail="A valid exchange market symbol is required")
+        if limit < 150 or limit > 1000:
+            raise HTTPException(status_code=422, detail="Candle limit must be between 150 and 1000")
+        result = await market_data.cex_strategy_data(symbol.strip(), timeframe=timeframe, limit=limit)
         if result.get("status") != "live":
             raise HTTPException(status_code=502, detail=result.get("error") or "Market analysis unavailable")
+        higher = result.get("higher_timeframe") or {}
+        result["strategy_research"] = evaluate_strategy_candidates(
+            result.get("candles", []),
+            higher.get("candles", []),
+            higher_interval_ms=result.get("higher_timeframe_interval_ms", 0),
+            now_ms=time.time() * 1000,
+        )
         return result
 
     @app.get("/api/workers")
