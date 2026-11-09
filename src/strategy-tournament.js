@@ -3,7 +3,7 @@ const SIX_HOUR_MS = 6 * HOUR_MS;
 const DEFAULTS = Object.freeze({
   initialEquity: 100,
   allocationPct: 0.1,
-  feeBpsPerSide: 15,
+  feeBpsPerSide: 60, // Match the conservative PAPER profile until verified account-tier fees are configured.
   slippageBps: 10,
   maxBarsInTrade: 72,
   monteCarloIterations: 500,
