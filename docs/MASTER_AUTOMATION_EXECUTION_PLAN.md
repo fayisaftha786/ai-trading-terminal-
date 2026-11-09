@@ -5,7 +5,7 @@
 The project has two distinct PAPER surfaces:
 
 1. **Android Local PAPER:** Android app, public market data and a local virtual ledger. Manual entry and close require fresh quotes; stale cached prices fail closed.
-2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor at approximately 15-minute intervals.
+2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor. Production is currently 15-minute; PR #66 proposes a 90-second cadence, not yet deployed.
 
 The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet execution remain disabled. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
 
@@ -26,7 +26,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet ex
 - Simulated stop/target defaults are 1% and 3%; estimated fees are 15 bps per side and slippage is 10 bps. Daily, weekly and overall drawdown limits are separate guards.
 - Adaptive risk reduces position size as drawdown/loss streaks rise. Consecutive losses, data-quality streaks, stale scheduler heartbeat and total drawdown can latch-stop new entries.
 - The kill switch disables new entries while scheduled monitoring continues. Reset requires no open PAPER positions and never silently turns auto-entry back on.
-- The 15-minute exit monitor is simulated, not an exchange-native protective order. Gaps and outages can make simulated fills materially worse than the trigger.
+- The 15-minute production / proposed 90-second exit monitor is simulated, not an exchange-native protective order. Gaps and outages can make simulated fills materially worse than the trigger.
 
 ## Current source and validation state
 
@@ -72,7 +72,9 @@ The current production entry path remains the conservative 1H trend-continuation
 - Volatility breakout above the prior 20-bar high with relative-volume and directional-strength confirmation.
 - Range mean reversion with low ADX and confirmed Bollinger-band reclaim.
 
-Before any research hypothesis is promoted, require chronological out-of-sample tests, walk-forward folds, look-ahead and recursive-indicator checks, realistic spread/fee/slippage stress, regime and asset segmentation, and forward PAPER evidence. Collect at least 30 calendar days of forward PAPER observations and a meaningful sample of trades. A strong backtest, clean CI run, or PAPER win streak does not establish future profitability. Do not add Martingale, unbounded DCA, unprotected grids or high leverage.
+PR #66 adds a stronger offline research gate: at least 3,000 clean 1H and 500 clean 6H candles, an aligned higher-timeframe warmup, four chronological non-overlapping test folds of at least 28 days each, an untouched final holdout, per-strategy out-of-sample trade counts, 2x transaction-cost stress and a deterministic 500-path trade-order / moving-block Monte Carlo sensitivity test. The history requirement is roughly 125 days; until enough valid history accumulates, the app should show insufficient history rather than manufacture a walk-forward pass. Monte Carlo estimates from a small historical trade list are not forecasts and are sample-gated at 30 trades.
+
+Before any research hypothesis is promoted, require look-ahead/prefix-invariance checks, recursive-indicator warmup stability, realistic spread/fee/slippage stress, regime and asset segmentation, and at least 30 calendar days of forward PAPER evidence with a meaningful sample. A strong backtest, clean CI run, or PAPER win streak does not establish future profitability. Do not add Martingale, unbounded DCA, unprotected grids or high leverage.
 
 ## Absolute guardrails
 
