@@ -92,13 +92,26 @@ export function buildFreshBidMarks(
  * observation in that UTC period.
  */
 export function resolveRiskBaseline({
-  periodKey, storedPeriodKey, storedBaseline, equity, closedPnl, unmarkedPositions
+  periodKey, storedPeriodKey, storedBaseline, equity, closedPnl, unmarkedPositions,
+  tradeCount
 }) {
-  if (storedPeriodKey === periodKey && Number.isFinite(storedBaseline)) {
-    return { baseline: storedBaseline, initialized: true, shouldPersist: false };
-  }
+  // Never infer a fresh baseline while an open position cannot be valued.
   if (unmarkedPositions > 0) {
     return { baseline: null, initialized: false, shouldPersist: false };
+  }
+  // An empty ledger has no realised or unrealised trading loss. Re-anchor the
+  // daily/weekly baseline to current equity instead of reusing stale app_state
+  // values left by an older ledger or capital profile.
+  if (tradeCount === 0) {
+    if (!Number.isFinite(equity)) {
+      return { baseline: null, initialized: false, shouldPersist: false };
+    }
+    const changed = storedPeriodKey !== periodKey ||
+      !Number.isFinite(storedBaseline) || Math.abs(storedBaseline - equity) > 1e-9;
+    return { baseline: equity, initialized: true, shouldPersist: changed };
+  }
+  if (storedPeriodKey === periodKey && Number.isFinite(storedBaseline)) {
+    return { baseline: storedBaseline, initialized: true, shouldPersist: false };
   }
   const baseline = equity - closedPnl;
   if (!Number.isFinite(baseline)) {
