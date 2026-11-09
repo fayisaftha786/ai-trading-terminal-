@@ -28,3 +28,20 @@ test("production deployment runs automatically on main pushes", () => {
   assert.match(deploymentWorkflow, /push:\s+branches:\s+- main/);
   assert.match(deploymentWorkflow, /workflow_dispatch:/);
 });
+
+
+const engineSource = readFileSync(new URL("../src/engine.js", import.meta.url), "utf8");
+const dashboardSource = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+
+test("dashboard API exposes explicit market-feed freshness diagnostics", () => {
+  assert.match(engineSource, /currentMarketFeedDiagnostics/);
+  assert.match(engineSource, /freshness_state: marketFeedFreshness\.state/);
+  assert.match(engineSource, /freshness_reason: marketFeedFreshness\.reason/);
+  assert.match(engineSource, /status: currentMarketStatus/);
+});
+
+test("dashboard UI never labels an omitted market-feed status as UNKNOWN", () => {
+  assert.match(dashboardSource, /feedStatus=currentFeed\.status\|\|\(currentFeed\.healthy===true\?"healthy":Number\(currentFeed\.healthy_market_count\|\|0\)>0\?"partial":"unavailable"\)/);
+  assert.match(dashboardSource, /currentFeed\.freshness_state/);
+  assert.match(dashboardSource, /currentFeed\.freshness_reason/);
+});
