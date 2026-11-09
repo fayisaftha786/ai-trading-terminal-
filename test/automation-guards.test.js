@@ -6,6 +6,9 @@ import {
   assessAdaptiveRisk,
   assessLossCooldown,
   deriveSchedulerStatus,
+  normalizeProviderFailureRows,
+  normalizeScanIssueRows,
+  parseScanIssueSummaries,
   shouldHaltPaperAutomation,
   updateTrailingStop
 } from "../src/automation-guards.js";
@@ -17,6 +20,7 @@ function healthyMarket(symbol) {
   return {
     symbol,
     status: "live",
+    market_data_provider: "coinbase_exchange",
     ticker_time: new Date(NOW - 1000).toISOString(),
     bid: 100,
     ask: 100.01,
@@ -29,6 +33,12 @@ function healthyMarket(symbol) {
     },
     six_hour_audit_summary: {
       ok: true, valid_closed_bars: 150, issues: [], last_closed_candle_ms: NOW - (2 * 21600000)
+    },
+    data_quality: {
+      ticker_provider: "coinbase_exchange",
+      book_provider: "coinbase_exchange",
+      one_hour_provider: "coinbase_exchange",
+      six_hour_provider: "coinbase_exchange"
     }
   };
 }
@@ -294,4 +304,54 @@ test("provider snapshot failures report the provider reason and skip quote/order
   assert.deepEqual(result.issues, [
     { symbol: "SOL/USD", reason: "provider_unavailable:provider_rate_limited" }
   ]);
+});
+
+
+test("market-universe gate rejects mixed or missing data-provider provenance", () => {
+  const symbol = "BTC/USD";
+  const mixed = healthyMarket(symbol);
+  mixed.data_quality.six_hour_provider = "bitstamp_spot";
+  const mixedResult = assessMarketUniverse([mixed], [symbol], NOW);
+  assert.ok(mixedResult.issues[0].reason.includes("market_data_provider_mismatch"));
+
+  const missing = healthyMarket(symbol);
+  delete missing.market_data_provider;
+  const missingResult = assessMarketUniverse([missing], [symbol], NOW);
+  assert.ok(missingResult.issues[0].reason.includes("market_data_provider_missing"));
+});
+
+
+test("scan diagnostics recover SOL provider issues from legacy stored summary strings", () => {
+  const runtime = {
+    last_scan_error: "SOL/USD: provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,",
+    last_scheduled_scan_error: "SOL/USD: provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,"
+  };
+  const issues = normalizeScanIssueRows(runtime);
+  assert.deepEqual(issues, [{
+    symbol: "SOL/USD",
+    reason: "provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,"
+  }]);
+  assert.deepEqual(normalizeProviderFailureRows(runtime, issues), [{
+    symbol: "SOL/USD",
+    reason: "provider_unavailable,ticker_stale_or_timestamp_invalid,orderbook_snapshot_stale_or_missing,",
+    primary_error_code: null,
+    backup_error_code: null,
+    inferred_from_scan_summary: true
+  }]);
+});
+
+test("diagnostic parser handles multiple markets, deduplicates and respects real stored issue rows", () => {
+  assert.deepEqual(parseScanIssueSummaries(
+    "BTC/USD: spread_too_wide;SOL/USD: provider_unavailable",
+    "SOL/USD: provider_unavailable;ETH/USD: orderbook_snapshot_stale_or_missing"
+  ), [
+    { symbol: "BTC/USD", reason: "spread_too_wide" },
+    { symbol: "SOL/USD", reason: "provider_unavailable" },
+    { symbol: "ETH/USD", reason: "orderbook_snapshot_stale_or_missing" }
+  ]);
+
+  assert.deepEqual(normalizeScanIssueRows({
+    market_feed_issues: [{ symbol: "SOL/USD", reason: "provider_unavailable" }],
+    last_scan_error: "BTC/USD: stale"
+  }), [{ symbol: "SOL/USD", reason: "provider_unavailable" }]);
 });

@@ -37,6 +37,20 @@ export function assessMarketUniverse(
       continue;
     }
 
+    const selectedProvider = market.market_data_provider;
+    const quality = market.data_quality || {};
+    const declaredProviders = [
+      quality.ticker_provider,
+      quality.book_provider,
+      quality.one_hour_provider,
+      quality.six_hour_provider
+    ];
+    if (typeof selectedProvider !== "string" || !selectedProvider) {
+      marketIssues.push("market_data_provider_missing");
+    } else if (declaredProviders.some((provider) => provider !== selectedProvider)) {
+      marketIssues.push("market_data_provider_mismatch");
+    }
+
     if (!isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs) ||
         !isFreshTickerEvent(market, nowMs, maxQuoteAgeMs)) {
       marketIssues.push("ticker_stale_or_timestamp_invalid");
@@ -248,4 +262,63 @@ export function updateTrailingStop({
     activationPct,
     distancePct
   };
+}
+
+
+/**
+ * Recover a compact, deduplicated list of per-market issue codes from the
+ * persisted human-readable error string. This keeps the health API useful when
+ * an older Durable Object runtime contains summary text but no issue array.
+ */
+export function parseScanIssueSummaries(...summaries) {
+  const parsed = [];
+  const seen = new Set();
+  for (const summary of summaries) {
+    if (typeof summary !== "string" || !summary.trim()) continue;
+    for (const part of summary.split(";")) {
+      const value = part.trim();
+      const separator = value.indexOf(":");
+      if (separator <= 0) continue;
+      const symbol = value.slice(0, separator).trim();
+      const reason = value.slice(separator + 1).trim();
+      if (!symbol || !reason) continue;
+      const key = symbol + "|" + reason;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      parsed.push({ symbol, reason });
+    }
+  }
+  return parsed;
+}
+
+export function normalizeScanIssueRows(runtime = {}) {
+  const stored = Array.isArray(runtime.market_feed_issues)
+    ? runtime.market_feed_issues.filter((issue) =>
+        issue && typeof issue.reason === "string"
+      ).slice(0, 12)
+    : [];
+  if (stored.length) return stored;
+  return parseScanIssueSummaries(
+    runtime.last_scan_error,
+    runtime.last_scheduled_scan_error
+  ).slice(0, 12);
+}
+
+export function normalizeProviderFailureRows(runtime = {}, issues = []) {
+  const stored = Array.isArray(runtime.provider_failures)
+    ? runtime.provider_failures.filter((failure) =>
+        failure && typeof failure.symbol === "string" && typeof failure.reason === "string"
+      ).slice(0, 3)
+    : [];
+  if (stored.length) return stored;
+
+  return issues.filter((issue) => /provider_unavailable/.test(issue.reason || ""))
+    .slice(0, 3)
+    .map((issue) => ({
+      symbol: issue.symbol,
+      reason: String(issue.reason).slice(0, 120),
+      primary_error_code: null,
+      backup_error_code: null,
+      inferred_from_scan_summary: true
+    }));
 }

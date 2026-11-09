@@ -66,6 +66,10 @@ try {
   assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
   assert.equal(health.scan_diagnostics.expected_market_count, 3);
   assert.deepEqual(health.scan_diagnostics.issues, []);
+  assert.deepEqual(health.scan_diagnostics.provider_failures, []);
+  assert.deepEqual(health.scan_diagnostics.market_data_providers, []);
+  assert.deepEqual(health.scan_diagnostics.provider_failures, []);
+  assert.deepEqual(health.scan_diagnostics.market_data_providers, []);
   assert.equal(health.scheduler.status, "starting", "scheduler must be explicit before its first alarm");
   assert.equal(health.scheduler.last_alarm_age_ms, null, "alarm age must be null before the first alarm");
   assert.equal(health.scheduler.last_scheduled_scan_status, "not_run");
