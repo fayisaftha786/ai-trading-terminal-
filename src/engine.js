@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -19,59 +19,6 @@ function jsonResponse(data, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store, private" }
   });
-}
-
-function parseScanIssueSummaries(...summaries) {
-  const parsed = [];
-  const seen = new Set();
-  for (const summary of summaries) {
-    if (typeof summary !== "string" || !summary.trim()) continue;
-    for (const part of summary.split(";")) {
-      const value = part.trim();
-      const separator = value.indexOf(":");
-      if (separator <= 0) continue;
-      const symbol = value.slice(0, separator).trim();
-      const reason = value.slice(separator + 1).trim();
-      if (!symbol || !reason) continue;
-      const key = symbol + "|" + reason;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      parsed.push({ symbol, reason });
-    }
-  }
-  return parsed;
-}
-
-function normalizeScanIssueRows(runtime) {
-  const stored = Array.isArray(runtime.market_feed_issues)
-    ? runtime.market_feed_issues.filter((issue) =>
-        issue && typeof issue.reason === "string"
-      ).slice(0, 12)
-    : [];
-  if (stored.length) return stored;
-  return parseScanIssueSummaries(
-    runtime.last_scan_error,
-    runtime.last_scheduled_scan_error
-  ).slice(0, 12);
-}
-
-function normalizeProviderFailureRows(runtime, issues) {
-  const stored = Array.isArray(runtime.provider_failures)
-    ? runtime.provider_failures.filter((failure) =>
-        failure && typeof failure.symbol === "string" && typeof failure.reason === "string"
-      ).slice(0, 3)
-    : [];
-  if (stored.length) return stored;
-
-  return issues.filter((issue) => /provider_unavailable/.test(issue.reason || ""))
-    .slice(0, 3)
-    .map((issue) => ({
-      symbol: issue.symbol,
-      reason: String(issue.reason).slice(0, 80),
-      primary_error_code: null,
-      backup_error_code: null,
-      inferred_from_scan_summary: true
-    }));
 }
 
 export class TradingEngine extends DurableObject {
