@@ -156,11 +156,35 @@ test("risk baseline waits for a fully marked portfolio", () => {
 test("risk baseline remains stable once initialized for a period", () => {
   const existing = resolveRiskBaseline({
     periodKey: "2026-11-07", storedPeriodKey: "2026-11-07", storedBaseline: 97.5,
-    equity: 120, closedPnl: 0, unmarkedPositions: 0
+    equity: 120, closedPnl: 0, unmarkedPositions: 0, tradeCount: 4
   });
   assert.equal(existing.initialized, true);
   assert.equal(existing.shouldPersist, false);
   assert.equal(existing.baseline, 97.5);
+});
+
+test("an empty paper ledger re-anchors a stale same-period risk baseline", () => {
+  const reset = resolveRiskBaseline({
+    periodKey: "2026-11-09", storedPeriodKey: "2026-11-09", storedBaseline: 9.85,
+    equity: 10, closedPnl: 0, unmarkedPositions: 0, tradeCount: 0
+  });
+  assert.deepEqual(reset, { baseline: 10, initialized: true, shouldPersist: true });
+});
+
+test("an empty paper ledger initializes a new UTC period at current equity", () => {
+  const reset = resolveRiskBaseline({
+    periodKey: "2026-11-09", storedPeriodKey: "2026-11-08", storedBaseline: 9.5,
+    equity: 10, closedPnl: 0, unmarkedPositions: 0, tradeCount: 0
+  });
+  assert.deepEqual(reset, { baseline: 10, initialized: true, shouldPersist: true });
+});
+
+test("an empty-ledger baseline still waits when an open position is unmarked", () => {
+  const waiting = resolveRiskBaseline({
+    periodKey: "2026-11-09", storedPeriodKey: "2026-11-09", storedBaseline: 9,
+    equity: 10, closedPnl: 0, unmarkedPositions: 1, tradeCount: 0
+  });
+  assert.deepEqual(waiting, { baseline: null, initialized: false, shouldPersist: false });
 });
 
 

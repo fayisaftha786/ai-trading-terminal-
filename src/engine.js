@@ -2161,10 +2161,13 @@ export class TradingEngine extends DurableObject {
       "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED' AND closed_at_ms>=?",
       weekStartMs
     ).toArray()[0]?.pnl || 0);
+    const ledgerTradeCount = Number(this.sql.exec(
+      "SELECT COUNT(*) AS count FROM trades"
+    ).toArray()[0]?.count || 0);
     const dayBaseline = resolveRiskBaseline({
       periodKey: dayKey, storedPeriodKey: this.getState("risk_day_key"),
       storedBaseline: this.getState("risk_day_baseline"), equity, closedPnl: closedToday,
-      unmarkedPositions: unmarked
+      unmarkedPositions: unmarked, tradeCount: ledgerTradeCount
     });
     if (dayBaseline.shouldPersist) {
       this.setState("risk_day_key", dayKey);
@@ -2174,7 +2177,7 @@ export class TradingEngine extends DurableObject {
     const weekBaseline = resolveRiskBaseline({
       periodKey: weekKey, storedPeriodKey: this.getState("risk_week_key"),
       storedBaseline: this.getState("risk_week_baseline"), equity, closedPnl: closedThisWeek,
-      unmarkedPositions: unmarked
+      unmarkedPositions: unmarked, tradeCount: ledgerTradeCount
     });
     if (weekBaseline.shouldPersist) {
       this.setState("risk_week_key", weekKey);
@@ -2186,6 +2189,11 @@ export class TradingEngine extends DurableObject {
       peak_equity_usd: peak, drawdown_pct_from_peak: drawdown,
       daily_equity_pnl_usd: dayBaseline.initialized ? equity - dayBaseline.baseline : null,
       weekly_equity_pnl_usd: weekBaseline.initialized ? equity - weekBaseline.baseline : null,
+      daily_risk_baseline_usd: dayBaseline.initialized ? dayBaseline.baseline : null,
+      weekly_risk_baseline_usd: weekBaseline.initialized ? weekBaseline.baseline : null,
+      daily_risk_baseline_initialized: dayBaseline.initialized,
+      weekly_risk_baseline_initialized: weekBaseline.initialized,
+      ledger_trade_count: ledgerTradeCount,
       risk_period_timezone: "UTC", last_updated_at_ms: nowMs
     };
   }
@@ -2375,8 +2383,16 @@ export class TradingEngine extends DurableObject {
         distance: "cost-aware; at least 0.9% below high-water bid",
         ratchet_only: true
       },
+      daily_equity_pnl_usd: portfolio.daily_equity_pnl_usd,
+      weekly_equity_pnl_usd: portfolio.weekly_equity_pnl_usd,
+      daily_risk_baseline_usd: portfolio.daily_risk_baseline_usd,
+      weekly_risk_baseline_usd: portfolio.weekly_risk_baseline_usd,
+      daily_risk_baseline_initialized: portfolio.daily_risk_baseline_initialized === true,
+      weekly_risk_baseline_initialized: portfolio.weekly_risk_baseline_initialized === true,
       soft_daily_loss_limit_usd: Number.isFinite(dailyLimit) ? dailyLimit * softFraction : null,
       soft_weekly_loss_limit_usd: Number.isFinite(weeklyLimit) ? weeklyLimit * softFraction : null,
+      daily_hard_loss_limit_usd: Number.isFinite(dailyLimit) ? dailyLimit : null,
+      weekly_hard_loss_limit_usd: Number.isFinite(weeklyLimit) ? weeklyLimit : null,
       daily_profit_lock_usd: Number.isFinite(initial) ? initial * risk.daily_profit_lock_pct / 100 : null
     };
   }
