@@ -23,6 +23,12 @@ Official references:
 - Jesse backtesting: https://docs.jesse.trade/docs/backtest/
 - NautilusTrader backtesting: https://nautilustrader.io/docs/latest/concepts/backtesting/
 
+## Runtime placement
+
+- The Python/FastAPI market-analysis endpoint exposes the lab using the exact higher-timeframe interval returned by the selected provider (4h or 6h).
+- The Cloudflare Free Worker uses its own Coinbase 1h/6h market snapshots and displays the same three hypothesis families in the Market Intelligence dashboard.
+- Neither display or scoring path feeds `AutoPaperEngine`, `openPaperTrade` or a live order endpoint. Candidate output is diagnostics only.
+
 ## Strategy families in this first research version
 
 ### 1. Trend pullback and EMA reclaim
