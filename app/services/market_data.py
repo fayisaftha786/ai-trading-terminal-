@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from app.settings import Settings
-from app.services.coinbase_public import CoinbasePublicAdapter
+from app.services.coinbase_public import CoinbasePublicAdapter, product_for_symbol
 
 
 class MarketDataService:
@@ -99,6 +99,9 @@ class MarketDataService:
                 "candles": [],
             }
         timeframe_ms, primary_seconds, confirm_timeframe, confirm_ms, confirm_seconds = timeframe_map[timeframe]
+        mapped_product = product_for_symbol(symbol)
+        provider_symbol = mapped_product[0] if mapped_product else None
+        quote_currency = mapped_product[1] if mapped_product else None
         try:
             async with CoinbasePublicAdapter() as provider:
                 primary_raw, higher_raw = await asyncio.gather(
@@ -157,6 +160,8 @@ class MarketDataService:
                 "higher_timeframe_last_closed_candle_timestamp_ms": higher[-1][0] if higher else None,
                 "higher_timeframe_interval_ms": confirm_ms,
                 "provider": "coinbase_public_fallback",
+                "provider_symbol": provider_symbol,
+                "quote_currency": quote_currency,
                 "fallback_reason": fallback_reason[:160],
                 "data_quality": {
                     "primary_missing_intervals": primary_quality["missing_intervals"] + primary_quality["off_interval_pairs"],
@@ -360,6 +365,8 @@ class MarketDataService:
                 "last_closed_candle_timestamp_ms": primary[-1][0] if primary else None,
                 "higher_timeframe_last_closed_candle_timestamp_ms": higher[-1][0] if higher else None,
                 "provider": self.config.cex_exchange,
+                "provider_symbol": symbol,
+                "quote_currency": symbol.split("/")[-1].split(":")[0].upper(),
                 "data_quality": {
                     "primary_missing_intervals": primary_gaps,
                     "higher_timeframe_missing_intervals": higher_gaps,
