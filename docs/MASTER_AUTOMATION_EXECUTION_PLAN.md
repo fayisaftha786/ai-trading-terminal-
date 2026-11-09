@@ -17,14 +17,14 @@ The older Python/FastAPI backend, Render Blueprint and Binance Testnet documenta
 - Package: `app.aitradingterminal.debug`, min SDK 26, target SDK 35.
 - GitHub Release: https://github.com/fayisaftha786/ai-trading-terminal-/releases/tag/v0.7.1-debug
 - Android v0.7.1 APK release commit: `369aaac4d3d5191e8a0648a675c3dc5327301bbb` (the APK release is older than current source).
-- Current GitHub `main` as of 2026-11-09: `14674f79938d21410a0ac265e197a43fa97db7f1`.
+- Current GitHub `main` as of 2026-11-09: `0d54d15209828393cd9ee457e98abae9b2c40111`.
 - Main-branch CI built and verified the installable debug APK and published it to GitHub Releases.
 - The code has passed backend/release checks, Worker validation/local smoke tests and Android build/signature/metadata checks.
 - Physical device installation and live Cloudflare deployment remain unverified.
 
 ## Cloudflare deployment — owner-controlled steps
 
-The public Worker URL currently responds, but its `worker_version.tag` is blank. Treat it as an older/unverified Worker instance: the current GitHub `main` revision has not been proven deployed, and the new scheduler heartbeat is not present in the public response. The owner must:
+The public Worker URL currently responds and its health response reports scheduler `healthy` with the last scheduled scan `completed`. The `worker_version.tag` remains blank, so the exact current GitHub `main` revision is not yet proven deployed. The owner must:
 
 1. Sign in to or create a Cloudflare account and choose the Free plan only.
 2. Read and accept Cloudflare's current Terms of Service and Privacy Policy directly with Cloudflare.
