@@ -37,6 +37,20 @@ export function assessMarketUniverse(
       continue;
     }
 
+    const selectedProvider = market.market_data_provider;
+    const quality = market.data_quality || {};
+    const declaredProviders = [
+      quality.ticker_provider,
+      quality.book_provider,
+      quality.one_hour_provider,
+      quality.six_hour_provider
+    ];
+    if (typeof selectedProvider !== "string" || !selectedProvider) {
+      marketIssues.push("market_data_provider_missing");
+    } else if (declaredProviders.some((provider) => provider !== selectedProvider)) {
+      marketIssues.push("market_data_provider_mismatch");
+    }
+
     if (!isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs) ||
         !isFreshTickerEvent(market, nowMs, maxQuoteAgeMs)) {
       marketIssues.push("ticker_stale_or_timestamp_invalid");
