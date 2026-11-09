@@ -76,12 +76,12 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)");
   }
 
-  loadResearchCandleCache(product, timeframeSeconds) {
+  loadResearchCandleCache(product, timeframeSeconds, exchange = "coinbase_exchange") {
     return this.sql.exec(
       "SELECT candle_open_ms AS time,open,high,low,close,volume FROM research_candles " +
-      "WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? " +
+      "WHERE exchange=? AND product=? AND timeframe_seconds=? " +
       "ORDER BY candle_open_ms DESC LIMIT 300",
-      product, timeframeSeconds
+      exchange, product, timeframeSeconds
     ).toArray().reverse().map((row) => ({
       time: Number(row.time),
       open: Number(row.open),
@@ -423,9 +423,31 @@ export class TradingEngine extends DurableObject {
             error: String(error?.message || error).slice(0, 160)
           });
         }
+        cachedCandles.bitstamp = {};
+        try {
+          cachedCandles.bitstamp.one_hour = this.loadResearchCandleCache(
+            product.product, 3600, "bitstamp_spot"
+          );
+        } catch (error) {
+          this.logEvent("research_cache_read_error", "Bitstamp 1H fallback cache read failed", {
+            product: product.product, timeframe_seconds: 3600,
+            error: String(error?.message || error).slice(0, 160)
+          });
+        }
+        try {
+          cachedCandles.bitstamp.six_hour = this.loadResearchCandleCache(
+            product.product, 21600, "bitstamp_spot"
+          );
+        } catch (error) {
+          this.logEvent("research_cache_read_error", "Bitstamp 6H fallback cache read failed", {
+            product: product.product, timeframe_seconds: 21600,
+            error: String(error?.message || error).slice(0, 160)
+          });
+        }
         const snapshot = await fetchProductSnapshot(product, Date.now(), cachedCandles);
         candleArchives.push({
           product: product.product,
+          exchange: snapshot.market_data_provider || "coinbase_exchange",
           one_hour: snapshot.one_hour_audit,
           six_hour: snapshot.six_hour_audit,
           received_at_ms: Date.now()
@@ -440,6 +462,7 @@ export class TradingEngine extends DurableObject {
           symbol: snapshot.symbol,
           product: snapshot.product,
           status: "live",
+          market_data_provider: snapshot.market_data_provider || "unknown",
           fetched_at_ms: snapshot.fetched_at_ms,
           quote_received_at_ms: snapshot.quote_received_at_ms,
           ticker_time: snapshot.ticker_time,
@@ -517,7 +540,9 @@ export class TradingEngine extends DurableObject {
         [21600, archive.six_hour]
       ]) {
         try {
-          const result = this.archiveClosedCandles(archive.product, timeframeSeconds, audit, checkedAt);
+          const result = archive.exchange === "bitstamp_spot"
+            ? this.archiveProviderCandles(archive.exchange, archive.product, timeframeSeconds, audit, checkedAt)
+            : this.archiveClosedCandles(archive.product, timeframeSeconds, audit, checkedAt);
           if (result?.status && result.status !== "clean") {
             this.logEvent("research_archive_quality", "Research candles were not archived", {
               product: archive.product, timeframe_seconds: timeframeSeconds,
@@ -666,9 +691,19 @@ export class TradingEngine extends DurableObject {
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
       last_entry_results: entryResults.slice(0, 10),
       market_feed_issues: marketFeed.issues.slice(0, 12),
-      provider_failures: markets.filter((market) => market.status === "error").map((market) => ({
+      provider_failures: markets.filter((market) => market.status !== "live").map((market) => ({
         symbol: market.symbol,
-        reason: market.error_code || "provider_unavailable"
+        reason: market.error_code || "provider_unavailable",
+        primary_error_code: market.primary_error_code || null,
+        backup_error_code: market.backup_error_code || null
+      })).slice(0, 3),
+      market_data_providers: markets.map((market) => ({
+        symbol: market.symbol,
+        status: market.status,
+        provider: market.market_data_provider || null,
+        failover_used: market.data_quality?.failover_used === true,
+        failover_reason: market.data_quality?.failover_reason || null,
+        entry_ready: market.entry_gate?.eligible === true
       })).slice(0, 3)
     };
     this.setState("runtime", runtime);
@@ -683,7 +718,9 @@ export class TradingEngine extends DurableObject {
     return {
       source,
       markets: markets.map((market) => ({
-        symbol: market.symbol, status: market.status, signal: market.signal || "HOLD",
+        symbol: market.symbol, status: market.status,
+        market_data_provider: market.market_data_provider || null,
+        signal: market.signal || "HOLD",
         score: market.score || 0, regime_1h: market.regime_1h || "UNKNOWN",
         regime_6h: market.regime_6h || "UNKNOWN", spread_bps: market.spread_bps ?? null,
         data_quality: market.data_quality || null, error: market.error || null
@@ -792,6 +829,42 @@ export class TradingEngine extends DurableObject {
       cumulativeGaps, receivedAtMs, inserted > 0 ? receivedAtMs : null
     );
     return { stored: inserted, bars_count: barsCount, cumulative_missing_intervals: cumulativeGaps, status: "clean" };
+  }
+
+  archiveProviderCandles(exchange, product, timeframeSeconds, audit, receivedAtMs) {
+    if (exchange !== "bitstamp_spot") return { stored: 0, status: "unsupported_provider" };
+    const retentionBars = timeframeSeconds === 3600 ? 4320 : timeframeSeconds === 21600 ? 1440 : 0;
+    if (!retentionBars || !audit?.ok || !Array.isArray(audit.rows)) {
+      return { stored: 0, status: "audit_rejected" };
+    }
+
+    const intervalMs = timeframeSeconds * 1000;
+    const rows = audit.rows.slice(-retentionBars);
+    let inserted = 0;
+    const batchSize = 8;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize);
+      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
+      const values = batch.flatMap((row) => [
+        exchange, product, timeframeSeconds, row.time,
+        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
+      ]);
+      inserted += this.sql.exec(
+        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
+        "VALUES " + valuesSql + " RETURNING candle_open_ms",
+        ...values
+      ).toArray().length;
+    }
+
+    const latest = rows.at(-1)?.time;
+    if (Number.isFinite(latest)) {
+      const cutoff = latest - ((retentionBars - 1) * intervalMs);
+      this.sql.exec(
+        "DELETE FROM research_candles WHERE exchange=? AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
+        exchange, product, timeframeSeconds, cutoff
+      );
+    }
+    return { stored: inserted, bars_count: Math.min(retentionBars, rows.length), status: "clean" };
   }
 
   researchTournament() {
