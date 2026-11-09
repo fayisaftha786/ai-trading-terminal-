@@ -172,6 +172,12 @@ test("snapshot uses ticker 24h volume and does not spend an extra request on sta
     assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.equal(calls.some((path) => path.endsWith("/stats")), false);
     assert.equal(calls.length, 6, "ticker, book and four sequential timeframe refreshes are used");
+    const bookCallIndex = calls.findIndex((path) => path.endsWith("/book?level=2"));
+    const lastCandleCallIndex = Math.max(...calls.map((path, index) =>
+      path.includes("/candles?") ? index : -1
+    ));
+    assert.ok(bookCallIndex > lastCandleCallIndex,
+      "fetch the order book after sequential candle refreshes to preserve the 15s freshness window");
   } finally {
     globalThis.fetch = originalFetch;
   }
