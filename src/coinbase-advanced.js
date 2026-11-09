@@ -155,7 +155,7 @@ export function coinbaseAdvancedStatus(env = {}) {
     max_order_quote: config.maxOrderQuoteValid ? config.maxOrderQuote : null,
     account_preflight_available: config.credentialsConfigured,
     order_preview_available: blockers.length === 0,
-    order_submission_available: false, // No live order-submission route is implemented; never advertise it as available.
+    order_submission_available: config.orderExecutionEnabled && blockers.length === 0 && config.maxOpenOrders > 0 && config.maxDailyOrders > 0,
     order_execution_configured: config.orderExecutionEnabled,
     max_open_orders: config.maxOpenOrders || null,
     max_daily_orders: config.maxDailyOrders || null,
@@ -289,11 +289,14 @@ async function loadAccounts(env, fetchImpl) {
 }
 
 function accountBalancesForProducts(accounts, products) {
-  const quoteCurrencies = new Set(products.map((product) => String(product.quote_currency_id || "").toUpperCase()).filter(Boolean));
+  const currencies = new Set(products.flatMap((product) => [
+    String(product.quote_currency_id || "").toUpperCase(),
+    String(product.base_currency_id || "").toUpperCase()
+  ]).filter(Boolean));
   const balances = {};
   for (const account of accounts) {
     const currency = String(account?.currency || "").toUpperCase();
-    if (!quoteCurrencies.has(currency)) continue;
+    if (!currencies.has(currency)) continue;
     const available = account?.available_balance?.value;
     if (!validNonNegativeMoney(available)) continue;
     balances[currency] = addDecimalStrings(balances[currency] || "0", String(available)) || "0";
@@ -380,6 +383,9 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
         quote_min_size: payload.quote_min_size || null,
         quote_max_size: payload.quote_max_size || null,
         quote_increment: payload.quote_increment || null,
+        base_min_size: payload.base_min_size || null,
+        base_max_size: payload.base_max_size || null,
+        base_increment: payload.base_increment || null,
         price_increment: payload.price_increment || null,
         is_disabled: payload.is_disabled === true,
         trading_disabled: payload.trading_disabled === true,
@@ -436,10 +442,14 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
 
 export async function previewCoinbaseAdvancedLimitBuy(
   env = {},
-  { productId, quoteSize, limitPrice } = {},
+  { productId, quoteSize, baseSize, limitPrice, side = "BUY" } = {},
   { fetchImpl = fetch } = {}
 ) {
   const config = configuration(env);
+  const selectedSide = String(side || "BUY").toUpperCase();
+  if (!["BUY", "SELL"].includes(selectedSide)) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["supported_order_side_required"], order_submission_available: false };
+  }
   if (!config.maxOrderQuoteValid || !config.allowedProductsValid) {
     return { status: "blocked", decision: "NO_ORDER", blockers: coinbaseAdvancedStatus(env).blockers, order_submission_available: false };
   }
@@ -447,106 +457,83 @@ export async function previewCoinbaseAdvancedLimitBuy(
   if (!config.allowedProducts.includes(selectedProduct)) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["product_not_on_explicit_allowlist"], order_submission_available: false };
   }
-  if (!validMoney(quoteSize) || !validMoney(limitPrice)) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["positive_decimal_quote_size_and_limit_price_required"], order_submission_available: false };
+  const size = selectedSide === "BUY" ? quoteSize : baseSize;
+  if (!validMoney(size) || !validMoney(limitPrice)) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: [selectedSide === "BUY" ? "positive_decimal_quote_size_and_limit_price_required" : "positive_decimal_base_size_and_limit_price_required"], order_submission_available: false };
   }
-  if (Number(quoteSize) > config.maxOrderQuote) {
+  const estimatedQuote = selectedSide === "BUY" ? Number(quoteSize) : Number(baseSize) * Number(limitPrice);
+  if (!Number.isFinite(estimatedQuote) || estimatedQuote <= 0 || estimatedQuote > config.maxOrderQuote) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_quote_cap_exceeded"], order_submission_available: false };
   }
 
   const preflight = await preflightCoinbaseAdvanced(env, { fetchImpl });
   if (preflight.status !== "preflight_ready_for_manual_order_preview") {
-    return {
-      status: "blocked", decision: "NO_ORDER",
-      blockers: preflight.blockers,
-      order_submission_available: false,
-      live_trading_enabled: false
-    };
+    return { status: "blocked", decision: "NO_ORDER", blockers: preflight.blockers, order_submission_available: false, live_trading_enabled: false };
   }
   const product = preflight.products.find((item) => item.product_id === selectedProduct && item.eligible);
-  if (!product) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["product_not_preflight_eligible"], order_submission_available: false };
-  }
-  if (compareDecimalStrings(quoteSize, product.quote_min_size) < 0 ||
-      compareDecimalStrings(quoteSize, product.quote_max_size) > 0) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_outside_exchange_product_limits"], order_submission_available: false };
-  }
-  if (!isIncrementMultiple(quoteSize, product.quote_increment)) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_not_aligned_to_exchange_increment"], order_submission_available: false };
+  if (!product) return { status: "blocked", decision: "NO_ORDER", blockers: ["product_not_preflight_eligible"], order_submission_available: false };
+
+  if (selectedSide === "BUY") {
+    if (compareDecimalStrings(quoteSize, product.quote_min_size) < 0 ||
+        compareDecimalStrings(quoteSize, product.quote_max_size) > 0 ||
+        !isIncrementMultiple(quoteSize, product.quote_increment)) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_outside_exchange_limits_or_increment"], order_submission_available: false };
+    }
+  } else {
+    if (!validMoney(String(product.base_min_size || "")) ||
+        !validMoney(String(product.base_max_size || "")) ||
+        !validMoney(String(product.base_increment || "")) ||
+        compareDecimalStrings(baseSize, product.base_min_size) < 0 ||
+        compareDecimalStrings(baseSize, product.base_max_size) > 0 ||
+        !isIncrementMultiple(baseSize, product.base_increment)) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["base_size_limits_or_increment_unavailable_or_invalid"], order_submission_available: false };
+    }
   }
   if (!isIncrementMultiple(limitPrice, product.price_increment)) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["limit_price_not_aligned_to_exchange_increment"], order_submission_available: false };
   }
-  const available = preflight.balances[product.quote_currency_id];
-  if (!validNonNegativeMoney(available) || compareDecimalStrings(available, quoteSize) < 0) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["insufficient_available_quote_balance"], order_submission_available: false };
+  const balanceCurrency = selectedSide === "BUY" ? product.quote_currency_id : product.base_currency_id;
+  const available = preflight.balances[balanceCurrency];
+  if (!validNonNegativeMoney(available) || compareDecimalStrings(available, size) < 0) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: [selectedSide === "BUY" ? "insufficient_available_quote_balance" : "insufficient_available_base_balance"], order_submission_available: false };
   }
 
-  const previewPath = API_PREFIX + "/orders/preview";
-  const preview = await advancedRequest(env, "POST", previewPath, {
+  const sizeField = selectedSide === "BUY" ? { quote_size: quoteSize } : { base_size: baseSize };
+  const preview = await advancedRequest(env, "POST", API_PREFIX + "/orders/preview", {
     product_id: selectedProduct,
-    side: "BUY",
-    order_configuration: {
-      limit_limit_gtc: {
-        quote_size: quoteSize,
-        limit_price: limitPrice,
-        post_only: true
-      }
-    }
+    side: selectedSide,
+    order_configuration: { limit_limit_gtc: { ...sizeField, limit_price: limitPrice, post_only: true } }
   }, fetchImpl);
 
   const errors = Array.isArray(preview.errs) ? preview.errs.map((item) => String(item).slice(0, 120)) : [];
-  const commission = validNonNegativeMoney(String(preview.commission_total ?? ""))
-    ? String(preview.commission_total) : null;
+  const commission = validNonNegativeMoney(String(preview.commission_total ?? "")) ? String(preview.commission_total) : null;
   if (errors.length || typeof preview.preview_id !== "string" || !preview.preview_id || commission === null) {
-    return {
-      status: "preview_rejected",
-      decision: "NO_ORDER",
-      product_id: selectedProduct,
-      side: "BUY",
-      quote_size: quoteSize,
-      limit_price: limitPrice,
-      commission_total: commission,
-      preview_errors: errors,
-      order_submission_available: false,
-      live_trading_enabled: false
-    };
+    return { status: "preview_rejected", decision: "NO_ORDER", product_id: selectedProduct, side: selectedSide,
+      quote_size: selectedSide === "BUY" ? quoteSize : null, base_size: selectedSide === "SELL" ? baseSize : null,
+      limit_price: limitPrice, commission_total: commission, preview_errors: errors,
+      order_submission_available: false, live_trading_enabled: false };
   }
-  const requiredQuote = addDecimalStrings(quoteSize, commission);
-  if (!requiredQuote || compareDecimalStrings(available, requiredQuote) < 0) {
-    return {
-      status: "blocked",
-      decision: "NO_ORDER",
-      product_id: selectedProduct,
-      quote_size: quoteSize,
-      limit_price: limitPrice,
-      commission_total: commission,
-      blockers: ["available_quote_balance_below_order_plus_previewed_fee"],
-      order_submission_available: false
-    };
+  if (selectedSide === "BUY") {
+    const requiredQuote = addDecimalStrings(quoteSize, commission);
+    if (!requiredQuote || compareDecimalStrings(available, requiredQuote) < 0) {
+      return { status: "blocked", decision: "NO_ORDER", product_id: selectedProduct, quote_size: quoteSize,
+        limit_price: limitPrice, commission_total: commission, blockers: ["available_quote_balance_below_order_plus_previewed_fee"], order_submission_available: false };
+    }
   }
   return {
-    status: "preview_ready",
-    decision: "PREVIEW_ONLY",
-    provider: "coinbase_advanced_trade",
-    product_id: selectedProduct,
-    side: "BUY",
-    order_type: "LIMIT_GTC_POST_ONLY",
-    quote_size: quoteSize,
-    limit_price: limitPrice,
-    commission_total: commission,
-    estimated_order_total: preview.order_total || null,
-    best_bid: preview.best_bid || null,
-    best_ask: preview.best_ask || null,
-    slippage: preview.slippage || null,
-    preview_id: preview.preview_id,
-    available_quote_balance: available,
-    quote_currency: product.quote_currency_id,
+    status: "preview_ready", decision: "PREVIEW_ONLY", provider: "coinbase_advanced_trade",
+    product_id: selectedProduct, side: selectedSide, order_type: "LIMIT_GTC_POST_ONLY",
+    quote_size: selectedSide === "BUY" ? quoteSize : null,
+    base_size: selectedSide === "SELL" ? baseSize : null,
+    limit_price: limitPrice, commission_total: commission,
+    estimated_order_total: preview.order_total || null, best_bid: preview.best_bid || null,
+    best_ask: preview.best_ask || null, slippage: preview.slippage || null,
+    preview_id: preview.preview_id, available_balance: available,
+    balance_currency: balanceCurrency, quote_currency: product.quote_currency_id,
     checked_at_ms: Date.now(),
-    order_submission_available: config.orderExecutionEnabled && config.maxOpenOrders > 0,
-    live_trading_enabled: false,
-    automatic_live_entries_enabled: false,
-    warning: "Preview only until the owner explicitly confirms a real order. No order has been submitted."
+    order_submission_available: config.orderExecutionEnabled && config.maxOpenOrders > 0 && config.maxDailyOrders > 0,
+    live_trading_enabled: false, automatic_live_entries_enabled: false,
+    warning: "Preview only. No order has been submitted. A separate explicit confirmation is required."
   };
 }
 
@@ -589,98 +576,94 @@ function sanitizeOrder(order) {
 
 export async function submitCoinbaseAdvancedLimitBuy(
   env = {},
-  { productId, quoteSize, limitPrice, commissionTotal, previewId, clientOrderId } = {},
+  { productId, quoteSize, baseSize, limitPrice, commissionTotal, previewId, clientOrderId, side = "BUY" } = {},
   { fetchImpl = fetch } = {}
 ) {
   const config = configuration(env);
-  if (!config.orderExecutionEnabled || config.maxOpenOrders < 1) {
+  const selectedSide = String(side || "BUY").toUpperCase();
+  if (!config.orderExecutionEnabled || config.maxOpenOrders < 1 || config.maxDailyOrders < 1) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_execution_switch_is_off"], order_submission_available: false };
   }
+  if (!["BUY", "SELL"].includes(selectedSide)) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["supported_order_side_required"], order_submission_available: false };
+  }
   const selectedProduct = String(productId || "").trim().toUpperCase();
+  const size = selectedSide === "BUY" ? quoteSize : baseSize;
+  const estimatedQuote = selectedSide === "BUY" ? Number(quoteSize) : Number(baseSize) * Number(limitPrice);
   if (!config.allowedProducts.includes(selectedProduct)) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["product_not_on_explicit_allowlist"], order_submission_available: false };
   }
-  if (!config.maxOrderQuoteValid || !validMoney(quoteSize) || !validMoney(limitPrice) ||
-      Number(quoteSize) > config.maxOrderQuote || typeof previewId !== "string" ||
-      previewId.length < 8 || previewId.length > 200 || !validClientOrderId(clientOrderId)) {
+  if (!config.maxOrderQuoteValid || !validMoney(size) || !validMoney(limitPrice) ||
+      !Number.isFinite(estimatedQuote) || estimatedQuote <= 0 || estimatedQuote > config.maxOrderQuote ||
+      typeof previewId !== "string" || previewId.length < 8 || previewId.length > 200 || !validClientOrderId(clientOrderId)) {
     return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_request_invalid_or_over_cap"], order_submission_available: false };
   }
   const preflight = await preflightCoinbaseAdvanced(env, { fetchImpl });
-  if (preflight.status !== "preflight_ready_for_manual_order_preview") {
-    return { status: "blocked", decision: "NO_ORDER", blockers: preflight.blockers, order_submission_available: false };
+  if (preflight.status !== "preflight_ready_for_manual_order_preview" || preflight.permissions?.can_trade !== true) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: [...(preflight.blockers || []), ...(preflight.permissions?.can_trade === true ? [] : ["api_key_trade_permission_required_for_manual_orders"])], order_submission_available: false };
   }
   const product = preflight.products.find((item) => item.product_id === selectedProduct && item.eligible);
   if (!product) return { status: "blocked", decision: "NO_ORDER", blockers: ["product_not_preflight_eligible"], order_submission_available: false };
-  if (compareDecimalStrings(quoteSize, product.quote_min_size) < 0 ||
-      compareDecimalStrings(quoteSize, product.quote_max_size) > 0 ||
-      !isIncrementMultiple(quoteSize, product.quote_increment) ||
-      !isIncrementMultiple(limitPrice, product.price_increment)) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_exchange_size_or_price_filter_failed"], order_submission_available: false };
+  if (selectedSide === "BUY") {
+    if (compareDecimalStrings(quoteSize, product.quote_min_size) < 0 ||
+        compareDecimalStrings(quoteSize, product.quote_max_size) > 0 ||
+        !isIncrementMultiple(quoteSize, product.quote_increment)) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_exchange_size_or_price_filter_failed"], order_submission_available: false };
+    }
+  } else if (!validMoney(String(product.base_min_size || "")) ||
+      !validMoney(String(product.base_max_size || "")) ||
+      !validMoney(String(product.base_increment || "")) ||
+      compareDecimalStrings(baseSize, product.base_min_size) < 0 ||
+      compareDecimalStrings(baseSize, product.base_max_size) > 0 ||
+      !isIncrementMultiple(baseSize, product.base_increment)) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_base_size_filter_failed"], order_submission_available: false };
   }
-  if (!validNonNegativeMoney(String(commissionTotal ?? ""))) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["previewed_commission_missing_or_invalid"], order_submission_available: false };
+  if (!isIncrementMultiple(limitPrice, product.price_increment) || !validNonNegativeMoney(String(commissionTotal ?? ""))) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: ["live_order_price_increment_or_preview_fee_invalid"], order_submission_available: false };
   }
-  const available = preflight.balances[product.quote_currency_id];
-  const requiredQuote = addDecimalStrings(quoteSize, String(commissionTotal));
-  if (!validNonNegativeMoney(available) || !requiredQuote ||
-      compareDecimalStrings(available, requiredQuote) < 0) {
-    return { status: "blocked", decision: "NO_ORDER", blockers: ["insufficient_available_quote_balance_for_order_and_fee"], order_submission_available: false };
+  const balanceCurrency = selectedSide === "BUY" ? product.quote_currency_id : product.base_currency_id;
+  const available = preflight.balances[balanceCurrency];
+  if (!validNonNegativeMoney(available) || compareDecimalStrings(available, size) < 0) {
+    return { status: "blocked", decision: "NO_ORDER", blockers: [selectedSide === "BUY" ? "insufficient_available_quote_balance_for_order" : "insufficient_available_base_balance_for_order"], order_submission_available: false };
   }
-
+  if (selectedSide === "BUY") {
+    const requiredQuote = addDecimalStrings(quoteSize, String(commissionTotal));
+    if (!requiredQuote || compareDecimalStrings(available, requiredQuote) < 0) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["insufficient_available_quote_balance_for_order_and_fee"], order_submission_available: false };
+    }
+  }
+  const sizeField = selectedSide === "BUY" ? { quote_size: quoteSize } : { base_size: baseSize };
   let response;
   try {
     response = await advancedRequest(env, "POST", API_PREFIX + "/orders", {
-      client_order_id: clientOrderId,
-      product_id: selectedProduct,
-      side: "BUY",
-      order_configuration: {
-        limit_limit_gtc: {
-          quote_size: quoteSize,
-          limit_price: limitPrice,
-          post_only: true
-        }
-      },
+      client_order_id: clientOrderId, product_id: selectedProduct, side: selectedSide,
+      order_configuration: { limit_limit_gtc: { ...sizeField, limit_price: limitPrice, post_only: true } },
       preview_id: previewId
     }, fetchImpl);
   } catch (error) {
-    error.ambiguousSubmission = Number(error?.status) >= 500 ||
-      error?.code === "coinbase_advanced_network_request_failed";
+    error.ambiguousSubmission = Number(error?.status) >= 500 || error?.code === "coinbase_advanced_network_request_failed";
     throw error;
   }
-
-  if (response.success === true &&
-      typeof response.success_response?.order_id === "string" &&
-      response.success_response.order_id) {
+  if (response.success === true && typeof response.success_response?.order_id === "string" && response.success_response.order_id) {
     return {
-      status: "PENDING",
-      decision: "LIVE_ORDER_ACCEPTED",
-      client_order_id: clientOrderId,
-      exchange_order_id: response.success_response.order_id,
-      product_id: selectedProduct,
-      side: "BUY",
-      order_type: "LIMIT_GTC_POST_ONLY",
-      quote_size: quoteSize,
-      limit_price: limitPrice,
-      quote_currency: product.quote_currency_id,
-      order_submission_available: true,
-      live_trading_enabled: true,
+      status: "PENDING", decision: "LIVE_ORDER_ACCEPTED", client_order_id: clientOrderId,
+      exchange_order_id: response.success_response.order_id, product_id: selectedProduct,
+      side: selectedSide, order_type: "LIMIT_GTC_POST_ONLY",
+      quote_size: selectedSide === "BUY" ? quoteSize : null,
+      base_size: selectedSide === "SELL" ? baseSize : null,
+      limit_price: limitPrice, quote_currency: product.quote_currency_id,
+      order_submission_available: true, live_trading_enabled: true,
       automatic_live_entries_enabled: false,
-      warning: "Exchange accepted the order. It may remain open or partially fill; reconcile exchange status before assuming a trade occurred."
+      warning: "Exchange accepted the order. It may remain open or partially fill; reconcile status and confirm fills before assuming a trade occurred."
     };
   }
   if (response.success === false) {
     return {
-      status: "REJECTED",
-      decision: "NO_ORDER",
-      client_order_id: clientOrderId,
-      product_id: selectedProduct,
-      side: "BUY",
-      error: typeof response.error_response?.message === "string"
-        ? response.error_response.message.slice(0, 180) : "coinbase_order_rejected",
-      error_code: typeof response.error_response?.error === "string"
-        ? response.error_response.error.slice(0, 80) : null,
-      order_submission_available: true,
-      live_trading_enabled: false
+      status: "REJECTED", decision: "NO_ORDER", client_order_id: clientOrderId,
+      product_id: selectedProduct, side: selectedSide,
+      error: typeof response.error_response?.message === "string" ? response.error_response.message.slice(0, 180) : "coinbase_order_rejected",
+      error_code: typeof response.error_response?.error === "string" ? response.error_response.error.slice(0, 80) : null,
+      order_submission_available: true, live_trading_enabled: false
     };
   }
   const error = new Error("coinbase_order_submission_response_ambiguous");
