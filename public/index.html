@@ -410,6 +410,7 @@ $("liveSide").addEventListener("change",()=>{
   const sell=$("liveSide").value==="SELL";
   $("liveSizeLabel").firstChild.textContent=sell
     ?"Base amount ("+($("liveProduct").value.split("-")[0]||"base")+")":"Quote amount (USD)";
+  $("liveQuoteSize").value="";
   $("liveQuoteSize").placeholder=sell?"e.g. 0.0001":"e.g. 10.00";
 });
 $("liveProduct").addEventListener("change",()=>{liveOrderPreview=null;$("liveSubmit").disabled=true;});

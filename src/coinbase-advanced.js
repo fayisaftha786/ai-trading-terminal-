@@ -482,7 +482,6 @@ export async function previewCoinbaseAdvancedLimitOrder(env = {}, { side = "BUY"
   if (preflight.status !== "preflight_ready_for_manual_order_preview") return { status:"blocked", decision:"NO_ORDER", blockers:preflight.blockers, order_submission_available:false, live_trading_enabled:false };
   const product = preflight.products.find((item) => item.product_id === selectedProduct && item.eligible);
   if (!product) return { status:"blocked", decision:"NO_ORDER", blockers:["product_not_preflight_eligible"], order_submission_available:false };
-  if (!isIncrementMultiple(limitPrice, product.price_increment)) return { status:"blocked", decision:"NO_ORDER", blockers:["limit_price_not_aligned_to_exchange_increment"], order_submission_available:false };
   let orderConfiguration;
   let availableBalance;
   if (selectedSide === "BUY") {
@@ -490,6 +489,8 @@ export async function previewCoinbaseAdvancedLimitOrder(env = {}, { side = "BUY"
       return { status:"blocked", decision:"NO_ORDER", blockers:["quote_size_outside_exchange_product_limits"], order_submission_available:false };
     if (!isIncrementMultiple(quoteSize, product.quote_increment))
       return { status:"blocked", decision:"NO_ORDER", blockers:["quote_size_not_aligned_to_exchange_increment"], order_submission_available:false };
+    if (!isIncrementMultiple(limitPrice, product.price_increment))
+      return { status:"blocked", decision:"NO_ORDER", blockers:["limit_price_not_aligned_to_exchange_increment"], order_submission_available:false };
     availableBalance = preflight.balances[product.quote_currency_id];
     if (!validNonNegativeMoney(availableBalance) || compareDecimalStrings(availableBalance, quoteSize) < 0)
       return { status:"blocked", decision:"NO_ORDER", blockers:["insufficient_available_quote_balance"], order_submission_available:false };
@@ -503,6 +504,8 @@ export async function previewCoinbaseAdvancedLimitOrder(env = {}, { side = "BUY"
       return { status:"blocked", decision:"NO_ORDER", blockers:["sell_size_outside_exchange_product_limits"], order_submission_available:false };
     if (!isIncrementMultiple(baseSize, product.base_increment))
       return { status:"blocked", decision:"NO_ORDER", blockers:["base_size_not_aligned_to_exchange_increment"], order_submission_available:false };
+    if (!isIncrementMultiple(limitPrice, product.price_increment))
+      return { status:"blocked", decision:"NO_ORDER", blockers:["limit_price_not_aligned_to_exchange_increment"], order_submission_available:false };
     availableBalance = preflight.balances[product.base_currency_id] || "0";
     if (!validNonNegativeMoney(availableBalance) || compareDecimalStrings(availableBalance, baseSize) < 0)
       return { status:"blocked", decision:"NO_ORDER", blockers:["insufficient_available_base_balance"], order_submission_available:false };
