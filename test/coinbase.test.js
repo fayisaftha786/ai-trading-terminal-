@@ -671,10 +671,10 @@ test("Bitstamp research backfill pages OHLC history, validates spot metadata and
     assert.equal(result.provider, "bitstamp_spot");
     assert.equal(result.market_type, "SPOT");
     assert.equal(result.quote_currency, "USD");
-    assert.equal(result.one_hour.audit.ok, true);
-    assert.equal(result.one_hour.audit.valid_closed_bars, 1001);
-    assert.equal(result.six_hour.audit.ok, true);
-    assert.equal(result.six_hour.audit.valid_closed_bars, 160);
+    assert.equal(result.one_hour.ok, true);
+    assert.equal(result.one_hour.valid_closed_bars, 1001);
+    assert.equal(result.six_hour.ok, true);
+    assert.equal(result.six_hour.valid_closed_bars, 160);
     assert.equal(result.requests.markets, 1);
     assert.equal(result.requests.one_hour, 2, "1,001 hourly bars must be paged across two requests");
     assert.equal(result.requests.six_hour, 1);
