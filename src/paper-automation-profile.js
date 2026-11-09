@@ -29,6 +29,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
     initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
     risk: { ...PAPER_AUTOMATION_RISK },
     auto_paper_enabled: false,
+    auto_paper_resume_after_watchdog: false,
     halted: false,
     halt_reason: null,
     peak_equity_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
@@ -50,6 +51,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
     return {
       ...settings,
       auto_paper_enabled: false,
+      auto_paper_resume_after_watchdog: false,
       capital_setup_required: true,
       capital_setup_required_reason: "existing_paper_ledger_not_rebased_automatically"
     };
@@ -60,7 +62,8 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
       ...base,
       halted: existing.halted === true,
       halt_reason: existing.halt_reason || (existing.halted === true ? "legacy_manual_halt" : null),
-      auto_paper_enabled: false
+      auto_paper_enabled: false,
+      auto_paper_resume_after_watchdog: false
     };
   }
 
@@ -69,8 +72,17 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
     initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
     paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version,
     capital_setup_required: false,
-    auto_paper_enabled: false
+    auto_paper_enabled: false,
+    auto_paper_resume_after_watchdog: false
   };
+}
+
+
+export function shouldResumePaperAutomationAfterWatchdog({
+  resumeAllowed,
+  capitalSetupRequired
+}) {
+  return resumeAllowed === true && capitalSetupRequired !== true;
 }
 
 export function calculateDynamicTakeProfit({ atrPct, roundTripCostBps }) {
