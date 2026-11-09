@@ -171,7 +171,7 @@ def test_signal_walk_forward_preserves_six_hour_confirmation_interval():
     base -= base % interval_6h
     primary = _candles(300, interval_1h, base,
                        drift=0.02, amplitude=0.8, noise=0.1, seed=23)
-    higher = _candles(150, interval_6h, base - 606 * interval_1h,
+    higher = _candles(180, interval_6h, base - 786 * interval_1h,
                       drift=0.08, amplitude=1.5, noise=0.2, seed=24)
 
     result = run_signal_walk_forward(
