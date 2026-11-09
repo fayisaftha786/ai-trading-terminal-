@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
-import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "./strategy.js";
+import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, deriveSchedulerStatus, shouldHaltPaperAutomation } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
@@ -409,6 +409,9 @@ export class TradingEngine extends DurableObject {
         });
         const primary = analyzeTimeframe(snapshot.one_hour_audit);
         const higher = analyzeTimeframe(snapshot.six_hour_audit);
+        const strategyResearch = evaluateResearchCandidates(
+          snapshot.one_hour_audit, snapshot.six_hour_audit, 6 * 60 * 60 * 1000
+        );
         // Store compact evidence only; never include hundreds of raw candles in each dashboard payload.
         const market = {
           symbol: snapshot.symbol,
@@ -441,6 +444,7 @@ export class TradingEngine extends DurableObject {
           },
           primary,
           higher,
+          strategy_research: strategyResearch,
           signal: primary.signal,
           score: primary.score,
           regime_1h: primary.regime,
