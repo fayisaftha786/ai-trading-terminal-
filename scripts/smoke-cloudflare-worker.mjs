@@ -229,6 +229,9 @@ try {
   const tournament = await tournamentResponse.json();
   assert.equal(tournament.mode, "offline_research_only");
   assert.equal(tournament.no_trading_side_effects, true);
+  assert.equal(tournament.strategy_comparability.status, "not_equivalent");
+  assert.equal(tournament.strategy_comparability.production_paper_strategy.version, "cloud-paper-v1");
+  assert.ok(tournament.strategy_comparability.limitations.length >= 2);
   assert.equal(tournament.assets.length, 3);
   assert.ok(tournament.assets.every((asset) => asset.exploratory.ok === false));
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
@@ -286,6 +289,8 @@ try {
   assert.match(staticHtml, /Preview LIMIT order only/);
   assert.match(staticHtml, /Live order submission unavailable/);
   assert.match(staticHtml, /Strategy tournament/);
+  assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
+  assert.match(staticHtml, /cloud-paper-v1/);
   assert.match(staticHtml, /id="runTournament"/);
   assert.match(staticHtml, /Paper equity curve/);
   assert.match(staticHtml, /Actual stored portfolio snapshots/);
