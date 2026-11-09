@@ -85,7 +85,7 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 </section>
 <section class="panel">
 <div class="row"><h2>Strategy tournament · offline research only</h2><button id="runTournament" type="button">Run strategy tournament</button></div>
-<p class="note">Compares trend, range mean-reversion and breakout hypotheses on archived closed candles. This is read-only research: no paper orders or settings change. OHLCV history does not contain historical spread, so slippage is used as a cost stress proxy.</p>
+<p class="note"><strong>RESEARCH ONLY — NOT A BACKTEST OF THE PRODUCTION PAPER BOT.</strong> These trend, range mean-reversion and breakout hypotheses use separate ATR-based stop/target rules and next-hour-open fills. Production PAPER uses the cloud-paper-v1 entry gates, live ask/bid quote fills, a cost-aware dynamic target and trailing stop. Historical OHLCV has no spread or order-book depth, so production entry gates cannot be replayed from this archive. Results compare research hypotheses only; they are not the bot's expected returns.</p>
 <p class="note" id="tournamentStatus">Run manually when enough clean candle history is available. Walk-forward validation requires at least 500 one-hour and 50 six-hour candles per asset.</p>
 <div class="table-wrap" id="tournamentResults"><div class="muted">No tournament has been run in this session.</div></div>
 </section>
@@ -470,7 +470,7 @@ async function runTournament(){
       }
     }
     $("tournamentResults").innerHTML='<table><thead><tr><th>STRATEGY</th><th>TRADES</th><th>EXPLORATORY NET</th><th>PF</th><th>MAX DD</th><th>HOLDOUT NET / OOS SAMPLE</th><th>2× COST NET</th><th>EXPECTANCY</th><th>MONTE CARLO · 500 PATHS</th><th>WARMUP SENSITIVITY</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
-    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · walk-forward requires 3,000 clean 1H + 500 clean 6H bars and four non-overlapping ~28-day test folds · Monte Carlo is a resampling stress test, not a forecast · offline only, no trades placed.";
+    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · RESEARCH HYPOTHESES ONLY — not a backtest of cloud-paper-v1 · walk-forward requires 3,000 clean 1H + 500 clean 6H bars and four non-overlapping ~28-day test folds · Monte Carlo is a resampling stress test, not a forecast · offline only, no trades placed.";
   }catch(error){$("tournamentStatus").textContent="Research failed: "+error.message;}
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
