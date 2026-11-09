@@ -520,8 +520,10 @@ export function classifyMarketFeedFreshness({
   const healthy = Number.isSafeInteger(Number(lastScheduledHealthyMarketCount)) &&
     Number(lastScheduledHealthyMarketCount) >= 0
     ? Number(lastScheduledHealthyMarketCount) : 0;
-  const age = Number(lastScheduledScanAgeMs);
-  const maxAge = Number(staleAfterMs);
+  const age = lastScheduledScanAgeMs === null || lastScheduledScanAgeMs === undefined
+    ? Number.NaN : Number(lastScheduledScanAgeMs);
+  const maxAge = staleAfterMs === null || staleAfterMs === undefined
+    ? Number.NaN : Number(staleAfterMs);
   const recent = Number.isFinite(age) && age >= 0 &&
     Number.isFinite(maxAge) && maxAge > 0 && age <= maxAge;
 
