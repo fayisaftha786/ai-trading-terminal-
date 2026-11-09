@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assessMarketUniverse,
   advanceUnhealthyScanStreak,
+  buildMarketDataProviderDiagnostics,
   assessAdaptiveRisk,
   assessLossCooldown,
   deriveSchedulerStatus,
@@ -10,6 +11,7 @@ import {
   normalizeScanIssueRows,
   parseScanIssueSummaries,
   shouldHaltPaperAutomation,
+  summarizeCurrentProviderFailures,
   updateTrailingStop
 } from "../src/automation-guards.js";
 
@@ -354,4 +356,87 @@ test("diagnostic parser handles multiple markets, deduplicates and respects real
     market_feed_issues: [{ symbol: "SOL/USD", reason: "provider_unavailable" }],
     last_scan_error: "BTC/USD: stale"
   }), [{ symbol: "SOL/USD", reason: "provider_unavailable" }]);
+});
+
+
+test("market-universe gate validates exchange-side Bitstamp book timestamp as well as retrieval time", () => {
+  const market = healthyMarket("SOL/USD");
+  market.market_data_provider = "bitstamp_spot";
+  market.data_quality = {
+    ticker_provider: "bitstamp_spot",
+    book_provider: "bitstamp_spot",
+    one_hour_provider: "bitstamp_spot",
+    six_hour_provider: "bitstamp_spot"
+  };
+  market.book_event_time_ms = NOW - 16000;
+  const stale = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.ok(stale.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
+
+  market.book_event_time_ms = NOW - 1000;
+  const fresh = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.equal(fresh.healthy, true);
+
+  delete market.book_event_time_ms;
+  const missing = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.ok(missing.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
+});
+
+
+test("provider diagnostics are derived from current snapshots and preserve future timestamp evidence", () => {
+  const market = healthyMarket("SOL/USD");
+  market.market_data_provider = "bitstamp_spot";
+  market.data_quality = {
+    ticker_provider: "bitstamp_spot",
+    book_provider: "bitstamp_spot",
+    one_hour_provider: "bitstamp_spot",
+    six_hour_provider: "bitstamp_spot",
+    failover_used: true,
+    primary_provider_error: "provider_rate_limited",
+    book_status: "available",
+    book_freshness_source: "local_retrieval_time"
+  };
+  market.quote_received_at_ms = NOW - 1000;
+  market.book_retrieved_at_ms = NOW - 500;
+  market.book_event_time_ms = NOW + 1000;
+  market.one_hour_audit_summary.last_closed_candle_ms = NOW - 3600000;
+  market.six_hour_audit_summary.last_closed_candle_ms = NOW - 21600000;
+
+  const rows = buildMarketDataProviderDiagnostics([market], NOW);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].provider, "bitstamp_spot");
+  assert.equal(rows[0].failover_used, true);
+  assert.equal(rows[0].primary_provider_error, "provider_rate_limited");
+  assert.equal(rows[0].quote_age_ms, 1000);
+  assert.equal(rows[0].book_age_ms, 500);
+  assert.equal(rows[0].book_event_age_ms, -1000, "future book event timestamps must remain visible");
+  assert.equal(rows[0].one_hour_closed_age_ms, 0);
+  assert.equal(rows[0].six_hour_closed_age_ms, 0);
+  assert.equal(rows[0].market_candidate_eligible, false);
+
+  const missing = healthyMarket("ETH/USD");
+  delete missing.one_hour_audit_summary.last_closed_candle_ms;
+  const missingRows = buildMarketDataProviderDiagnostics([missing], NOW);
+  assert.equal(missingRows[0].one_hour_closed_age_ms, null);
+});
+
+test("current provider failure diagnostics include selected endpoint failures, not just scan errors", () => {
+  const market = healthyMarket("SOL/USD");
+  market.data_quality.book_status = "provider_error";
+  market.data_quality.book_error = "provider_timeout";
+  const failures = summarizeCurrentProviderFailures([market]);
+  assert.deepEqual(failures, [{ symbol: "SOL/USD", reason: "provider_timeout" }]);
+
+  market.status = "error";
+  market.error_code = "all_market_data_providers_unavailable";
+  market.primary_error_code = "provider_rate_limited";
+  market.backup_error_code = "provider_server_error";
+  assert.deepEqual(summarizeCurrentProviderFailures([market]), [
+    {
+      symbol: "SOL/USD",
+      reason: "all_market_data_providers_unavailable",
+      primary_error_code: "provider_rate_limited",
+      backup_error_code: "provider_server_error"
+    },
+    { symbol: "SOL/USD", reason: "provider_timeout" }
+  ]);
 });

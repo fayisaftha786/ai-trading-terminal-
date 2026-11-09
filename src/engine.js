@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -167,8 +167,11 @@ export class TradingEngine extends DurableObject {
         const allowedScanStatuses = new Set(["running", "completed", "partial", "unavailable", "error"]);
         const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
           ? runtime.last_scheduled_scan_status : "not_run";
+        const currentMarkets = this.getMarkets().slice(0, PRODUCTS.length);
         const diagnosticIssues = normalizeScanIssueRows(runtime);
         const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
+        const currentProviderFailures = summarizeCurrentProviderFailures(currentMarkets);
+        const marketDataProviders = buildMarketDataProviderDiagnostics(currentMarkets, nowMs, PRODUCTS.length);
         const diagnostics = {
           last_scan_status: runtime.last_scan_status || "not_started",
           last_scan_age_ms: Number.isFinite(Number(runtime.last_scan_at_ms)) && Number(runtime.last_scan_at_ms) > 0
@@ -179,20 +182,20 @@ export class TradingEngine extends DurableObject {
           healthy_market_count: Number(runtime.healthy_market_count) || 0,
           expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
           consecutive_unhealthy_scheduled_scans: Number(runtime.consecutive_unhealthy_scheduled_scans) || 0,
-          issues: (Array.isArray(runtime.market_feed_issues) ? runtime.market_feed_issues : [])
-            .slice(0, 6)
-            .map((issue) => ({
-              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
-              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
-            })),
           issues: diagnosticIssues
             .slice(0, 6)
             .map((issue) => ({
               symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
               reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
             })),
-          provider_failures: diagnosticProviderFailures
-            .slice(0, 3)
+          provider_failures: [
+            ...currentProviderFailures,
+            ...diagnosticProviderFailures
+          ]
+            .filter((failure, index, rows) =>
+              rows.findIndex((item) => item.symbol === failure.symbol && item.reason === failure.reason) === index
+            )
+            .slice(0, 6)
             .map((failure) => ({
               symbol: typeof failure?.symbol === "string" ? failure.symbol.slice(0, 24) : null,
               reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 120) : "unknown",
@@ -202,22 +205,7 @@ export class TradingEngine extends DurableObject {
                 ? failure.backup_error_code.slice(0, 80) : null,
               inferred_from_scan_summary: failure?.inferred_from_scan_summary === true
             })),
-          market_data_providers: (Array.isArray(runtime.market_data_providers) ? runtime.market_data_providers : [])
-            .slice(0, 3)
-            .map((item) => ({
-              symbol: typeof item?.symbol === "string" ? item.symbol.slice(0, 24) : null,
-              status: typeof item?.status === "string" ? item.status.slice(0, 24) : "unknown",
-              provider: typeof item?.provider === "string" ? item.provider.slice(0, 40) : null,
-              failover_used: item?.failover_used === true,
-              failover_attempted: item?.failover_attempted === true,
-              failover_reason: typeof item?.failover_reason === "string"
-                ? item.failover_reason.slice(0, 80) : null,
-              failover_error: typeof item?.failover_error === "string"
-                ? item.failover_error.slice(0, 80) : null,
-              primary_provider_error: typeof item?.primary_provider_error === "string"
-                ? item.primary_provider_error.slice(0, 80) : null,
-              entry_ready: item?.entry_ready === true
-            }))
+          market_data_providers: marketDataProviders
         };
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
@@ -514,6 +502,7 @@ export class TradingEngine extends DurableObject {
           bid_depth_quote: snapshot.bid_depth_quote,
           ask_depth_quote: snapshot.ask_depth_quote,
           book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
+          book_event_time_ms: snapshot.book_event_time_ms ?? null,
           book_age_ms: snapshot.book_age_ms,
           book_sequence: snapshot.book_sequence,
           data_quality: snapshot.data_quality,
@@ -887,10 +876,27 @@ export class TradingEngine extends DurableObject {
 
     const intervalMs = timeframeSeconds * 1000;
     const rows = audit.rows.slice(-retentionBars);
+    const previousLastValue = this.sql.exec(
+      "SELECT MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
+      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
+      exchange, product, timeframeSeconds
+    ).toArray()[0]?.last_candle_ms;
+    const previousLast = previousLastValue == null ? null
+      : (Number.isFinite(Number(previousLastValue)) ? Number(previousLastValue) : null);
+    const newRows = previousLast === null
+      ? rows
+      : rows.filter((row) => Number(row.time) > previousLast);
+
+    const gapCount = countMissingArchiveBars(previousLast, newRows, intervalMs);
+    if (gapCount === null) return { stored: 0, status: "archive_gap_alignment_error" };
+
     let inserted = 0;
+    // Only add candles newer than this provider's archive cursor. A normal scan
+    // therefore writes at most the newly closed bars, not the full 160–200 bar
+    // window on every 15-minute cycle.
     const batchSize = 8;
-    for (let offset = 0; offset < rows.length; offset += batchSize) {
-      const batch = rows.slice(offset, offset + batchSize);
+    for (let offset = 0; offset < newRows.length; offset += batchSize) {
+      const batch = newRows.slice(offset, offset + batchSize);
       const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
       const values = batch.flatMap((row) => [
         exchange, product, timeframeSeconds, row.time,
@@ -903,7 +909,7 @@ export class TradingEngine extends DurableObject {
       ).toArray().length;
     }
 
-    const latest = rows.at(-1)?.time;
+    const latest = newRows.at(-1)?.time ?? previousLast;
     if (Number.isFinite(latest)) {
       const cutoff = latest - ((retentionBars - 1) * intervalMs);
       this.sql.exec(
@@ -911,7 +917,12 @@ export class TradingEngine extends DurableObject {
         exchange, product, timeframeSeconds, cutoff
       );
     }
-    return { stored: inserted, bars_count: Math.min(retentionBars, rows.length), status: "clean" };
+    return {
+      stored: inserted,
+      bars_count: Math.min(retentionBars, rows.length),
+      missing_intervals_since_previous_archive: gapCount,
+      status: "clean"
+    };
   }
 
   researchTournament() {
