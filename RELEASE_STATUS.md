@@ -36,17 +36,17 @@ A further PAPER entry hardening fix was merged in PR #28 (main commit `99532b93b
 
 **Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
 
-## Latest market scan — 2026-11-08 00:13 UTC
+## Latest market scan — 2026-11-09 04:17:59 UTC
 
-The GitHub scheduled read-only scanner used fresh public Binance market data on main commit `99532b93b09c8a55543bea6b2d9a79cb3856cd97`:
+The GitHub scheduled read-only scanner used public Binance data on current main commit `14674f79938d21410a0ac265e197a43fa97db7f1`:
 
-| Symbol | Data | Last | Signal | Score | 1h regime | 6h regime | Spread |
+| Symbol | Data | Last | Signal | Score | 1H regime | 6H regime | Spread |
 |---|---|---:|---|---:|---|---|---:|
-| BTC/USDT | Live | $75,698.01 | HOLD | 22 | DOWNTREND | DOWNTREND | 0.0013 bps |
-| ETH/USDT | Live | $2,234.76 | HOLD | 32 | DOWNTREND | DOWNTREND | 0.0447 bps |
-| SOL/USDT | Live | $89.53 | HOLD | 32 | DOWNTREND | DOWNTREND | 1.1170 bps |
+| BTC/USDT | Live | $74,884.30 | HOLD | 40 | DOWNTREND | DOWNTREND | 0.0013 bps |
+| ETH/USDT | Live | $2,140.60 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.0467 bps |
+| SOL/USDT | Live | $87.36 | HOLD | 40 | DOWNTREND | DOWNTREND | 1.1446 bps |
 
-All three symbols were fresh. Each had 349 valid closed candles in both 1h and 6h history, with zero gaps, duplicate timestamps, malformed rows or off-grid timestamps. All three signals were HOLD because both timeframes were in a downtrend; no candidate qualified. The scan was read-only: it sent no orders and created no paper positions. The GitHub schedule is best-effort, not a continuous 24/7 trading server.
+All three markets had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All three signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. SOL's reported ticker age was approximately -679 ms (exchange timestamp slightly ahead of the runner clock), within the scanner's documented 5-second clock-skew tolerance; the raw negative age remains visible for audit. Timestamps more than 5 seconds in the future are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
 
 ## Cloud backend status
 

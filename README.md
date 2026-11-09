@@ -34,7 +34,7 @@ This package is signed with an Android debug key for testing, not a production r
 
 ## Market scan evidence
 
-GitHub Actions also runs a separate read-only market scanner using public Binance data. Its report does not create paper positions and does not send orders. The 2026-11-07 scan returned live data for BTC/USDT, ETH/USDT and SOL/USDT; all three signals were HOLD. See the [market scanner workflow](.github/workflows/free-cloud-market-scanner.yml).
+GitHub Actions also runs a separate read-only market scanner using public Binance data. Its report does not create paper positions and does not send orders. The latest archived scan (2026-11-09 04:17:59 UTC, current main) returned live data for BTC/USDT, ETH/USDT and SOL/USDT; all three signals were HOLD, with 349 clean closed candles on both 1H and 6H per market. The scanner allows at most 5 seconds of future timestamp skew for exchange/runner clock differences; the raw age remains visible in the report, and timestamps beyond that tolerance fail closed. See the [market scanner workflow](.github/workflows/free-cloud-market-scanner.yml).
 
 A HOLD result is intentional when the configured strategy filters do not align. The strategy score is deterministic and uncalibrated; it is not a probability or a forecast.
 
