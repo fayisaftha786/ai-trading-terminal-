@@ -676,12 +676,23 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         if result.get("status") != "live":
             raise HTTPException(status_code=502, detail=result.get("error") or "Market analysis unavailable")
         higher = result.get("higher_timeframe") or {}
-        result["strategy_research"] = evaluate_strategy_candidates(
-            result.get("candles", []),
-            higher.get("candles", []),
-            higher_interval_ms=result.get("higher_timeframe_interval_ms", 0),
-            now_ms=time.time() * 1000,
-        )
+        if timeframe == "1h":
+            result["strategy_research"] = evaluate_strategy_candidates(
+                result.get("candles", []),
+                higher.get("candles", []),
+                higher_interval_ms=result.get("higher_timeframe_interval_ms", 0),
+                now_ms=time.time() * 1000,
+            )
+        else:
+            result["strategy_research"] = {
+                "status": "blocked",
+                "reason": "strategy_research_lab_requires_1h_primary_candles",
+                "candidates": [],
+                "best_research_candidate": None,
+                "execution_authorized": False,
+                "paper_auto_entry_eligible": False,
+                "live_trading_enabled": False,
+            }
         return result
 
     @app.get("/api/workers")
