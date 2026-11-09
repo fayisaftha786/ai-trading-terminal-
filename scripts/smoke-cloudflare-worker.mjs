@@ -142,6 +142,35 @@ try {
   assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
 
 
+  const tradingModeResponse = await request("/api/trading/mode", { headers: auth });
+  assert.equal(tradingModeResponse.status, 200, "owner trading-mode API must load");
+  const initialTradingMode = await tradingModeResponse.json();
+  assert.equal(initialTradingMode.mode, "demo", "DEMO must be the safe default");
+  assert.equal(initialTradingMode.demo.data_source, "coinbase_public_market_data");
+  assert.equal(initialTradingMode.demo.execution, "simulated_paper_ledger");
+  assert.equal(initialTradingMode.real.order_submission_available, false);
+
+  const selectRealMode = await request("/api/trading/mode", {
+    method: "PUT", headers: auth, body: JSON.stringify({ mode: "real" })
+  });
+  assert.equal(selectRealMode.status, 200, "REAL account-connection mode can be selected without enabling execution");
+  const realModeState = await selectRealMode.json();
+  assert.equal(realModeState.mode, "real");
+  assert.equal(realModeState.live_execution_enabled, false);
+  assert.equal(realModeState.paper_auto_enabled, false);
+
+  const blockedPaperInRealMode = await request("/api/automation/paper-trading", {
+    method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
+  });
+  assert.equal(blockedPaperInRealMode.status, 409, "paper automation must not start in REAL mode");
+  assert.equal((await blockedPaperInRealMode.json()).error, "select_demo_mode_before_enabling_paper_automation");
+
+  const returnDemoMode = await request("/api/trading/mode", {
+    method: "PUT", headers: auth, body: JSON.stringify({ mode: "demo" })
+  });
+  assert.equal(returnDemoMode.status, 200);
+  assert.equal((await returnDemoMode.json()).paper_auto_enabled, false, "switching back to DEMO must not silently re-enable auto-entry");
+
   const liveStatusResponse = await request("/api/live/status", { headers: auth });
   assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
   const liveStatus = await liveStatusResponse.json();
@@ -234,7 +263,9 @@ try {
   assert.match(staticHtml, /last_scan_error/);
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
-  assert.match(staticHtml, /Coinbase Advanced · read-only preflight/);
+  assert.match(staticHtml, /REAL MODE · Coinbase Advanced account connection/);
+  assert.match(staticHtml, /id="demoModeBtn"/);
+  assert.match(staticHtml, /id="realModeBtn"/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /id="capitalReview"/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);
