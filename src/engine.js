@@ -14,7 +14,7 @@ import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearch
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
-import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog } from "./paper-automation-profile.js";
+import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog } from "./paper-automation-profile.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -532,6 +532,7 @@ export class TradingEngine extends DurableObject {
           }
         }
         state.auto_paper_enabled = body.enabled;
+        state.auto_paper_resume_after_watchdog = body.enabled;
         this.setState("settings", state);
         this.logEvent("paper_automation_setting", body.enabled ? "Automatic paper entries enabled by owner" : "Automatic paper entries disabled by owner");
         return jsonResponse({ enabled: state.auto_paper_enabled, halted: state.halted, mode: "paper_only" });
@@ -539,6 +540,7 @@ export class TradingEngine extends DurableObject {
       if (request.method === "POST" && url.pathname === "/api/automation/kill-switch") {
         const state = this.getState("settings");
         state.auto_paper_enabled = false;
+        state.auto_paper_resume_after_watchdog = false;
         state.halted = true;
         state.halt_reason = "owner_emergency_stop";
         this.setState("settings", state);
@@ -551,6 +553,7 @@ export class TradingEngine extends DurableObject {
         state.halted = false;
         state.halt_reason = null;
         state.auto_paper_enabled = false;
+        state.auto_paper_resume_after_watchdog = false;
         this.setState("settings", state);
         this.logEvent("emergency_stop_reset", "Paper entry halt reset; auto-entry remains OFF");
         return jsonResponse({ halted: false, auto_paper_enabled: false });
@@ -663,6 +666,7 @@ export class TradingEngine extends DurableObject {
         failureThreshold: 3
       });
       if (watchdogDecision.halt) {
+        settings.auto_paper_resume_after_watchdog = settings.auto_paper_enabled === true;
         settings.auto_paper_enabled = false;
         settings.halted = true;
         settings.halt_reason = "market_data_watchdog";
@@ -976,6 +980,7 @@ export class TradingEngine extends DurableObject {
     });
     if (watchdogDecision.halt) {
       const haltState = this.getState("settings") || state;
+      haltState.auto_paper_resume_after_watchdog = haltState.auto_paper_enabled === true;
       haltState.auto_paper_enabled = false;
       haltState.halted = true;
       haltState.halt_reason = "market_data_watchdog";
@@ -995,7 +1000,11 @@ export class TradingEngine extends DurableObject {
     })) {
       latestSettings.halted = false;
       latestSettings.halt_reason = null;
-      latestSettings.auto_paper_enabled = !latestSettings.capital_setup_required;
+      latestSettings.auto_paper_enabled = shouldResumePaperAutomationAfterWatchdog({
+        resumeAllowed: latestSettings.auto_paper_resume_after_watchdog,
+        capitalSetupRequired: latestSettings.capital_setup_required
+      });
+      latestSettings.auto_paper_resume_after_watchdog = false;
       this.setState("settings", latestSettings);
       Object.assign(state, latestSettings);
       this.logEvent("market_data_watchdog_recovered", "Paper auto-entry resumed after two complete healthy scheduled scans", {
@@ -1768,7 +1777,7 @@ export class TradingEngine extends DurableObject {
     if (portfolio.drawdown_pct_from_peak >= risk.max_total_drawdown_pct) {
       reasons.push("max_total_drawdown");
       const state = this.getState("settings");
-      state.auto_paper_enabled = false; state.halted = true; state.halt_reason = "max_total_drawdown"; this.setState("settings", state);
+      state.auto_paper_enabled = false; state.auto_paper_resume_after_watchdog = false; state.halted = true; state.halt_reason = "max_total_drawdown"; this.setState("settings", state);
       this.logEvent("drawdown_circuit_breaker", "Paper automation halted by total drawdown limit");
     }
     if (!Number.isFinite(portfolio.daily_equity_pnl_usd) || !Number.isFinite(portfolio.weekly_equity_pnl_usd)) {
