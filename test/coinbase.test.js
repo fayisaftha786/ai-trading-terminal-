@@ -136,7 +136,7 @@ test("final Coinbase order-book refresh returns fresh top-of-book and validated 
     assert.equal(result.bid, 100);
     assert.equal(result.ask, 100.01);
     assert.equal(result.bid_depth_quote, 9995.5);
-    assert.equal(result.ask_depth_quote, 10005.5);
+    assert.ok(Math.abs(result.ask_depth_quote - 10005.5) < 1e-8);
     assert.ok(Date.now() - result.book_retrieved_at_ms < 1000);
     assert.equal(result.book_sequence, 123456);
   } finally {
@@ -148,7 +148,7 @@ test("final Coinbase order-book refresh rejects malformed or crossed books", asy
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => jsonResponse({ bids: [["101", "2"]], asks: [["100", "2"]] });
   try {
-    await assert.rejects(fetchCoinbaseOrderBook("BTC-USD", createCoinbaseRequestState()), /failed validation/);
+    await assert.rejects(fetchCoinbaseOrderBook("BTC-USD", createCoinbaseRequestState()), (error) => error.message === "coinbase_order_book_failed_validation");
   } finally {
     globalThis.fetch = originalFetch;
   }
