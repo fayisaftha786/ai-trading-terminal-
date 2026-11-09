@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "node --test",
-    "check": "node scripts/check-dashboard-js.mjs && node --check src/index.js && node --check src/engine.js && node --check src/automation-guards.js && node --check src/coinbase.js && node --check src/strategy.js && node --check src/research.js && node --check src/micro-scalp.js && node --check test/micro-scalp.test.js && node --check test/strategy.test.js && node --check test/automation-guards.test.js && node --check test/coinbase.test.js && node --check test/research.test.js && node --check src/strategy-tournament.js && node --check test/strategy-tournament.test.js",
+    "check": "node scripts/check-dashboard-js.mjs && node --check src/index.js && node --check src/engine.js && node --check src/automation-guards.js && node --check src/coinbase.js && node --check src/strategy.js && node --check src/research.js && node --check src/micro-scalp.js && node --check src/coinbase-advanced.js && node --check test/coinbase-advanced.test.js && node --check test/micro-scalp.test.js && node --check test/strategy.test.js && node --check test/automation-guards.test.js && node --check test/coinbase.test.js && node --check test/research.test.js && node --check src/strategy-tournament.js && node --check test/strategy-tournament.test.js",
     "build": "npx --yes wrangler@4 deploy --dry-run --outdir=.wrangler-dry-run",
     "smoke": "node scripts/smoke-cloudflare-worker.mjs"
   }
