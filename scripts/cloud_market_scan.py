@@ -213,7 +213,8 @@ async def collect_scan() -> dict[str, Any]:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "READ_ONLY_MARKET_SCAN",
-        "exchange": settings.cex_exchange,
+        "exchange": tickers.get("exchange", settings.cex_exchange) if isinstance(tickers, dict) else settings.cex_exchange,
+        "configured_exchange": settings.cex_exchange,
         "symbols": symbols,
         "live_symbol_count": live_count,
         "analysis_ready_count": analysis_ready_count,
@@ -234,7 +235,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "# Scheduled crypto market scan",
         "",
         f"- Generated: {report['generated_at']}",
-        f"- Exchange: {report['exchange']}",
+        f"- Configured exchange: {report['configured_exchange']}",
+        f"- Actual market-data adapter: {report['exchange']}",
         f"- Mode: `{report['mode']}`",
         f"- Fresh symbols with strategy data: {report['live_symbol_count']}/{len(report['results'])}",
         f"- Source-, quote- and timeframe-verified analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
@@ -252,8 +254,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{'yes' if row['timeframes_aligned'] else 'no'} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
-        if row.get("error") or row.get("reason") or row.get("signal_block_reasons"):
-            notes = [row.get("error"), row.get("reason"), *row.get("signal_block_reasons", [])]
+        source_note = (
+            f"ticker={row['ticker_provider'] or 'unknown'}/{row['ticker_quote_currency'] or 'unknown'}; "
+            f"candles={row['strategy_provider'] or 'unknown'}/{row['strategy_quote_currency'] or 'unknown'}"
+        )
+        if row.get("error") or row.get("reason") or row.get("signal_block_reasons") or source_note:
+            notes = [source_note, row.get("error"), row.get("reason"), *row.get("signal_block_reasons", [])]
             note = "; ".join(item for item in notes if item)
             lines.append(f"\n**{row['symbol']} note:** {note}\n")
     lines.extend([
