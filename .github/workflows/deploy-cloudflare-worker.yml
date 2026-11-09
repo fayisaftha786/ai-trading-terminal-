@@ -22,7 +22,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: "22"
+          node-version: "24"
 
       - name: Validate source
         run: npm run check
@@ -48,3 +48,46 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
           command: deploy --tag ${{ github.sha }} --message "Git commit ${{ github.sha }}"
+
+      - name: Verify deployed Worker revision and PAPER-only safety
+        env:
+          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
+          EXPECTED_WORKER_TAG: ${{ github.sha }}
+        shell: bash
+        run: |
+          for attempt in $(seq 1 12); do
+            response="$(curl --fail --silent --max-time 15 "$WORKER_HEALTH_URL" 2>/dev/null || true)"
+            if [ -n "$response" ] && printf '%s' "$response" | node -e '
+              let raw = "";
+              process.stdin.setEncoding("utf8");
+              process.stdin.on("data", (chunk) => { raw += chunk; });
+              process.stdin.on("end", () => {
+                try {
+                  const health = JSON.parse(raw);
+                  const checks = {
+                    workerIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
+                    commitTagMatches: health.worker_version?.tag === process.env.EXPECTED_WORKER_TAG,
+                    statusOk: health.status === "ok",
+                    paperOnly: health.mode === "paper_only",
+                    liveTradingDisabled: health.live_trading_enabled === false,
+                    binanceTestnetDisabled: health.binance_testnet_enabled === false
+                  };
+                  if (Object.values(checks).every(Boolean)) {
+                    console.log("Deployed Worker revision and PAPER-only safety verified.");
+                    return;
+                  }
+                  console.error("Worker health checks did not pass:", JSON.stringify(checks));
+                  process.exitCode = 1;
+                } catch (error) {
+                  console.error("Worker health endpoint returned invalid JSON:", error.message);
+                  process.exitCode = 1;
+                }
+              });
+            '; then
+              exit 0
+            fi
+            echo "Deployment health check attempt $attempt/12 did not match the expected revision; retrying."
+            sleep 10
+          done
+          echo "::error::Production Worker did not report the expected commit tag and PAPER-only safety flags."
+          exit 1
