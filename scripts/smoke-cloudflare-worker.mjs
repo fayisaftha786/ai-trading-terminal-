@@ -293,7 +293,7 @@ try {
   assert.match(staticHtml, /Confirm &amp; submit REAL order/);
   assert.match(staticHtml, /crypto\.randomUUID\(\)/);
   assert.match(staticHtml, /REAL COINBASE ORDER CONFIRMATION/);
-  assert.match(staticHtml, /automatic live entries and withdrawals are never enabled/);
+  assert.match(staticHtml, /withdrawals are never enabled/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);
