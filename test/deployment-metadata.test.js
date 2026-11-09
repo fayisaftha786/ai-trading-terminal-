@@ -12,7 +12,7 @@ test("Worker health binds only a validated deployment Git SHA", () => {
   assert.match(workerSource, /typeof env\.DEPLOY_COMMIT_SHA === "string"/);
   assert.match(workerSource, /\/\^\[a-f0-9\]\{40\}\$\/i\.test\(env\.DEPLOY_COMMIT_SHA\)/);
   assert.match(workerSource, /deployment_commit_sha: deploymentCommitSha/);
-  assert.match(workerSource, /deploymentCommitSha\.toLowerCase\(\)/);
+  assert.match(workerSource, /env\.DEPLOY_COMMIT_SHA\.toLowerCase\(\)/);
   assert.match(workerSource, /worker_version: workerVersion/);
 });
 
