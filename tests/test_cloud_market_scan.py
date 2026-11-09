@@ -1,4 +1,4 @@
-from scripts.cloud_market_scan import compare_market_sources, market_is_fresh, ticker_age_ms, timeframes_are_aligned
+from scripts.cloud_market_scan import compare_market_sources, market_is_fresh, render_markdown, ticker_age_ms, timeframes_are_aligned
 
 
 def test_market_is_fresh_requires_live_and_recent_timestamp():
@@ -88,3 +88,44 @@ def test_timeframes_require_confirmed_matching_directional_regimes():
         {"regime": "DATA_GAP"},
         {"regime": "DATA_GAP"},
     ) is False
+
+
+
+def test_scan_report_discloses_configured_exchange_and_actual_fallback_provider():
+    report = {
+        "generated_at": "2026-11-09T05:20:00+00:00",
+        "configured_exchange": "binance",
+        "exchange": "coinbase_public_fallback",
+        "mode": "READ_ONLY_MARKET_SCAN",
+        "live_symbol_count": 1,
+        "analysis_ready_count": 1,
+        "research_candidate_counts": {
+            "trend_pullback": 0,
+            "volatility_breakout": 0,
+            "range_mean_reversion": 0,
+        },
+        "results": [{
+            "symbol": "BTC/USDT",
+            "ticker_fresh": True,
+            "last": 100.0,
+            "signal": "HOLD",
+            "score": 40,
+            "regime_1h": "DOWNTREND",
+            "confirmation_timeframe": "6h",
+            "regime_confirmation": "DOWNTREND",
+            "providers_match": True,
+            "timeframes_aligned": True,
+            "spread_bps": 1.0,
+            "ticker_provider": "coinbase_public_fallback",
+            "strategy_provider": "coinbase_public_fallback",
+            "ticker_quote_currency": "USD",
+            "strategy_quote_currency": "USD",
+            "signal_block_reasons": [],
+        }],
+    }
+
+    rendered = render_markdown(report)
+    assert "Configured exchange: binance" in rendered
+    assert "Actual market-data adapter: coinbase_public_fallback" in rendered
+    assert "ticker=coinbase_public_fallback/USD" in rendered
+    assert "candles=coinbase_public_fallback/USD" in rendered
