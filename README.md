@@ -40,6 +40,16 @@ A HOLD result is intentional when the configured strategy filters do not align. 
 
 The read-only scanner now reports ticker and candle-analysis providers plus their quote currencies separately. It downgrades signals to HOLD unless both feeds match exactly, preventing a Binance USDT ticker from being paired with Coinbase USD candles during fallback.
 
+## Strategy research lab
+
+The read-only market scanner now compares three separate spot-long research hypotheses alongside the existing trend signal:
+
+- `trend_pullback`: higher-timeframe uptrend, EMA20 reclaim after a pullback, positive directional strength, controlled RSI and ATR.
+- `volatility_breakout`: close above the prior 20-bar high, at least 1.5x relative volume, ADX/positive directional movement and controlled ATR.
+- `range_mean_reversion`: range regime on both timeframes, low ADX, RSI at or below 40, and a confirmed reclaim of the lower Bollinger band (not a falling-knife entry).
+
+The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. Its scores are transparent rule counts, not probabilities or model confidence. It does not connect to the automatic paper executor. Candidate strategies must undergo separate chronological out-of-sample/walk-forward tests, realistic fee/slippage stress and forward PAPER observation before any future promotion.
+
 ## Security and limitations
 
 - No profit or positive return is guaranteed. A working bot can still lose money in simulation and live markets.
