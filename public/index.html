@@ -472,7 +472,6 @@ async function loadLiveStatus(){
     const status=await api("/api/live/status");
     coinbaseStaticStatus=status;
     renderCoinbaseConnection(status,coinbasePreflightResult,coinbasePreflightAtMs);
-    $("livePreview").disabled=!status.order_preview_available;
     $("liveSubmit").disabled=true;
     livePreviewResult=null;
   }catch(error){
@@ -508,7 +507,7 @@ async function loadTradingMode(){
       ?"Manual spot orders only after fresh Coinbase preflight, preview and explicit confirmation."
       :"Manual spot orders require configured CDP Trade permission, execution secret, balance, preview and explicit confirmation.";
     if(!demo&&state.real?.connection_status==="credentials_configured_preflight_required"){
-      await runCoinbasePreflight({silent:true});
+      await runCoinbasePreflight({silent:true}).catch(()=>null);
     }else if(demo){
       $("liveSubmit").disabled=true;
     }
@@ -758,7 +757,7 @@ async function runTournament(){
 $("runTournament").addEventListener("click",runTournament);
 async function boot(){try{const healthResponse=await fetch("/api/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Backend health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
 setInterval(()=>{
-  if(!document.hidden&&token&&currentTradingMode==="real"){
+  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true){
     runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
       $("coinbaseSyncState").textContent="SYNC FAILED";
       $("coinbaseSyncState").className="feed-pill offline";
@@ -767,7 +766,7 @@ setInterval(()=>{
   }
 },COINBASE_ACCOUNT_SYNC_INTERVAL_MS);
 document.addEventListener("visibilitychange",()=>{
-  if(!document.hidden&&token&&currentTradingMode==="real"&&
+  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true&&
      (!coinbasePreflightAtMs||Date.now()-coinbasePreflightAtMs>=COINBASE_ACCOUNT_SYNC_INTERVAL_MS)){
     runCoinbasePreflight({silent:true}).catch(()=>{});
   }
