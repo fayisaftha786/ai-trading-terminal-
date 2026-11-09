@@ -445,8 +445,9 @@ test("current provider failure diagnostics include selected endpoint failures, n
 
 test("scheduled scan waits for in-flight manual scan instead of reusing it as a scheduled result", async () => {
   let releaseManual;
+  let activeScan = null;
   const manualScan = new Promise((resolve) => { releaseManual = resolve; });
-  let activeScan = manualScan;
+  activeScan = manualScan.finally(() => { activeScan = null; });
   let scheduledStarted = false;
 
   const scheduled = runAfterActiveScan(
@@ -466,8 +467,9 @@ test("scheduled scan waits for in-flight manual scan instead of reusing it as a 
 });
 
 test("scheduled scan still runs after an in-flight manual scan rejects", async () => {
+  let activeScan = null;
   const failedManualScan = Promise.reject(new Error("manual provider failure"));
-  let activeScan = failedManualScan;
+  activeScan = failedManualScan.finally(() => { activeScan = null; });
   const result = await runAfterActiveScan(
     () => activeScan,
     () => {
