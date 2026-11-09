@@ -1168,8 +1168,8 @@ export class TradingEngine extends DurableObject {
           six_hour: snapshot.six_hour_audit,
           received_at_ms: Date.now()
         });
-        const primary = analyzeTimeframe(snapshot.one_hour_audit);
-        const higher = analyzeTimeframe(snapshot.six_hour_audit);
+        const primary = analyzeTimeframe(snapshot.one_hour_audit, 3600000);
+        const higher = analyzeTimeframe(snapshot.six_hour_audit, 21600000);
         const strategyResearch = evaluateResearchCandidates(
           snapshot.one_hour_audit, snapshot.six_hour_audit, 6 * 60 * 60 * 1000
         );
