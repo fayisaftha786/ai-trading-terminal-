@@ -12,6 +12,12 @@
  * printed recently. Entry eligibility still requires a fresh exchange
  * timestamp in assessCandidate/assessMarketUniverse.
  */
+/**
+ * A newly received ticker response is a usable mark for an existing PAPER
+ * position even when no recent trade printed. Exchange event time is checked
+ * separately for entries; exits only require a fresh local observation and
+ * valid bid/ask values.
+ */
 export function isFreshQuoteObservation(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
   if (market?.status !== "live") return false;
   const hasReceivedAt = Object.prototype.hasOwnProperty.call(market, "quote_received_at_ms");
@@ -21,20 +27,46 @@ export function isFreshQuoteObservation(market, nowMs = Date.now(), maxQuoteAgeM
     const receivedAge = nowMs - receivedAt;
     if (receivedAge < -5000 || receivedAge > maxQuoteAgeMs) return false;
     const eventTime = Date.parse(market.ticker_time || "");
-    return Number.isFinite(eventTime) && eventTime <= nowMs + 5000;
+    return !Number.isFinite(eventTime) || eventTime <= nowMs + 5000;
   }
 
-  // Backward compatibility for persisted snapshots created before the local
-  // retrieval timestamp was introduced.
+  // Backward compatibility for snapshots created before local receipt time
+  // was persisted: use the exchange ticker timestamp as the only observation.
   const quoteTime = Date.parse(market.ticker_time || "");
   const age = nowMs - quoteTime;
   return Number.isFinite(quoteTime) && age >= -5000 && age <= maxQuoteAgeMs;
 }
 
+/** New entries also require a recent actual exchange trade timestamp. */
+export function isFreshTickerEvent(market, nowMs = Date.now(), maxEventAgeMs = 120000) {
+  if (!isFreshQuoteObservation(market, nowMs, maxEventAgeMs)) return false;
+  const quoteTime = Date.parse(market?.ticker_time || "");
+  const age = nowMs - quoteTime;
+  return Number.isFinite(quoteTime) && age >= -5000 && age <= maxEventAgeMs;
+}
+
+/**
+ * Exit marks use the current response receipt time, not the last-trade time.
+ * Old trade timestamps are therefore allowed for quiet markets, but malformed
+ * or future timestamps are still rejected when present.
+ */
 export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
-  return isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs) &&
-    Number.isFinite(market.bid) && market.bid > 0 &&
-    Number.isFinite(market.ask) && market.ask >= market.bid;
+  if (market?.status !== "live" ||
+      !Number.isFinite(market.bid) || market.bid <= 0 ||
+      !Number.isFinite(market.ask) || market.ask < market.bid) return false;
+
+  if (!Object.prototype.hasOwnProperty.call(market, "quote_received_at_ms")) {
+    const quoteTime = Date.parse(market.ticker_time || "");
+    const age = nowMs - quoteTime;
+    return Number.isFinite(quoteTime) && age >= -5000 && age <= maxQuoteAgeMs;
+  }
+
+  const receivedAt = Number(market.quote_received_at_ms);
+  if (!Number.isFinite(receivedAt) || receivedAt <= 0) return false;
+  const receivedAge = nowMs - receivedAt;
+  if (receivedAge < -5000 || receivedAge > maxQuoteAgeMs) return false;
+  const eventTime = Date.parse(market.ticker_time || "");
+  return !Number.isFinite(eventTime) || eventTime <= nowMs + 5000;
 }
 
 export function buildFreshBidMarks(markets, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
@@ -398,7 +430,8 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
       !Number.isFinite(costs.slippageBps) || costs.slippageBps < 0) {
     return reject("execution_cost_assumptions_invalid");
   }
-  if (!isFreshQuoteObservation(market, nowMs, 120000)) {
+  if (!isFreshQuoteObservation(market, nowMs, 120000) ||
+      !isFreshTickerEvent(market, nowMs, 120000)) {
     return reject("ticker_stale_or_timestamp_invalid");
   }
   const { bid, ask, last, quote_volume_usd: quoteVolume } = market;
