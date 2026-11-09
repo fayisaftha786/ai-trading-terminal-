@@ -6,7 +6,9 @@ import {
   coinbaseAdvancedStatus,
   preflightCoinbaseAdvanced,
   previewCoinbaseAdvancedLimitBuy,
+  previewCoinbaseAdvancedLimitSell,
   submitCoinbaseAdvancedLimitBuy,
+  submitCoinbaseAdvancedLimitSell,
   reconcileCoinbaseAdvancedOrder,
   cancelCoinbaseAdvancedOrder
 } from "./coinbase-advanced.js";
@@ -277,17 +279,12 @@ export class TradingEngine extends DurableObject {
           scan_diagnostics: diagnostics
         });
       }
-      // Coinbase Advanced account preflight and order preview are deliberately
-      // separated from execution. There is no /api/live/execute route in this build.
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
-        return jsonResponse({
-          error: "live_order_executor_not_implemented_or_approved",
-          live_trading_enabled: false,
-          order_submission_available: false,
-          automatic_live_entries_enabled: false
-        }, 423);
-      }
-      if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real")
+          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"], order_submission_available: false }, 409);
+        if (settings.auto_paper_enabled === true)
+          return jsonResponse({ status: "blocked", blockers: ["paper_auto_entry_must_be_off_in_real_mode"], order_submission_available: false }, 409);
         const executionStatus = coinbaseAdvancedStatus(this.env);
         if (!executionStatus.order_submission_available) {
           return jsonResponse({
@@ -310,11 +307,26 @@ export class TradingEngine extends DurableObject {
           return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400);
         }
         const clientOrderId = body?.client_order_id;
-        if (body?.confirm_real_order !== true ||
-            typeof clientOrderId !== "string" ||
-            !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId)) {
-          return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_and_client_order_id_required"] }, 400);
-        }
+        const side = String(body?.side || "BUY").toUpperCase();
+        if (body?.confirm_real_order !== true || !["BUY","SELL"].includes(side) ||
+            typeof clientOrderId !== "string" || !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId))
+          return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_valid_side_and_client_order_id_required"] }, 400);
+        const previewId = body?.preview_id;
+        const quoteSize = side === "BUY" ? String(body?.quote_size ?? "") : "";
+        const baseSize = side === "SELL" ? String(body?.base_size ?? "") : "";
+        const previewRecords = this.getState("coinbase_live_previews") || [];
+        const storedPreview = previewRecords.find((item) => item.preview_id === previewId);
+        const previewAgeMs = storedPreview ? Date.now() - Number(storedPreview.created_at_ms) : Infinity;
+        const previewMatches = storedPreview && previewAgeMs >= 0 && previewAgeMs <= 120000 &&
+          storedPreview.product_id === String(body?.product_id || "").toUpperCase() &&
+          storedPreview.side === side &&
+          storedPreview.limit_price === String(body?.limit_price ?? "") &&
+          storedPreview.commission_total === String(body?.commission_total ?? "") &&
+          (side === "BUY" ? storedPreview.quote_size === quoteSize : storedPreview.base_size === baseSize);
+        if (!previewMatches)
+          return jsonResponse({ status: "blocked", blockers: ["fresh_matching_server_stored_preview_required"], order_submission_available: false }, 409);
+        // Consume the server-stored preview before calling Coinbase so it cannot be replayed.
+        this.setState("coinbase_live_previews", previewRecords.filter((item) => item.preview_id !== previewId));
         const records = this.getState("coinbase_live_orders") || [];
         const prior = records.find((item) => item.client_order_id === clientOrderId);
         if (prior) return jsonResponse({ status: "duplicate_or_existing_order", order: prior }, 409);
@@ -338,7 +350,7 @@ export class TradingEngine extends DurableObject {
         const record = {
           client_order_id: clientOrderId,
           product_id: String(body.product_id || "").toUpperCase(),
-          side: "BUY",
+          side,
           status: "SUBMITTING",
           created_at_ms: Date.now(),
           updated_at_ms: Date.now(),
@@ -347,13 +359,11 @@ export class TradingEngine extends DurableObject {
         records.unshift(record);
         this.setState("coinbase_live_orders", records.slice(0, 100));
         try {
-          const result = await submitCoinbaseAdvancedLimitBuy(this.env, {
-            productId: body.product_id,
-            quoteSize: body.quote_size,
-            limitPrice: body.limit_price,
-            commissionTotal: body.commission_total,
-            previewId: body.preview_id,
-            clientOrderId
+          const submitOrder = side === "BUY" ? submitCoinbaseAdvancedLimitBuy : submitCoinbaseAdvancedLimitSell;
+          const result = await submitOrder(this.env, {
+            productId: body.product_id, quoteSize: body.quote_size, baseSize: body.base_size,
+            limitPrice: body.limit_price, commissionTotal: body.commission_total,
+            previewId: body.preview_id, clientOrderId
           });
           Object.assign(record, result, { updated_at_ms: Date.now() });
           const current = this.getState("coinbase_live_orders") || [];
@@ -380,6 +390,9 @@ export class TradingEngine extends DurableObject {
         return jsonResponse({ orders: records.slice(0, 100), count: records.length });
       }
       if (request.method === "POST" && url.pathname === "/api/live/reconcile") {
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real")
+          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"] }, 409);
         let body;
         try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
         const records = this.getState("coinbase_live_orders") || [];
@@ -405,6 +418,9 @@ export class TradingEngine extends DurableObject {
         }
       }
       if (request.method === "POST" && url.pathname === "/api/live/cancel") {
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real")
+          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"] }, 409);
         let body;
         try { body = await request.json(); } catch { return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400); }
         const records = this.getState("coinbase_live_orders") || [];
@@ -432,7 +448,9 @@ export class TradingEngine extends DurableObject {
             connection_status: live.credentials_configured ? "credentials_configured_preflight_required" : "not_configured",
             account_preflight_available: live.account_preflight_available,
             order_preview_available: live.order_preview_available,
-            order_submission_available: false,
+            order_submission_available: live.order_submission_available === true,
+            manual_live_orders_enabled: live.manual_live_orders_enabled === true,
+            submission_blockers: live.submission_blockers || [],
             live_trading_enabled: false,
             automatic_live_entries_enabled: false,
             withdrawal_permission_required: false,
@@ -479,6 +497,9 @@ export class TradingEngine extends DurableObject {
         return jsonResponse(result);
       }
       if (request.method === "POST" && url.pathname === "/api/live/order-preview") {
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real")
+          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["real_mode_must_be_selected"], order_submission_available: false }, 409);
         let rawBody;
         try { rawBody = await request.text(); } catch {
           return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_request_body"], order_submission_available: false }, 400);
@@ -491,11 +512,26 @@ export class TradingEngine extends DurableObject {
           return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_json"], order_submission_available: false }, 400);
         }
         try {
-          const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
-            productId: body.product_id,
-            quoteSize: body.quote_size,
-            limitPrice: body.limit_price
+          const side = String(body.side || "BUY").toUpperCase();
+          if (!["BUY","SELL"].includes(side))
+            return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["spot_order_side_must_be_buy_or_sell"], order_submission_available: false }, 400);
+          const previewOrder = side === "BUY" ? previewCoinbaseAdvancedLimitBuy : previewCoinbaseAdvancedLimitSell;
+          const result = await previewOrder(this.env, {
+            productId: body.product_id, quoteSize: body.quote_size, baseSize: body.base_size, limitPrice: body.limit_price
           });
+          if (result.status === "preview_ready" && typeof result.preview_id === "string") {
+            const currentPreviews = this.getState("coinbase_live_previews") || [];
+            const nowMs = Date.now();
+            const nextPreviews = currentPreviews.filter((item) =>
+              item.preview_id !== result.preview_id && nowMs - Number(item.created_at_ms) <= 120000
+            ).slice(0, 19);
+            nextPreviews.unshift({
+              preview_id: result.preview_id, product_id: result.product_id, side: result.side,
+              quote_size: result.quote_size || null, base_size: result.base_size || null,
+              limit_price: result.limit_price, commission_total: result.commission_total, created_at_ms: nowMs
+            });
+            this.setState("coinbase_live_previews", nextPreviews);
+          }
           return jsonResponse(result);
         } catch (error) {
           const code = typeof error?.code === "string" ? error.code : "coinbase_advanced_preview_failed";

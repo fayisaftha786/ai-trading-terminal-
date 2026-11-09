@@ -40,7 +40,7 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <section id="login" class="panel login hidden"><div class="eyebrow">PRIVATE INSTANCE</div><h1>AI Trading Terminal</h1><p class="muted">Sign in to your private paper-trading dashboard. API keys are not used here.</p>
 <form id="loginForm"><label>Username<input id="username" autocomplete="username" value="admin" required maxlength="128"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="primary" type="submit">Sign in</button><p id="loginError" class="status"></p></form></section>
 <section id="app" class="hidden">
-<header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Coinbase public market data · virtual ledger · live execution locked</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
+<header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">DEMO virtual ledger · REAL Coinbase manual spot orders</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
 <section class="panel" id="modePanel">
   <div class="row"><h2>Trading mode</h2><span id="modeBadge" class="tag good">DEMO ACTIVE</span></div>
   <div class="mode-switch">
@@ -69,10 +69,11 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <section class="panel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
 
 <section class="panel" id="realModePanel"><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
-<p class="note">REAL mode is currently account-connection and read-only preflight only. Coinbase credentials must be stored as Cloudflare Worker secrets, never in this page or chat. This build does not submit real orders: live BUY/SELL and automatic live entries remain hard-locked. Keep Transfer permission disabled.</p><p class="note">Connection setup: create a Coinbase Developer Platform CDP API key with View permission for the initial account check, then set COINBASE_ADVANCED_API_KEY and COINBASE_ADVANCED_API_SECRET as Worker secrets. Configure an explicit spot-product allowlist and maximum quote cap. Trade permission and live execution must remain disabled until a separate, tested live-order workflow is approved.</p>
+<p class="note">REAL mode supports manual Coinbase Advanced SPOT LIMIT BUY/SELL only. Every order requires a fresh server-stored preview and a separate confirmation click. No automatic live entries, market orders, leverage, futures or transfers are supported. Exchange orders can remain open or partially fill; inspect and reconcile their state.</p><p class="note">Connection setup: create a Coinbase CDP API key with View + Trade permission and Transfer disabled. Store COINBASE_ADVANCED_API_KEY and COINBASE_ADVANCED_API_SECRET only as Cloudflare Worker secrets. Set an explicit SPOT allowlist, a small maximum quote cap, max open orders and max daily orders. Manual live submission also requires COINBASE_ADVANCED_ORDER_ENABLED=true; it remains OFF by default. Never enable Transfer permission or put keys in this page/chat.</p>
 <div class="controls"><button id="livePreflight" type="button">Check account &amp; permissions</button><span id="liveSummary" class="status">Credentials not configured · order submission disabled</span></div>
-<div class="controls"><label>Eligible SPOT product ID<br><input class="live-input" id="liveProduct" maxlength="48" placeholder="Use an eligible product from the preflight"></label><label>Quote amount for preview<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 10.00"></label><label>Limit price for preview<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order only</button><button id="liveSubmit" class="danger" type="button" disabled>Live order submission unavailable</button><button id="liveOrders" type="button">View prior order records</button></div>
-<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Live order submission is disabled in this build. Add CDP key details only through Cloudflare secrets; never paste them into chat or the browser.</pre></section>
+<div class="controls"><label>Eligible SPOT product ID<br><input class="live-input" id="liveProduct" maxlength="48" placeholder="Use an eligible product from the preflight"></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY · spend quote currency</option><option value="SELL">SELL · sell base currency</option></select></label><label id="liveSizeLabel">Quote amount (USD)<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 10.00"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Manual live order gate OFF</button><button id="liveOrders" type="button">View prior order records</button></div>
+<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. The REAL manual order switch is OFF by default. Configure Coinbase CDP secrets and explicit limits only in Cloudflare Worker settings.</pre>
+<div id="liveOrderActions" class="events"><div class="event muted">No REAL orders loaded yet.</div></div></section>
 <section class="panel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
 <section class="panel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
 <section class="panel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
@@ -105,7 +106,7 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <p class="footer">This is not an AI-trained predictive model. Signal scoring is deterministic and uncalibrated. Coinbase public data availability may vary by region. Data gaps, stale quotes, wide spreads and low depth cause HOLD / no entry. Paper fills are approximations; this 90-second monitor is not a real-time exchange-native stop or scalping execution feed. No real funds are moved. No profit is promised.</p>
 </section></main>
 <script>
-const $=(id)=>document.getElementById(id);let token=sessionStorage.getItem("att_cf_token")||"";
+const $=(id)=>document.getElementById(id);let token=sessionStorage.getItem("att_cf_token")||"";let liveOrderPreview=null;
 const money=(value)=>"$"+Number(value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=(value)=>String(value??"").replace(/[&<>"']/g,(char)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 async function api(path,options={}){const headers={"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(options.headers||{})};const response=await fetch(path,{...options,headers,cache:"no-store"});let data={};try{data=await response.json()}catch{}if(response.status===401){token="";sessionStorage.removeItem("att_cf_token");showLogin();throw new Error("Session expired. Sign in again.");}if(!response.ok)throw new Error(data.detail||data.error||"Request failed ("+response.status+")");return data;}
@@ -242,7 +243,7 @@ document.addEventListener("visibilitychange",()=>{
 setInterval(updateTickerFreshness,3000);
 
 function showLogin(){closeMarketFeed();$("app").classList.add("hidden");$("login").classList.remove("hidden");}let currentTradingMode="demo";
-function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();connectMarketFeed();loadMarketChart();}
+function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadTradingMode().then(()=>loadLiveStatus());connectMarketFeed();loadMarketChart();}
 $("loginForm").addEventListener("submit",async(event)=>{event.preventDefault();$("loginError").textContent="Signing in…";try{const response=await fetch("/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({username:$("username").value,password:$("password").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Sign-in failed");token=data.access_token;sessionStorage.setItem("att_cf_token",token);$("password").value="";showApp();await refresh();}catch(error){$("loginError").textContent=error.message;}});
 $("logout").addEventListener("click",()=>{token="";sessionStorage.removeItem("att_cf_token");showLogin();});
 
@@ -251,19 +252,29 @@ async function refreshLiveOrders(){
   const data=await api("/api/live/orders");
   const rows=Array.isArray(data.orders)?data.orders:[];
   $("liveDetails").textContent=JSON.stringify({orders:rows},null,2);
+  $("liveOrderActions").innerHTML=rows.map(order=>{
+    const id=esc(order.client_order_id||"");
+    const status=String(order.status||"UNKNOWN").toUpperCase();
+    const canCancel=order.exchange_order_id&&["PENDING","OPEN","QUEUED","PARTIALLY_FILLED"].includes(status);
+    const cancel=canCancel?'<button type="button" data-live-action="cancel" data-client-order-id="'+id+'">Cancel exchange order</button>':"";
+    return '<div class="event"><strong>'+esc(order.side||"ORDER")+' · '+esc(order.product_id||"—")+
+      '</strong> · '+esc(status)+' · '+esc(order.exchange_order_id||"Awaiting exchange ID")+
+      ' <button type="button" data-live-action="reconcile" data-client-order-id="'+id+'">Reconcile</button> '+cancel+'</div>';
+  }).join("")||'<div class="event muted">No saved REAL orders.</div>';
 }
 async function loadLiveStatus(){
   try{
     const status=await api("/api/live/status");
-    $("liveState").textContent=status.credentials_configured?"CREDENTIALS SET · PREVIEW ONLY":"LIVE LOCKED · SETUP REQUIRED";
+    $("liveState").textContent=status.credentials_configured?"COINBASE CREDENTIALS CONFIGURED":"REAL ACCOUNT NOT CONNECTED";
     $("liveState").className="tag bad";
     $("liveSummary").textContent=(status.credentials_configured?"CDP credentials configured":"CDP credentials not configured")+
-      " · allowlist "+(status.allowed_products_configured?"set":"missing")+
-      " · quote cap "+(status.max_order_quote_configured?String(status.max_order_quote):"missing")+
-      " · submit OFF";
-    $("livePreview").disabled=!status.order_preview_available;
+      " · SPOT allowlist "+(status.allowed_products_configured?"set":"missing")+
+      " · max quote "+(status.max_order_quote_configured?String(status.max_order_quote):"missing")+
+      " · manual submit "+(status.manual_live_orders_enabled?"configured":"OFF")+
+      (Array.isArray(status.submission_blockers)&&status.submission_blockers.length?" · "+status.submission_blockers.join(" · "):"");
+    $("livePreview").disabled=!(status.order_preview_available && currentTradingMode==="real");
     $("liveSubmit").disabled=true;
-    $("liveSummary").textContent += " · live order submission is disabled in this build";
+    $("liveSubmit").textContent=status.manual_live_orders_enabled?"Preview first · then confirm":"Manual live order gate OFF";
   }catch(error){
     $("liveState").textContent="PREFLIGHT UNAVAILABLE";
     $("liveState").className="tag bad";
@@ -281,16 +292,16 @@ async function loadTradingMode(){
     $("realModeBtn").classList.toggle("active",!demo);
     $("demoModeBtn").setAttribute("aria-pressed",String(demo));
     $("realModeBtn").setAttribute("aria-pressed",String(!demo));
-    $("modeBadge").textContent=demo?"DEMO ACTIVE":"REAL SELECTED · ORDERS LOCKED";
+    $("modeBadge").textContent=demo?"DEMO ACTIVE":"REAL SELECTED · MANUAL ONLY";
     $("modeBadge").className="tag "+(demo?"good":"bad");
     $("modeNote").textContent=demo
       ?"DEMO is selected. Coinbase public market data feeds the market scanner; BUY/SELL are recorded only in the virtual paper ledger. No real funds are used. Auto-entry remains OFF until you explicitly enable it."
-      :"REAL account mode is selected. Paper auto-entry has been switched OFF. Coinbase account preflight is available below, but this build cannot submit real BUY/SELL orders or run automatic live entries.";
+      :"REAL mode is selected. Paper auto-entry is OFF. Run Coinbase account preflight; after explicit server configuration you can preview and confirm manual spot LIMIT BUY/SELL orders. Automatic live entries remain disabled.";
     $("autoToggle").disabled=!demo;
     $("autoToggle").title=demo?"Paper-only automatic entries. No real funds are used.":"Switch back to DEMO before enabling paper auto-entry.";
     $("realModeBtn").title=state.real?.order_submission_available===true
-      ?"Real order route reported available; confirm safety review before proceeding."
-      :"Coinbase connection/preflight only; live order submission remains disabled.";
+      ?"Manual Coinbase order gate configured; account preflight and per-order confirmation are required."
+      :"Coinbase manual order setup is incomplete; inspect the REAL account panel.";
   }catch(error){
     $("modeBadge").textContent="MODE STATUS UNAVAILABLE";
     $("modeBadge").className="tag bad";
@@ -312,6 +323,7 @@ async function selectTradingMode(mode){
   }finally{
     $("demoModeBtn").disabled=false;$("realModeBtn").disabled=false;
     await loadTradingMode();
+    await loadLiveStatus();
   }
 }
 $("demoModeBtn").addEventListener("click",()=>selectTradingMode("demo"));
@@ -322,10 +334,15 @@ $("livePreflight").addEventListener("click",async()=>{
     const result=await api("/api/live/preflight",{method:"POST",body:"{}"});
     $("liveDetails").textContent=JSON.stringify(result,null,2);
     const ready=result.status==="preflight_ready_for_manual_order_preview";
-    $("liveState").textContent=ready?"PREVIEW READY · NO ORDER ROUTE":"LIVE LOCKED · "+String(result.status||"BLOCKED").toUpperCase();
+    $("liveState").textContent=ready
+      ?(result.order_submission_available?"ACCOUNT READY · MANUAL ORDERS CONFIGURED":"ACCOUNT READ-ONLY / MANUAL ORDER GATE OFF")
+      :"ACCOUNT CHECK · "+String(result.status||"BLOCKED").toUpperCase();
     $("liveState").className="tag bad";
-    $("liveSummary").textContent=(result.eligible_products||[]).join(", ")||((result.blockers||[]).join(" · ")||"No eligible product");
-    $("livePreview").disabled=!ready;
+    $("liveSummary").textContent=(result.eligible_products||[]).join(", ")||
+      ((result.blockers||[]).join(" · ")||"No eligible SPOT product");
+    $("livePreview").disabled=!(ready && currentTradingMode==="real");
+    $("liveSubmit").disabled=true;
+    liveOrderPreview=null;
     if(ready&&result.eligible_products?.length&&!$("liveProduct").value)$("liveProduct").value=result.eligible_products[0];
   }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
   finally{$("livePreflight").disabled=false;$("livePreflight").textContent="Check account & permissions";}
@@ -333,20 +350,87 @@ $("livePreflight").addEventListener("click",async()=>{
 $("livePreview").addEventListener("click",async()=>{
   $("livePreview").disabled=true;$("livePreview").textContent="Previewing…";
   try{
-    const result=await api("/api/live/order-preview",{method:"POST",body:JSON.stringify({
-      product_id:$("liveProduct").value,quote_size:$("liveQuoteSize").value,limit_price:$("liveLimitPrice").value
-    })});
-    $("liveSubmit").disabled=true;
+    const side=$("liveSide").value;
+    const size=$("liveQuoteSize").value;
+    const body={product_id:$("liveProduct").value,side,limit_price:$("liveLimitPrice").value};
+    if(side==="BUY")body.quote_size=size;else body.base_size=size;
+    const result=await api("/api/live/order-preview",{method:"POST",body:JSON.stringify(body)});
+    liveOrderPreview=result.status==="preview_ready"?result:null;
+    const canSubmit=!!(liveOrderPreview && result.order_submission_available===true && currentTradingMode==="real");
+    $("liveSubmit").disabled=!canSubmit;
+    $("liveSubmit").textContent=canSubmit?"Confirm & submit REAL "+side:"Manual live order gate OFF";
     $("liveDetails").textContent=JSON.stringify(result,null,2);
     $("liveSummary").textContent=result.status==="preview_ready"
-      ?"Preview valid · fee "+String(result.commission_total)+" "+String(result.quote_currency)+" · NO ORDER SENT"
+      ?"Preview valid · "+side+" · fee "+String(result.commission_total)+" "+String(result.quote_currency)+" · NO ORDER SENT"+
+        (canSubmit?" · ready for explicit confirmation":" · "+((result.submission_blockers||[]).join(" · ")||"order switch / trade permission not ready"))
       :(result.blockers||result.preview_errors||[]).join(" · ")||result.status;
-    $("liveState").textContent="PREVIEW ONLY · LIVE SUBMISSION DISABLED";
+    $("liveState").textContent=canSubmit?"PREVIEW READY · NO ORDER SENT":"PREVIEW ONLY · SUBMIT GATE OFF";
     $("liveState").className="tag bad";
   }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
   finally{$("livePreview").disabled=false;$("livePreview").textContent="Preview LIMIT order only";}
 });
 
+$("liveSubmit").addEventListener("click",async()=>{
+  const preview=liveOrderPreview;
+  if(!preview || preview.status!=="preview_ready" || preview.order_submission_available!==true){
+    $("liveSummary").textContent="Create a new verified preview before submitting.";
+    $("liveSubmit").disabled=true;return;
+  }
+  if(Date.now()-Number(preview.checked_at_ms)>120000){
+    liveOrderPreview=null;$("liveSubmit").disabled=true;
+    $("liveSummary").textContent="Preview expired. Run a fresh account check and preview.";return;
+  }
+  const side=preview.side;
+  const sizeText=side==="BUY"?String(preview.quote_size):String(preview.base_size);
+  const prompt="SEND REAL COINBASE "+side+" LIMIT ORDER?\n\n"+
+    preview.product_id+" · "+(side==="BUY"?"quote amount ":"base amount ")+sizeText+
+    "\nLimit: "+preview.limit_price+"\nEstimated fee: "+preview.commission_total+" "+preview.quote_currency+
+    "\n\nThis sends one real exchange order. It may remain open or partially fill. Continue?";
+  if(!confirm(prompt))return;
+  const clientOrderId=crypto.randomUUID();
+  const body={confirm_real_order:true,client_order_id:clientOrderId,preview_id:preview.preview_id,
+    product_id:preview.product_id,side,limit_price:preview.limit_price,commission_total:preview.commission_total};
+  if(side==="BUY")body.quote_size=preview.quote_size;else body.base_size=preview.base_size;
+  $("liveSubmit").disabled=true;$("liveSubmit").textContent="Sending…";
+  try{
+    const result=await api("/api/live/execute",{method:"POST",body:JSON.stringify(body)});
+    $("liveDetails").textContent=JSON.stringify(result,null,2);
+    $("liveSummary").textContent=(result.status||"Order response")+" · "+
+      (result.exchange_order_id||result.error_code||"check order record")+" · reconcile before assuming a fill";
+    $("liveState").textContent=result.status==="PENDING"?"REAL ORDER ACCEPTED · PENDING":String(result.status||"ORDER RESULT").toUpperCase();
+  }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
+  finally{
+    liveOrderPreview=null;$("liveSubmit").disabled=true;$("liveSubmit").textContent="Preview a new order";
+    try{await refreshLiveOrders();}catch{}
+    await loadLiveStatus();
+  }
+});
+$("liveSide").addEventListener("change",()=>{
+  liveOrderPreview=null;$("liveSubmit").disabled=true;
+  const sell=$("liveSide").value==="SELL";
+  $("liveSizeLabel").firstChild.textContent=sell
+    ?"Base amount ("+($("liveProduct").value.split("-")[0]||"base")+")":"Quote amount (USD)";
+  $("liveQuoteSize").placeholder=sell?"e.g. 0.0001":"e.g. 10.00";
+});
+$("liveProduct").addEventListener("change",()=>{liveOrderPreview=null;$("liveSubmit").disabled=true;});
+$("liveQuoteSize").addEventListener("input",()=>{liveOrderPreview=null;$("liveSubmit").disabled=true;});
+$("liveLimitPrice").addEventListener("input",()=>{liveOrderPreview=null;$("liveSubmit").disabled=true;});
+$("liveOrderActions").addEventListener("click",async(event)=>{
+  const button=event.target.closest("button[data-live-action]");
+  if(!button)return;
+  const clientOrderId=button.dataset.clientOrderId;
+  const action=button.dataset.liveAction;
+  if(!clientOrderId || !["reconcile","cancel"].includes(action))return;
+  if(action==="cancel"&&!confirm("Send a cancellation request to Coinbase for this REAL order?"))return;
+  button.disabled=true;
+  try{
+    const result=await api("/api/live/"+action,{method:"POST",body:JSON.stringify({client_order_id:clientOrderId})});
+    $("liveDetails").textContent=JSON.stringify(result,null,2);
+    $("liveSummary").textContent=action==="cancel"?"Cancellation requested; reconcile exchange state.":"Exchange order status reconciled.";
+    await refreshLiveOrders();
+  }catch(error){$("liveSummary").textContent=error.message;}
+  finally{button.disabled=false;}
+});
 $("liveOrders").addEventListener("click",async()=>{try{await refreshLiveOrders();}catch(error){$("liveSummary").textContent=error.message;}});
 function renderEquityHistory(history){
   const rows=(Array.isArray(history)?history:[]).filter(row=>
@@ -382,7 +466,7 @@ function renderEquityHistory(history){
   windowLabel.textContent="Coverage: "+first.toLocaleString()+" → "+last.toLocaleString()+" · "+duration.toFixed(1)+"h";
   rangeLabel.textContent="Latest "+money(latest)+" · "+(delta>=0?"+":"")+money(delta)+" since first sample"+(maxDd===null?"":" · sampled max DD "+maxDd.toFixed(2)+"%");
 }
-async function refresh(){try{const data=await api("/api/dashboard");await loadTradingMode();$("apiState").textContent="API ONLINE · LIVE LOCKED";$("apiState").className="tag good";const p=data.portfolio||{};$("equity").textContent=money(p.equity_usd);$("realized").textContent=money(p.realized_pnl_usd);$("positions").textContent=String(p.open_positions||0);$("exposure").textContent=money(p.exposure_usd)+" exposure";$("drawdown").textContent=Number.isFinite(p.drawdown_pct_from_peak)?Number(p.drawdown_pct_from_peak).toFixed(2)+"%":(p.unmarked_positions>0?"UNMARKED":"—");const rp=data.risk_protection||{};const rpReasons=Array.isArray(rp.block_reasons)?rp.block_reasons:[];$("riskProtection").textContent="New entries: "+(rp.new_entries_paused?"PAUSED":"eligible for normal gates")+" · Effective risk: "+(Number.isFinite(rp.effective_risk_per_trade_pct)?Number(rp.effective_risk_per_trade_pct).toFixed(3)+"%":"—")+" · Adaptive size: "+(Number.isFinite(rp.adaptive_risk_multiplier)?Math.round(rp.adaptive_risk_multiplier*100)+"%":"—")+" · Loss streak: "+String(rp.consecutive_loss_streak??0)+" · Cooldown: "+(rp.loss_cooldown_active?Math.ceil(Number(rp.loss_cooldown_remaining_ms||0)/60000)+"m remaining":"clear")+(rpReasons.length?" · Guards: "+rpReasons.join(", "):"")+" · Trailing stop: "+(rp.trailing_stop?.enabled?"ON":"OFF");const x=data.analytics||{};renderEquityHistory(x.equity_history||[]);$("closedTrades").textContent=String(x.closed_trades||0);$("tradeCoverage").textContent=String(x.total_trades||0)+" total recorded · "+String(x.open_trades||0)+" open";$("winRate").textContent=Number.isFinite(x.win_rate_pct)?Number(x.win_rate_pct).toFixed(1)+"%":"—";$("profitFactor").textContent=x.profit_factor_unbounded?"∞":Number.isFinite(x.profit_factor)?Number(x.profit_factor).toFixed(2):"—";$("expectancy").textContent=Number.isFinite(x.expectancy_per_closed_trade_usd)?money(x.expectancy_per_closed_trade_usd):"—";$("tradeRiskStats").textContent="Fees: "+money(x.total_fees_usd)+" · Avg hold: "+(Number.isFinite(x.average_holding_minutes)?Number(x.average_holding_minutes).toFixed(1)+" min":"—")+" · Longest loss streak (latest 1000): "+String(x.longest_loss_streak_in_latest_1000_closed||0);const audit=x.execution_audit||{};$("executionAuditStats").textContent="MODELED PAPER EXECUTION · "+String(audit.sample_count||0)+" ledger trades sampled · Entry spread: "+(Number.isFinite(audit.average_entry_spread_bps)?Number(audit.average_entry_spread_bps).toFixed(2)+" bps ("+String(audit.entry_spread_sample_count)+")":"—")+" · Entry slippage: "+(Number.isFinite(audit.average_entry_slippage_bps)?Number(audit.average_entry_slippage_bps).toFixed(2)+" bps":"—")+" · Exit slippage: "+(Number.isFinite(audit.average_exit_slippage_bps)?Number(audit.average_exit_slippage_bps).toFixed(2)+" bps":"—")+" · Est. round trip: "+(Number.isFinite(audit.average_estimated_round_trip_cost_bps)?Number(audit.average_estimated_round_trip_cost_bps).toFixed(2)+" bps":"—");$("symbolAnalytics").innerHTML=(x.per_symbol||[]).map((s)=>'<tr><td>'+esc(s.symbol)+'</td><td>'+String(s.total_trades)+'</td><td>'+(Number.isFinite(s.win_rate_pct)?Number(s.win_rate_pct).toFixed(1)+"%":"—")+'</td><td class="'+(Number(s.net_pnl_usd)>=0?"positive":"negative")+'">'+money(s.net_pnl_usd)+'</td><td>'+money(s.fees_usd)+'</td></tr>').join("")||'<tr><td colspan="5">No paper trades recorded yet.</td></tr>';$("analyticsCaveat").textContent=(x.closed_trades||0)<30?"Only "+String(x.closed_trades||0)+" closed trades recorded. Treat these statistics as preliminary; at least 30–100+ varied paper trades are needed before judging strategy quality.":"Statistics include all recorded closed paper trades. They remain simulated results, not proof of future profitability.";const a=data.automation||{};$("autoState").textContent=a.halted?"HALTED":a.enabled?"AUTO PAPER ON":"AUTO OFF";$("autoState").className="tag "+(a.halted?"bad":a.enabled?"good":"");$("autoToggle").textContent=a.enabled?"Disable paper auto-entry":"Enable paper auto-entry";$("autoToggle").disabled=!!a.halted||!!a.capital_setup_required||currentTradingMode==="real";$("capitalReview").classList.toggle("hidden",!a.capital_setup_required);$("capitalReview").disabled=Number(p.open_positions||0)>0;$("capitalReview").textContent=Number(p.open_positions||0)>0?"Close open positions before capital review":"Review existing PAPER balance";const runtime=data.runtime||{};const entryDetails=(runtime.last_entry_results||[]).map((result)=>[result.symbol,result.reason].filter(Boolean).join(": ")).filter(Boolean);$("entryDecision").textContent="Last scan entry decision: "+(runtime.last_entry_status||"not_evaluated")+(entryDetails.length?" · "+entryDetails.join(" | "):"")+" — per-market gate reasons are diagnostic; portfolio and global safety gates also apply.";const schedulerLabels={starting:"STARTING",running:"RUNNING",healthy:"HEALTHY",partial:"PARTIAL DATA",unavailable:"DATA UNAVAILABLE",stale:"STALE",error:"ERROR"};const schedulerLabel=schedulerLabels[a.scanner_status]||"UNKNOWN";$("runtime").textContent="Scheduler: "+schedulerLabel+" · "+(a.schedule_seconds||90)+"s · closed cycles "+String(a.daily_cycles_used||0)+"/"+String(a.daily_cycle_limit||5)+(a.capital_setup_required?" · CAPITAL REVIEW REQUIRED":"");const scanAge=a.last_scan_age_ms==null?null:Math.floor(a.last_scan_age_ms/60000);const scheduledAge=a.last_scheduled_alarm_age_ms==null?null:Math.floor(a.last_scheduled_alarm_age_ms/60000);const nextAlarm=a.next_alarm_in_ms==null?null:a.next_alarm_in_ms<=0?"alarm due":"next alarm in "+Math.ceil(a.next_alarm_in_ms/60000)+"m";const scanError=a.last_scheduled_scan_error||a.last_scan_error||runtime.last_scan_error;const lastScanMarketText="Last scan markets "+String(runtime.healthy_market_count??0)+"/"+String(runtime.expected_market_count??3);const scheduledScanAge=runtime.last_scheduled_scan_at_ms==null?null:Math.floor(Math.max(0,Date.now()-Number(runtime.last_scheduled_scan_at_ms))/60000);const scheduledScanMarketText="Last scheduled scan markets "+String(runtime.last_scheduled_scan_healthy_market_count??0)+"/"+String(runtime.last_scheduled_scan_expected_market_count??3)+(scheduledScanAge==null?"":" · "+scheduledScanAge+"m ago");const scheduledScanIssues=(runtime.last_scheduled_scan_issues||[]).map(issue=>[issue.symbol,issue.reason].filter(Boolean).join(": ")).filter(Boolean);const currentFeed=data.current_market_feed||{};const currentMarketText="Current snapshots "+String(currentFeed.healthy_market_count??0)+"/"+String(currentFeed.expected_market_count??3)+" · "+String(currentFeed.status||"unknown").toUpperCase();const currentMarketIssues=(currentFeed.issues||[]).map(issue=>[issue.symbol,issue.reason].filter(Boolean).join(": ")).filter(Boolean);const scanDetails=[runtime.last_scan_at_ms?"Last scan "+new Date(runtime.last_scan_at_ms).toLocaleString()+" · "+(runtime.source||""):"No scan completed yet",scheduledAge==null?"No scheduled alarm recorded":"Last scheduled alarm "+scheduledAge+"m ago · "+(a.last_scheduled_scan_status||"unknown"),lastScanMarketText,scheduledScanMarketText,...scheduledScanIssues.slice(0,3).map(issue=>"Scheduled scan issue: "+issue),currentMarketText,...currentMarketIssues.slice(0,3).map(issue=>"Current data issue: "+issue),"Consecutive scheduled data failures "+String(runtime.consecutive_unhealthy_scheduled_scans||0)+"/3",scanAge==null?null:scanAge+"m since last scan",nextAlarm,scanError?"Scan error: "+scanError:null].filter(Boolean);$("lastScan").textContent=scanDetails.join(" · ");const markets=data.markets||[];$("markets").innerHTML = markets.map((m) => {
+async function refresh(){try{const data=await api("/api/dashboard");await loadTradingMode();$("apiState").textContent=currentTradingMode==="demo"?"API ONLINE · DEMO PAPER":"API ONLINE · REAL SELECTED";$("apiState").className="tag good";const p=data.portfolio||{};$("equity").textContent=money(p.equity_usd);$("realized").textContent=money(p.realized_pnl_usd);$("positions").textContent=String(p.open_positions||0);$("exposure").textContent=money(p.exposure_usd)+" exposure";$("drawdown").textContent=Number.isFinite(p.drawdown_pct_from_peak)?Number(p.drawdown_pct_from_peak).toFixed(2)+"%":(p.unmarked_positions>0?"UNMARKED":"—");const rp=data.risk_protection||{};const rpReasons=Array.isArray(rp.block_reasons)?rp.block_reasons:[];$("riskProtection").textContent="New entries: "+(rp.new_entries_paused?"PAUSED":"eligible for normal gates")+" · Effective risk: "+(Number.isFinite(rp.effective_risk_per_trade_pct)?Number(rp.effective_risk_per_trade_pct).toFixed(3)+"%":"—")+" · Adaptive size: "+(Number.isFinite(rp.adaptive_risk_multiplier)?Math.round(rp.adaptive_risk_multiplier*100)+"%":"—")+" · Loss streak: "+String(rp.consecutive_loss_streak??0)+" · Cooldown: "+(rp.loss_cooldown_active?Math.ceil(Number(rp.loss_cooldown_remaining_ms||0)/60000)+"m remaining":"clear")+(rpReasons.length?" · Guards: "+rpReasons.join(", "):"")+" · Trailing stop: "+(rp.trailing_stop?.enabled?"ON":"OFF");const x=data.analytics||{};renderEquityHistory(x.equity_history||[]);$("closedTrades").textContent=String(x.closed_trades||0);$("tradeCoverage").textContent=String(x.total_trades||0)+" total recorded · "+String(x.open_trades||0)+" open";$("winRate").textContent=Number.isFinite(x.win_rate_pct)?Number(x.win_rate_pct).toFixed(1)+"%":"—";$("profitFactor").textContent=x.profit_factor_unbounded?"∞":Number.isFinite(x.profit_factor)?Number(x.profit_factor).toFixed(2):"—";$("expectancy").textContent=Number.isFinite(x.expectancy_per_closed_trade_usd)?money(x.expectancy_per_closed_trade_usd):"—";$("tradeRiskStats").textContent="Fees: "+money(x.total_fees_usd)+" · Avg hold: "+(Number.isFinite(x.average_holding_minutes)?Number(x.average_holding_minutes).toFixed(1)+" min":"—")+" · Longest loss streak (latest 1000): "+String(x.longest_loss_streak_in_latest_1000_closed||0);const audit=x.execution_audit||{};$("executionAuditStats").textContent="MODELED PAPER EXECUTION · "+String(audit.sample_count||0)+" ledger trades sampled · Entry spread: "+(Number.isFinite(audit.average_entry_spread_bps)?Number(audit.average_entry_spread_bps).toFixed(2)+" bps ("+String(audit.entry_spread_sample_count)+")":"—")+" · Entry slippage: "+(Number.isFinite(audit.average_entry_slippage_bps)?Number(audit.average_entry_slippage_bps).toFixed(2)+" bps":"—")+" · Exit slippage: "+(Number.isFinite(audit.average_exit_slippage_bps)?Number(audit.average_exit_slippage_bps).toFixed(2)+" bps":"—")+" · Est. round trip: "+(Number.isFinite(audit.average_estimated_round_trip_cost_bps)?Number(audit.average_estimated_round_trip_cost_bps).toFixed(2)+" bps":"—");$("symbolAnalytics").innerHTML=(x.per_symbol||[]).map((s)=>'<tr><td>'+esc(s.symbol)+'</td><td>'+String(s.total_trades)+'</td><td>'+(Number.isFinite(s.win_rate_pct)?Number(s.win_rate_pct).toFixed(1)+"%":"—")+'</td><td class="'+(Number(s.net_pnl_usd)>=0?"positive":"negative")+'">'+money(s.net_pnl_usd)+'</td><td>'+money(s.fees_usd)+'</td></tr>').join("")||'<tr><td colspan="5">No paper trades recorded yet.</td></tr>';$("analyticsCaveat").textContent=(x.closed_trades||0)<30?"Only "+String(x.closed_trades||0)+" closed trades recorded. Treat these statistics as preliminary; at least 30–100+ varied paper trades are needed before judging strategy quality.":"Statistics include all recorded closed paper trades. They remain simulated results, not proof of future profitability.";const a=data.automation||{};$("autoState").textContent=a.halted?"HALTED":a.enabled?"AUTO PAPER ON":"AUTO OFF";$("autoState").className="tag "+(a.halted?"bad":a.enabled?"good":"");$("autoToggle").textContent=a.enabled?"Disable paper auto-entry":"Enable paper auto-entry";$("autoToggle").disabled=!!a.halted||!!a.capital_setup_required||currentTradingMode==="real";$("capitalReview").classList.toggle("hidden",!a.capital_setup_required);$("capitalReview").disabled=Number(p.open_positions||0)>0;$("capitalReview").textContent=Number(p.open_positions||0)>0?"Close open positions before capital review":"Review existing PAPER balance";const runtime=data.runtime||{};const entryDetails=(runtime.last_entry_results||[]).map((result)=>[result.symbol,result.reason].filter(Boolean).join(": ")).filter(Boolean);$("entryDecision").textContent="Last scan entry decision: "+(runtime.last_entry_status||"not_evaluated")+(entryDetails.length?" · "+entryDetails.join(" | "):"")+" — per-market gate reasons are diagnostic; portfolio and global safety gates also apply.";const schedulerLabels={starting:"STARTING",running:"RUNNING",healthy:"HEALTHY",partial:"PARTIAL DATA",unavailable:"DATA UNAVAILABLE",stale:"STALE",error:"ERROR"};const schedulerLabel=schedulerLabels[a.scanner_status]||"UNKNOWN";$("runtime").textContent="Scheduler: "+schedulerLabel+" · "+(a.schedule_seconds||90)+"s · closed cycles "+String(a.daily_cycles_used||0)+"/"+String(a.daily_cycle_limit||5)+(a.capital_setup_required?" · CAPITAL REVIEW REQUIRED":"");const scanAge=a.last_scan_age_ms==null?null:Math.floor(a.last_scan_age_ms/60000);const scheduledAge=a.last_scheduled_alarm_age_ms==null?null:Math.floor(a.last_scheduled_alarm_age_ms/60000);const nextAlarm=a.next_alarm_in_ms==null?null:a.next_alarm_in_ms<=0?"alarm due":"next alarm in "+Math.ceil(a.next_alarm_in_ms/60000)+"m";const scanError=a.last_scheduled_scan_error||a.last_scan_error||runtime.last_scan_error;const lastScanMarketText="Last scan markets "+String(runtime.healthy_market_count??0)+"/"+String(runtime.expected_market_count??3);const scheduledScanAge=runtime.last_scheduled_scan_at_ms==null?null:Math.floor(Math.max(0,Date.now()-Number(runtime.last_scheduled_scan_at_ms))/60000);const scheduledScanMarketText="Last scheduled scan markets "+String(runtime.last_scheduled_scan_healthy_market_count??0)+"/"+String(runtime.last_scheduled_scan_expected_market_count??3)+(scheduledScanAge==null?"":" · "+scheduledScanAge+"m ago");const scheduledScanIssues=(runtime.last_scheduled_scan_issues||[]).map(issue=>[issue.symbol,issue.reason].filter(Boolean).join(": ")).filter(Boolean);const currentFeed=data.current_market_feed||{};const currentMarketText="Current snapshots "+String(currentFeed.healthy_market_count??0)+"/"+String(currentFeed.expected_market_count??3)+" · "+String(currentFeed.status||"unknown").toUpperCase();const currentMarketIssues=(currentFeed.issues||[]).map(issue=>[issue.symbol,issue.reason].filter(Boolean).join(": ")).filter(Boolean);const scanDetails=[runtime.last_scan_at_ms?"Last scan "+new Date(runtime.last_scan_at_ms).toLocaleString()+" · "+(runtime.source||""):"No scan completed yet",scheduledAge==null?"No scheduled alarm recorded":"Last scheduled alarm "+scheduledAge+"m ago · "+(a.last_scheduled_scan_status||"unknown"),lastScanMarketText,scheduledScanMarketText,...scheduledScanIssues.slice(0,3).map(issue=>"Scheduled scan issue: "+issue),currentMarketText,...currentMarketIssues.slice(0,3).map(issue=>"Current data issue: "+issue),"Consecutive scheduled data failures "+String(runtime.consecutive_unhealthy_scheduled_scans||0)+"/3",scanAge==null?null:scanAge+"m since last scan",nextAlarm,scanError?"Scan error: "+scanError:null].filter(Boolean);$("lastScan").textContent=scanDetails.join(" · ");const markets=data.markets||[];$("markets").innerHTML = markets.map((m) => {
   const gate = m.entry_gate || {};
   const gateLabel = gate.eligible ? "QUALIFIED" : String(gate.reason || "not_evaluated").replace(/_/g, " ");
   const signalReason = m.primary?.reason || "";

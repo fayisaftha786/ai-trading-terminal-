@@ -5,7 +5,10 @@ import {
   coinbaseAdvancedStatus,
   createCoinbaseAdvancedJwt,
   preflightCoinbaseAdvanced,
-  previewCoinbaseAdvancedLimitBuy
+  previewCoinbaseAdvancedLimitBuy,
+  previewCoinbaseAdvancedLimitSell,
+  submitCoinbaseAdvancedLimitBuy,
+  submitCoinbaseAdvancedLimitSell
 } from "../src/coinbase-advanced.js";
 
 globalThis.crypto ||= webcrypto;
@@ -78,7 +81,10 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
     }
     if (parsed.pathname.endsWith("/accounts")) {
       return Response.json(accounts || {
-        accounts: [{ currency: "USD", available_balance: { value: "25.00" } }],
+        accounts: [
+          { currency: "USD", available_balance: { value: "25.00" } },
+          { currency: "BTC", available_balance: { value: "0.00100000" } }
+        ],
         has_next: false
       });
     }
@@ -88,7 +94,8 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
         trading_disabled: false, cancel_only: false, view_only: false,
         quote_currency_id: "USD", base_currency_id: "BTC",
         quote_min_size: "1.00", quote_max_size: "10000.00",
-        quote_increment: "0.01", price_increment: "0.01"
+        quote_increment: "0.01", base_increment: "0.00000001",
+        base_min_size: "0.00000001", base_max_size: "1000", price_increment: "0.01"
       });
     }
     if (parsed.pathname.endsWith("/orders/preview")) {
@@ -98,6 +105,9 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
         slippage: "0.00", errs: [], warning: []
       });
     }
+    if (parsed.pathname === "/api/v3/brokerage/orders") {
+      return Response.json({ success: true, success_response: { order_id: "exchange-order-test" } });
+    }
     throw new Error("Unexpected endpoint " + parsed.pathname);
   };
   return { fetchImpl, calls };
@@ -105,7 +115,7 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
 
 test("live readiness status defaults closed and exposes no API secret", () => {
   const status = coinbaseAdvancedStatus({});
-  assert.equal(status.mode, "live_setup_locked");
+  assert.equal(status.mode, "live_manual_spot_only");
   assert.equal(status.credentials_configured, false);
   assert.equal(status.order_submission_available, false);
   assert.equal(status.live_trading_enabled, false);
@@ -123,7 +133,9 @@ test("guarded order switch remains closed by default and requires strict daily/o
     COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
     COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
   }));
-  assert.equal(on.order_submission_available, false, "live order submission is not implemented and must remain unavailable");
+  assert.equal(on.order_submission_available, true, "manual order path requires explicit configuration");
+  assert.equal(on.manual_live_orders_enabled, true);
+  assert.equal(on.automatic_live_entries_enabled, false);
   assert.equal(on.max_open_orders, 1);
   assert.equal(on.max_daily_orders, 1);
   const invalid = coinbaseAdvancedStatus(makeEnv({
@@ -271,6 +283,54 @@ test("preview blocks insufficient quote balance and provider preview errors", as
   assert.equal(rejectedResult.status, "preview_rejected");
   assert.deepEqual(rejectedResult.preview_errors, ["INSUFFICIENT_FUND"]);
   assert.equal(rejected.calls.some((call) => call.path === "/api/v3/brokerage/orders"), false);
+});
+
+test("manual submission is blocked unless Trade permission is granted and Transfer stays disabled", async () => {
+  const env = makeEnv({ COINBASE_ADVANCED_ORDER_ENABLED:"true", COINBASE_ADVANCED_MAX_OPEN_ORDERS:"1", COINBASE_ADVANCED_MAX_DAILY_ORDERS:"1" });
+  const api = mockApi(env, { permissions: { can_view:true, can_trade:false, can_transfer:false } });
+  const result = await submitCoinbaseAdvancedLimitBuy(env, {
+    productId:"BTC-USD", quoteSize:"10.00", limitPrice:"99000.00", commissionTotal:"0.10",
+    previewId:"preview-test-123", clientOrderId:"order-client-00000001"
+  }, { fetchImpl:api.fetchImpl });
+  assert.equal(result.status,"blocked");
+  assert.ok(result.blockers.includes("api_key_trade_permission_required"));
+  assert.equal(api.calls.some((call)=>call.path==="/api/v3/brokerage/orders"),false);
+});
+
+test("manual BUY sends only a guarded post-only LIMIT order", async () => {
+  const env = makeEnv({ COINBASE_ADVANCED_ORDER_ENABLED:"true", COINBASE_ADVANCED_MAX_OPEN_ORDERS:"1", COINBASE_ADVANCED_MAX_DAILY_ORDERS:"1" });
+  const api = mockApi(env, { permissions: { can_view:true, can_trade:true, can_transfer:false } });
+  const result = await submitCoinbaseAdvancedLimitBuy(env, {
+    productId:"BTC-USD", quoteSize:"10.00", limitPrice:"99000.00", commissionTotal:"0.10",
+    previewId:"preview-test-123", clientOrderId:"order-client-00000002"
+  }, { fetchImpl:api.fetchImpl });
+  assert.equal(result.status,"PENDING");
+  assert.equal(result.side,"BUY");
+  assert.equal(result.exchange_order_id,"exchange-order-test");
+  const order=api.calls.find((call)=>call.path==="/api/v3/brokerage/orders");
+  assert.deepEqual(order.body.order_configuration.limit_limit_gtc,{quote_size:"10.00",limit_price:"99000.00",post_only:true});
+});
+
+test("manual SELL preview and submission use base amount and available base balance", async () => {
+  const env = makeEnv({ COINBASE_ADVANCED_ORDER_ENABLED:"true", COINBASE_ADVANCED_MAX_OPEN_ORDERS:"1", COINBASE_ADVANCED_MAX_DAILY_ORDERS:"1" });
+  const api = mockApi(env, { permissions: { can_view:true, can_trade:true, can_transfer:false } });
+  const preview = await previewCoinbaseAdvancedLimitSell(env, {
+    productId:"BTC-USD", baseSize:"0.0001", limitPrice:"99000.00"
+  }, { fetchImpl:api.fetchImpl });
+  assert.equal(preview.status,"preview_ready");
+  assert.equal(preview.side,"SELL");
+  assert.equal(preview.quote_notional,"9.900000");
+  assert.equal(preview.order_submission_available,true);
+  const previewCall=api.calls.find((call)=>call.path.endsWith("/orders/preview"));
+  assert.deepEqual(previewCall.body.order_configuration.limit_limit_gtc,{base_size:"0.0001",limit_price:"99000.00",post_only:true});
+  const result = await submitCoinbaseAdvancedLimitSell(env, {
+    productId:"BTC-USD", baseSize:"0.0001", limitPrice:"99000.00", commissionTotal:"0.10",
+    previewId:"preview-test-123", clientOrderId:"order-client-00000003"
+  }, { fetchImpl:api.fetchImpl });
+  assert.equal(result.status,"PENDING");
+  assert.equal(result.side,"SELL");
+  const order=api.calls.find((call)=>call.path==="/api/v3/brokerage/orders");
+  assert.deepEqual(order.body.order_configuration.limit_limit_gtc,{base_size:"0.0001",limit_price:"99000.00",post_only:true});
 });
 
 test("account pagination uncertainty and incomplete provider data fail closed", async () => {
