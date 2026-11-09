@@ -16,20 +16,21 @@ The older Python/FastAPI backend, Render Blueprint and Binance Testnet documenta
 - Android version: 0.7.1, versionCode 48.
 - Package: `app.aitradingterminal.debug`, min SDK 26, target SDK 35.
 - GitHub Release: https://github.com/fayisaftha786/ai-trading-terminal-/releases/tag/v0.7.1-debug
-- Main commit: `369aaac4d3d5191e8a0648a675c3dc5327301bbb`.
+- Android v0.7.1 APK release commit: `369aaac4d3d5191e8a0648a675c3dc5327301bbb` (the APK release is older than current source).
+- Current GitHub `main` as of 2026-11-09: `14674f79938d21410a0ac265e197a43fa97db7f1`.
 - Main-branch CI built and verified the installable debug APK and published it to GitHub Releases.
 - The code has passed backend/release checks, Worker validation/local smoke tests and Android build/signature/metadata checks.
 - Physical device installation and live Cloudflare deployment remain unverified.
 
 ## Cloudflare deployment — owner-controlled steps
 
-No Cloudflare account is connected or deployed by this repository yet. The owner must:
+The public Worker URL currently responds, but its `worker_version.tag` is blank. Treat it as an older/unverified Worker instance: the current GitHub `main` revision has not been proven deployed, and the new scheduler heartbeat is not present in the public response. The owner must:
 
 1. Sign in to or create a Cloudflare account and choose the Free plan only.
 2. Read and accept Cloudflare's current Terms of Service and Privacy Policy directly with Cloudflare.
 3. In Workers & Pages, connect the GitHub repository `fayisaftha786/ai-trading-terminal-`, production branch `main`, and configure the root Worker build using the exact instructions in [CLOUDFLARE_FREE_PAPER_AUTOMATION.md](CLOUDFLARE_FREE_PAPER_AUTOMATION.md).
 4. Configure `ADMIN_PASSWORD` (at least 16 characters) and `SESSION_SECRET` (at least 32 characters) using Cloudflare's secret manager. Never paste secrets into chat, issue comments or source files.
-5. Deploy and verify the HTTPS Worker health response: `status=ok`, `mode=paper_only`, `live_trading_enabled=false`, `binance_testnet_enabled=false`.
+5. Deploy and verify the HTTPS Worker health response: `status=ok`, `mode=paper_only`, `live_trading_enabled=false`, `binance_testnet_enabled=false`, and `worker_version.tag` equal to current `main` SHA.
 6. Sign in and validate fresh market data, 1h/6h closed-candle integrity, local Coinbase order-book response-retrieval age (15-second maximum for automatic entries; not an exchange event timestamp), persistence after refresh/restart, and recurring alarm cadence.
 7. Keep automatic PAPER entries OFF until these checks pass. Enabling them is a separate, explicit owner action and authorizes virtual trades only.
 
