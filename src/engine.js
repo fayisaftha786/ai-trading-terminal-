@@ -12,7 +12,7 @@ import {
   listCoinbaseAdvancedFills
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
@@ -194,6 +194,17 @@ export class TradingEngine extends DurableObject {
         );
         const currentMarketStatus = currentMarketFeed.healthy ? "healthy"
           : currentMarketFeed.healthy_market_count > 0 ? "partial" : "unavailable";
+        const lastScheduledScanAgeMs = Number.isFinite(Number(runtime.last_scheduled_scan_at_ms)) &&
+          Number(runtime.last_scheduled_scan_at_ms) > 0
+          ? Math.max(0, nowMs - Number(runtime.last_scheduled_scan_at_ms)) : null;
+        const marketFeedFreshness = classifyMarketFeedFreshness({
+          currentFeedHealthy: currentMarketFeed.healthy,
+          lastScheduledScanStatus: scanStatus,
+          lastScheduledHealthyMarketCount: runtime.last_scheduled_scan_healthy_market_count,
+          lastScheduledExpectedMarketCount: runtime.last_scheduled_scan_expected_market_count || PRODUCTS.length,
+          lastScheduledScanAgeMs,
+          staleAfterMs: SCAN_INTERVAL_MS * 3
+        });
         const diagnosticIssues = normalizeScanIssueRows(runtime);
         const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
         const currentProviderFailures = summarizeCurrentProviderFailures(currentMarkets);
@@ -226,6 +237,8 @@ export class TradingEngine extends DurableObject {
           last_scan_expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
           current_market_feed: {
             status: currentMarketStatus,
+            freshness_state: marketFeedFreshness.state,
+            freshness_reason: marketFeedFreshness.reason,
             healthy: currentMarketFeed.healthy,
             healthy_market_count: currentMarketFeed.healthy_market_count,
             expected_market_count: currentMarketFeed.expected_market_count,
