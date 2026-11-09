@@ -10,6 +10,7 @@ import {
   normalizeProviderFailureRows,
   normalizeScanIssueRows,
   parseScanIssueSummaries,
+  runAfterActiveScan,
   shouldHaltPaperAutomation,
   summarizeCurrentProviderFailures,
   updateTrailingStop
@@ -439,4 +440,40 @@ test("current provider failure diagnostics include selected endpoint failures, n
     },
     { symbol: "SOL/USD", reason: "provider_timeout" }
   ]);
+});
+
+
+test("scheduled scan waits for in-flight manual scan instead of reusing it as a scheduled result", async () => {
+  let releaseManual;
+  const manualScan = new Promise((resolve) => { releaseManual = resolve; });
+  let activeScan = manualScan;
+  let scheduledStarted = false;
+
+  const scheduled = runAfterActiveScan(
+    () => activeScan,
+    () => {
+      scheduledStarted = true;
+      activeScan = null;
+      return { source: "scheduled", market_feed: { healthy: true } };
+    }
+  );
+
+  assert.equal(scheduledStarted, false);
+  releaseManual({ source: "manual", market_feed: { healthy: true } });
+  const result = await scheduled;
+  assert.equal(scheduledStarted, true);
+  assert.equal(result.source, "scheduled");
+});
+
+test("scheduled scan still runs after an in-flight manual scan rejects", async () => {
+  const failedManualScan = Promise.reject(new Error("manual provider failure"));
+  let activeScan = failedManualScan;
+  const result = await runAfterActiveScan(
+    () => activeScan,
+    () => {
+      activeScan = null;
+      return { source: "scheduled" };
+    }
+  );
+  assert.deepEqual(result, { source: "scheduled" });
 });
