@@ -176,6 +176,7 @@ function connectMarketFeed(){
   }
 }
 function updateTickerFreshness(){
+  if(!token){setFeedState("SIGN IN REQUIRED");return;}
   const now=Date.now();let fresh=0;
   for(const code of Object.values(marketProductCodes)){
     const seen=Number(marketTickerSeenAt[code]||0);
