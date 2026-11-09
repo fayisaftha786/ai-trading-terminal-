@@ -3,7 +3,7 @@ const SCALE = 10n ** PRECISION;
 
 function fixed(value) {
   if (typeof value !== "string" || value.length > 48 ||
-      !/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(value)) return null;
+      !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return null;
   const [whole, fraction = ""] = value.split(".");
   if (fraction.length > Number(PRECISION)) return null;
   return BigInt(whole) * SCALE + BigInt((fraction + "0".repeat(Number(PRECISION))).slice(0, Number(PRECISION)));
