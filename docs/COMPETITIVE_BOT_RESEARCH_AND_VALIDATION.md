@@ -157,3 +157,18 @@ requirements; even the 90-second PR cadence is not a real-time feed.
 
 Do not paste Coinbase keys into chat, GitHub, screenshots, or the dashboard.
 Use Cloudflare secret storage only. Do not enable transfer permission.
+
+
+## Coinbase guarded live-order integration (manual-confirm phase)
+
+The Coinbase Advanced Trade v3 adapter supports a deliberately narrow real-order path:
+- CDP key permissions must report View + Trade and Transfer=false.
+- Only explicitly allowlisted SPOT products are accepted.
+- Orders are BUY / LIMIT / GTC / post-only; market orders, withdrawals and automatic strategy-driven live entries are not enabled.
+- The owner must preview first and then explicitly confirm the exact preview with a unique client order ID.
+- Per-order quote cap, max-open-order cap and persistent daily order-count cap are checked before submission.
+- Order attempts are persisted before the network call. Ambiguous timeouts are marked UNKNOWN and must be reconciled by client order ID before retrying.
+- Reconciliation and cancel endpoints expose exchange status; an accepted order is not considered a fill.
+- Fill-level accounting and daily realized-loss automation are not yet complete. Therefore automatic live entries remain OFF and this phase is not unattended/fully automated trading.
+
+Required Cloudflare secrets/vars are listed in .env.example. Keep COINBASE_ADVANCED_ORDER_ENABLED=false until the account's Advanced Trade API is eligible and the owner has independently reviewed limits. Never enable Transfer permission or put private keys in Git, browser storage, or chat.
