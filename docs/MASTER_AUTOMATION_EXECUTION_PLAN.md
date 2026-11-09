@@ -60,6 +60,8 @@ The GitHub read-only scanner must not combine a ticker from one exchange/quote c
 
 ## Phase 3 regime-aware strategy research
 
+Backtest and walk-forward endpoints must receive the exact higher-timeframe interval (currently supported: 4h or 6h). Indicator annualization must use the matching bars-per-day value; never reinterpret Coinbase 6h candles as 4h bars.
+
 The research-only strategy lab compares three spot-long hypotheses without changing the production PAPER entry engine:
 
 1. Trend pullback and EMA20 reclaim, requiring a higher-timeframe uptrend and positive directional strength.
