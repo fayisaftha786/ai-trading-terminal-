@@ -2,7 +2,7 @@
 
 ## Purpose and safety boundary
 
-This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF.
+This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 also forces legacy v1 auto-entry settings OFF during migration, while preserving a deliberate owner opt-in made after v2 is active.
 
 This is not unattended real-money trading. Production/live exchange orders are not implemented here. Binance Testnet order execution is not part of this Worker. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
 
