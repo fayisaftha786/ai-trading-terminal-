@@ -5,7 +5,8 @@ import {
   coinbaseAdvancedStatus,
   createCoinbaseAdvancedJwt,
   preflightCoinbaseAdvanced,
-  previewCoinbaseAdvancedLimitBuy
+  previewCoinbaseAdvancedLimitBuy,
+  submitCoinbaseAdvancedLimitBuy
 } from "../src/coinbase-advanced.js";
 
 globalThis.crypto ||= webcrypto;
@@ -78,7 +79,7 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
     }
     if (parsed.pathname.endsWith("/accounts")) {
       return Response.json(accounts || {
-        accounts: [{ currency: "USD", available_balance: { value: "25.00" } }],
+        accounts: [{ currency: "USD", available_balance: { value: "25.00" } }, { currency: "BTC", available_balance: { value: "0.5" } }],
         has_next: false
       });
     }
@@ -88,7 +89,7 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
         trading_disabled: false, cancel_only: false, view_only: false,
         quote_currency_id: "USD", base_currency_id: "BTC",
         quote_min_size: "1.00", quote_max_size: "10000.00",
-        quote_increment: "0.01", price_increment: "0.01"
+        quote_increment: "0.01", base_min_size: "0.00001", base_max_size: "100", base_increment: "0.00001", price_increment: "0.01"
       });
     }
     if (parsed.pathname.endsWith("/orders/preview")) {
@@ -123,7 +124,7 @@ test("guarded order switch remains closed by default and requires strict daily/o
     COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
     COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
   }));
-  assert.equal(on.order_submission_available, false, "live order submission is not implemented and must remain unavailable");
+  assert.equal(on.order_submission_available, true, "the guarded manual route is available only when explicitly configured");
   assert.equal(on.max_open_orders, 1);
   assert.equal(on.max_daily_orders, 1);
   const invalid = coinbaseAdvancedStatus(makeEnv({
@@ -164,6 +165,7 @@ test("preflight supports view-only permissions, transfer disabled, SPOT product 
   assert.deepEqual(result.permissions, { can_view: true, can_trade: false, can_transfer: false });
   assert.equal(result.balances.USD, "25.00");
   assert.equal(result.order_submission_available, false);
+  assert.equal(result.permissions.can_trade, false);
   assert.equal(result.live_trading_enabled, false);
   assert.equal(calls.some((call) => call.path.endsWith("/orders")), false);
 });
@@ -271,6 +273,39 @@ test("preview blocks insufficient quote balance and provider preview errors", as
   assert.equal(rejectedResult.status, "preview_rejected");
   assert.deepEqual(rejectedResult.preview_errors, ["INSUFFICIENT_FUND"]);
   assert.equal(rejected.calls.some((call) => call.path === "/api/v3/brokerage/orders"), false);
+});
+
+test("SELL preview uses base balance, base increment and a post-only limit preview", async () => {
+  const env = makeEnv();
+  const { fetchImpl, calls } = mockApi(env);
+  const result = await previewCoinbaseAdvancedLimitBuy(
+    env, { productId: "BTC-USD", side: "SELL", baseSize: "0.00010", limitPrice: "99000.00" },
+    { fetchImpl }
+  );
+  assert.equal(result.status, "preview_ready");
+  assert.equal(result.side, "SELL");
+  assert.equal(result.base_size, "0.00010");
+  assert.equal(result.balance_currency, "BTC");
+  const previewCall = calls.find((call) => call.path.endsWith("/orders/preview"));
+  assert.deepEqual(previewCall.body.order_configuration.limit_limit_gtc, {
+    base_size: "0.00010", limit_price: "99000.00", post_only: true
+  });
+});
+
+test("manual submission requires explicit execution switch and Coinbase Trade permission", async () => {
+  const env = makeEnv({
+    COINBASE_ADVANCED_ORDER_ENABLED: "true",
+    COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
+    COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
+  });
+  const noTrade = mockApi(env);
+  const blocked = await submitCoinbaseAdvancedLimitBuy(env, {
+    productId: "BTC-USD", quoteSize: "5.00", limitPrice: "99000.00",
+    commissionTotal: "0.10", previewId: "preview-test-123", clientOrderId: "12345678-1234-1234-1234-123456789012"
+  }, { fetchImpl: noTrade.fetchImpl });
+  assert.equal(blocked.status, "blocked");
+  assert.ok(blocked.blockers.includes("api_key_trade_permission_required_for_manual_orders"));
+  assert.equal(noTrade.calls.some((call) => call.path === "/api/v3/brokerage/orders"), false);
 });
 
 test("account pagination uncertainty and incomplete provider data fail closed", async () => {
