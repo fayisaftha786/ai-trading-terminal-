@@ -140,6 +140,15 @@ try {
   assert.equal(dashboard.settings.risk.max_daily_loss_pct, 1, "daily hard loss guard must be one percent");
   assert.equal(dashboard.live_trading_enabled, false);
   assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
+  const emptyChart = await request("/api/market/candles?symbol=BTC%2FUSD&timeframe=3600&limit=72", { headers: auth });
+  assert.equal(emptyChart.status, 200);
+  const emptyChartData = await emptyChart.json();
+  assert.equal(emptyChartData.status, "insufficient_history");
+  assert.equal(emptyChartData.source, "coinbase_exchange_closed_candle_archive");
+  assert.deepEqual(emptyChartData.bars, []);
+  const invalidChart = await request("/api/market/candles?symbol=UNKNOWN%2FUSD", { headers: auth });
+  assert.equal(invalidChart.status, 400);
+
 
 
   const tradingModeResponse = await request("/api/trading/mode", { headers: auth });
@@ -266,6 +275,10 @@ try {
   assert.match(staticHtml, /REAL MODE · Coinbase Advanced account connection/);
   assert.match(staticHtml, /id="demoModeBtn"/);
   assert.match(staticHtml, /id="realModeBtn"/);
+  assert.match(staticHtml, /Live market monitor/);
+  assert.match(staticHtml, /id="marketChart"/);
+  assert.match(staticHtml, /display-only market prices/);
+  assert.match(staticHtml, /api\/market\/candles/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /id="capitalReview"/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);

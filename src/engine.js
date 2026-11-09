@@ -505,6 +505,45 @@ export class TradingEngine extends DurableObject {
           }, coinbaseAdvancedErrorStatus(error));
         }
       }
+      if (request.method === "GET" && url.pathname === "/api/market/candles") {
+        const symbol = String(url.searchParams.get("symbol") || "BTC/USD").toUpperCase();
+        const selected = PRODUCTS.find((item) => item.symbol === symbol);
+        const timeframeSeconds = Number(url.searchParams.get("timeframe") || 3600);
+        const limit = Math.max(24, Math.min(200, Number.parseInt(url.searchParams.get("limit") || "72", 10) || 72));
+        if (!selected) return jsonResponse({ error: "configured_market_symbol_required" }, 400);
+        if (![60, 300, 3600, 21600].includes(timeframeSeconds)) {
+          return jsonResponse({ error: "unsupported_candle_timeframe" }, 400);
+        }
+        const rows = this.sql.exec(
+          "SELECT candle_open_ms,open,high,low,close,volume,received_at_ms FROM research_candles " +
+          "WHERE exchange='coinbase_exchange' AND product=? AND timeframe_seconds=? " +
+          "ORDER BY candle_open_ms DESC LIMIT ?",
+          selected.product, timeframeSeconds, limit
+        ).toArray().reverse().map((row) => ({
+          time: Number(row.candle_open_ms),
+          open: Number(row.open),
+          high: Number(row.high),
+          low: Number(row.low),
+          close: Number(row.close),
+          volume: Number(row.volume),
+          received_at_ms: Number(row.received_at_ms)
+        }));
+        const latest = rows.at(-1) || null;
+        const nowMs = Date.now();
+        return jsonResponse({
+          status: rows.length >= 24 ? "ready" : "insufficient_history",
+          mode: "read_only",
+          source: "coinbase_exchange_closed_candle_archive",
+          symbol,
+          product: selected.product,
+          timeframe_seconds: timeframeSeconds,
+          bars: rows,
+          count: rows.length,
+          latest_closed_at_ms: latest ? latest.time + timeframeSeconds * 1000 : null,
+          latest_age_ms: latest ? Math.max(0, nowMs - (latest.time + timeframeSeconds * 1000)) : null,
+          retrieved_at_ms: nowMs
+        });
+      }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
       if (request.method === "GET" && url.pathname === "/api/markets") return jsonResponse({ markets: this.getMarkets() });
       if (request.method === "GET" && url.pathname === "/api/trades") {
