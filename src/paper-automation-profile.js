@@ -78,6 +78,53 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
 }
 
 
+
+export function reviewLegacyPaperCapital(existing, {
+  action,
+  confirmed,
+  tradeCount,
+  openPositions
+} = {}) {
+  if (action !== "keep_existing_capital") {
+    return { ok: false, reason: "capital_review_action_invalid" };
+  }
+  if (confirmed !== true) {
+    return { ok: false, reason: "capital_review_confirmation_required" };
+  }
+  if (!existing || typeof existing !== "object" ||
+      Array.isArray(existing) || existing.capital_setup_required !== true) {
+    return { ok: false, reason: "capital_review_not_required" };
+  }
+  const initialCapital = Number(existing.initial_capital_usd);
+  if (!Number.isFinite(initialCapital) || initialCapital <= 0) {
+    return { ok: false, reason: "capital_review_existing_balance_invalid" };
+  }
+  if (!Number.isSafeInteger(tradeCount) || tradeCount < 1) {
+    return { ok: false, reason: "capital_review_history_required" };
+  }
+  if (!Number.isSafeInteger(openPositions) || openPositions < 0) {
+    return { ok: false, reason: "capital_review_ledger_state_unavailable" };
+  }
+  if (openPositions > 0) {
+    return { ok: false, reason: "capital_review_open_positions_must_be_closed" };
+  }
+
+  const peak = Number(existing.peak_equity_usd);
+  const settings = {
+    ...existing,
+    initial_capital_usd: initialCapital,
+    peak_equity_usd: Number.isFinite(peak) && peak > 0
+      ? Math.max(initialCapital, peak) : initialCapital,
+    risk: { ...PAPER_AUTOMATION_RISK },
+    auto_paper_enabled: false,
+    auto_paper_resume_after_watchdog: false,
+    paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version,
+    capital_setup_required: false
+  };
+  delete settings.capital_setup_required_reason;
+  return { ok: true, settings };
+}
+
 export function shouldResumePaperAutomationAfterWatchdog({
   resumeAllowed,
   capitalSetupRequired
