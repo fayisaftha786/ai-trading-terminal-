@@ -272,6 +272,14 @@ export class TradingEngine extends DurableObject {
       }
       // Coinbase Advanced account preflight and order preview are deliberately
       // separated from execution. There is no /api/live/execute route in this build.
+      if (request.method === "POST" && url.pathname === "/api/live/execute") {
+        return jsonResponse({
+          error: "live_order_executor_not_implemented_or_approved",
+          live_trading_enabled: false,
+          order_submission_available: false,
+          automatic_live_entries_enabled: false
+        }, 423);
+      }
       if (request.method === "GET" && url.pathname === "/api/live/status") {
         return jsonResponse(coinbaseAdvancedStatus(this.env));
       }
