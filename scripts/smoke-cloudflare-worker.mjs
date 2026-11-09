@@ -307,7 +307,6 @@ try {
   assert.match(staticHtml, /server-bound one-time preview/i);
   assert.match(staticHtml, /id="liveFillSync"/);
   assert.match(staticHtml, /id="liveFillReport"/);
-  assert.match(staticHtml, /FIFo realized/);
   assert.match(staticHtml, /FIFO realized P/);
   assert.match(staticHtml, /external\/manual Coinbase trades are not included/i);
   assert.match(staticHtml, /Strategy tournament/);
