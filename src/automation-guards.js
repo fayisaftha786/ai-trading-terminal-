@@ -65,6 +65,13 @@ export function assessMarketUniverse(
     if (!Number.isFinite(bookRetrievedAtMs) || bookAgeMs < -1000 || bookAgeMs > maxOrderBookAgeMs) {
       marketIssues.push("orderbook_snapshot_stale_or_missing");
     }
+    if (selectedProvider === "bitstamp_spot") {
+      const bookEventTimeMs = Number(market.book_event_time_ms);
+      const bookEventAgeMs = nowMs - bookEventTimeMs;
+      if (!Number.isFinite(bookEventTimeMs) || bookEventAgeMs < -1000 || bookEventAgeMs > maxOrderBookAgeMs) {
+        marketIssues.push("orderbook_exchange_timestamp_stale_or_missing");
+      }
+    }
     const bidDepthQuote = Number(market.bid_depth_quote);
     const askDepthQuote = Number(market.ask_depth_quote);
     if (![bidDepthQuote, askDepthQuote].every(Number.isFinite) ||
