@@ -278,7 +278,7 @@ try {
   assert.match(staticHtml, /Live market monitor/);
   assert.match(staticHtml, /id="marketChart"/);
   assert.match(staticHtml, /display-only market prices/);
-  assert.match(staticHtml, /api\\/market\\/candles/);
+  assert.match(staticHtml, /api\/market\/candles/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /id="capitalReview"/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);
