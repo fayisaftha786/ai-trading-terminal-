@@ -329,3 +329,96 @@ export function normalizeProviderFailureRows(runtime = {}, issues = []) {
       inferred_from_scan_summary: true
     }));
 }
+
+
+function safeProviderDiagnosticCode(value) {
+  return typeof value === "string" && /^[a-z0-9_]{1,80}$/.test(value) ? value : null;
+}
+
+function diagnosticAge(timestamp, nowMs) {
+  const value = Number(timestamp);
+  return Number.isFinite(value) && value > 0 ? nowMs - value : null;
+}
+
+function diagnosticClosedAge(lastOpenMs, intervalMs, nowMs) {
+  const value = Number(lastOpenMs);
+  return Number.isFinite(value) && value > 0 ? nowMs - (value + intervalMs) : null;
+}
+
+/**
+ * Build a bounded, sanitized view of the selected provider and its freshness
+ * evidence from the actual persisted market snapshots, not a stale runtime copy.
+ * Negative ages are kept visible so future timestamps cannot masquerade as fresh.
+ */
+export function buildMarketDataProviderDiagnostics(markets, nowMs = Date.now(), limit = 3) {
+  const rows = Array.isArray(markets) ? markets : [];
+  const safeLimit = Number.isSafeInteger(limit) ? Math.max(0, Math.min(3, limit)) : 3;
+  if (!Number.isFinite(nowMs) || nowMs <= 0) return [];
+
+  return rows.slice(0, safeLimit).map((market) => {
+    const quality = market?.data_quality || {};
+    return {
+      symbol: typeof market?.symbol === "string" ? market.symbol.slice(0, 24) : null,
+      status: market?.status === "live" ? "live" : "error",
+      provider: safeProviderDiagnosticCode(market?.market_data_provider),
+      failover_used: quality.failover_used === true,
+      failover_attempted: quality.failover_attempted === true,
+      failover_reason: safeProviderDiagnosticCode(quality.failover_reason),
+      failover_error: safeProviderDiagnosticCode(quality.failover_error),
+      primary_provider_error: safeProviderDiagnosticCode(quality.primary_provider_error),
+      quote_age_ms: diagnosticAge(market?.quote_received_at_ms, nowMs),
+      ticker_event_age_ms: diagnosticAge(Date.parse(market?.ticker_time || ""), nowMs),
+      book_age_ms: diagnosticAge(market?.book_retrieved_at_ms, nowMs),
+      book_event_age_ms: diagnosticAge(market?.book_event_time_ms, nowMs),
+      book_status: safeProviderDiagnosticCode(quality.book_status) || "unknown",
+      book_error: safeProviderDiagnosticCode(quality.book_error),
+      one_hour_refresh_status: safeProviderDiagnosticCode(quality.one_hour_refresh_status),
+      one_hour_refresh_error: safeProviderDiagnosticCode(quality.one_hour_refresh_error),
+      one_hour_closed_age_ms: diagnosticClosedAge(
+        market?.one_hour_audit_summary?.last_closed_candle_ms, 3600000, nowMs
+      ),
+      six_hour_refresh_status: safeProviderDiagnosticCode(quality.six_hour_refresh_status),
+      six_hour_refresh_error: safeProviderDiagnosticCode(quality.six_hour_refresh_error),
+      six_hour_closed_age_ms: diagnosticClosedAge(
+        market?.six_hour_audit_summary?.last_closed_candle_ms, 21600000, nowMs
+      ),
+      market_candidate_eligible: market?.entry_gate?.eligible === true
+    };
+  });
+}
+
+/** Return only actionable selected-provider failures from the current snapshots. */
+export function summarizeCurrentProviderFailures(markets) {
+  const rows = Array.isArray(markets) ? markets : [];
+  return rows.flatMap((market) => {
+    const quality = market?.data_quality || {};
+    const failures = [];
+    if (market?.status !== "live") {
+      failures.push({
+        symbol: market?.symbol || null,
+        reason: safeProviderDiagnosticCode(market?.error_code) || "provider_unavailable",
+        primary_error_code: safeProviderDiagnosticCode(market?.primary_error_code),
+        backup_error_code: safeProviderDiagnosticCode(market?.backup_error_code)
+      });
+    }
+    if (quality.book_status === "provider_error" || quality.book_status === "invalid_or_missing") {
+      failures.push({
+        symbol: market?.symbol || null,
+        reason: safeProviderDiagnosticCode(quality.book_error) || "orderbook_unavailable"
+      });
+    }
+    if (quality.one_hour_refresh_error && market?.one_hour_audit_summary?.ok !== true) {
+      failures.push({
+        symbol: market?.symbol || null,
+        reason: safeProviderDiagnosticCode(quality.one_hour_refresh_error) || "one_hour_candle_provider_error"
+      });
+    }
+    if (quality.six_hour_refresh_error && market?.six_hour_audit_summary?.ok !== true) {
+      failures.push({
+        symbol: market?.symbol || null,
+        reason: safeProviderDiagnosticCode(quality.six_hour_refresh_error) || "six_hour_candle_provider_error"
+      });
+    }
+    return failures;
+  }).slice(0, 6);
+}
