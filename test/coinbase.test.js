@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCoinbaseRequestState, fetchBitstampResearchHistory, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
+import { createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
 
 test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
@@ -123,6 +123,36 @@ function jsonResponse(value, status = 200) {
   });
 }
 
+test("final Coinbase order-book refresh returns fresh top-of-book and validated depth", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (url) => {
+    requested = String(url);
+    return jsonResponse(makeBook());
+  };
+  try {
+    const result = await fetchCoinbaseOrderBook("BTC-USD", createCoinbaseRequestState());
+    assert.match(requested, /\/products\/BTC-USD\/book\?level=2$/);
+    assert.equal(result.bid, 100);
+    assert.equal(result.ask, 100.01);
+    assert.equal(result.bid_depth_quote, 9995.5);
+    assert.ok(Math.abs(result.ask_depth_quote - 10005.5) < 1e-8);
+    assert.ok(Date.now() - result.book_retrieved_at_ms < 1000);
+    assert.equal(result.book_sequence, 123456);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("final Coinbase order-book refresh rejects malformed or crossed books", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({ bids: [["101", "2"]], asks: [["100", "2"]] });
+  try {
+    await assert.rejects(fetchCoinbaseOrderBook("BTC-USD", createCoinbaseRequestState()), (error) => error.message === "coinbase_order_book_failed_validation");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 test("snapshot uses ticker 24h volume and does not spend an extra request on stats", async () => {
   const originalFetch = globalThis.fetch;
   const now = Date.now();
