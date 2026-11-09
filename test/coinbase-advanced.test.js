@@ -74,7 +74,7 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
     assert.equal(checked.payload.uri, options.method + " api.coinbase.com" + parsed.pathname + parsed.search);
     calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: options.body ? JSON.parse(options.body) : null });
     if (parsed.pathname.endsWith("/key_permissions")) {
-      return Response.json(permissions || { can_view: true, can_trade: true, can_transfer: false, portfolio_uuid: "portfolio-test" });
+      return Response.json(permissions || { can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "portfolio-test" });
     }
     if (parsed.pathname.endsWith("/accounts")) {
       return Response.json(accounts || {
@@ -123,7 +123,7 @@ test("guarded order switch remains closed by default and requires strict daily/o
     COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
     COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
   }));
-  assert.equal(on.order_submission_available, true);
+  assert.equal(on.order_submission_available, false, "live order submission is not implemented and must remain unavailable");
   assert.equal(on.max_open_orders, 1);
   assert.equal(on.max_daily_orders, 1);
   const invalid = coinbaseAdvancedStatus(makeEnv({
@@ -155,13 +155,13 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
 });
 
-test("preflight confirms view/trade permissions, transfer disabled, SPOT product and quote balance", async () => {
+test("preflight supports view-only permissions, transfer disabled, SPOT product and quote balance", async () => {
   const env = makeEnv();
   const { fetchImpl, calls } = mockApi(env);
   const result = await preflightCoinbaseAdvanced(env, { fetchImpl });
   assert.equal(result.status, "preflight_ready_for_manual_order_preview");
   assert.deepEqual(result.eligible_products, ["BTC-USD"]);
-  assert.deepEqual(result.permissions, { can_view: true, can_trade: true, can_transfer: false });
+  assert.deepEqual(result.permissions, { can_view: true, can_trade: false, can_transfer: false });
   assert.equal(result.balances.USD, "25.00");
   assert.equal(result.order_submission_available, false);
   assert.equal(result.live_trading_enabled, false);
