@@ -266,3 +266,182 @@ test("book failure preserves a fresh bid for paper exits and uses stats only as 
     globalThis.fetch = originalFetch;
   }
 });
+
+
+function makeBitstampRows(intervalMs, lastOpenMs, count = 160) {
+  return Array.from({ length: count }, (_, index) => {
+    const time = lastOpenMs - ((count - 1 - index) * intervalMs);
+    const close = 100 + (index * 0.02);
+    return {
+      timestamp: String(Math.floor(time / 1000)),
+      open: String(close - 0.1),
+      high: String(close + 0.5),
+      low: String(close - 0.5),
+      close: String(close),
+      volume: "1000"
+    };
+  });
+}
+
+function makeBitstampBook() {
+  return {
+    timestamp: String(Math.floor(Date.now() / 1000)),
+    bids: Array.from({ length: 10 }, (_, index) => [
+      String(100 - (index * 0.01)), "100"
+    ]),
+    asks: Array.from({ length: 10 }, (_, index) => [
+      String(100.01 + (index * 0.01)), "100"
+    ])
+  };
+}
+
+test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6H candle set", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const interval1h = 3600000;
+  const interval6h = 21600000;
+  const last1h = Math.floor(now / interval1h) * interval1h - interval1h;
+  const last6h = Math.floor(now / interval6h) * interval6h - interval6h;
+  const calls = [];
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    calls.push(parsed.hostname + path);
+    if (parsed.hostname === "api.exchange.coinbase.com") {
+      return jsonResponse({ message: "primary feed unavailable" }, 503);
+    }
+    if (parsed.hostname !== "www.bitstamp.net") {
+      return jsonResponse({ message: "unexpected provider" }, 404);
+    }
+    if (path === "/api/v2/ticker/solusd/") {
+      return jsonResponse({
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        bid: "99.99", ask: "100.01", last: "100",
+        volume: "25000"
+      });
+    }
+    if (path === "/api/v2/order_book/solusd/?group=1") {
+      return jsonResponse(makeBitstampBook());
+    }
+    if (path === "/api/v2/ohlc/solusd/?step=3600&limit=200&exclude_current_candle=true") {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval1h, last1h) }
+      });
+    }
+    if (path === "/api/v2/ohlc/solusd/?step=21600&limit=200&exclude_current_candle=true") {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval6h, last6h) }
+      });
+    }
+    return jsonResponse({ message: "unexpected endpoint: " + path }, 404);
+  };
+
+  try {
+    const snapshot = await fetchProductSnapshot(
+      { symbol: "SOL/USD", product: "SOL-USD" },
+      now,
+      { bitstamp: { one_hour: [], six_hour: [] } },
+      createCoinbaseRequestState()
+    );
+
+    assert.equal(snapshot.status, "live");
+    assert.equal(snapshot.market_data_provider, "bitstamp_spot");
+    assert.equal(snapshot.bid, 99.99);
+    assert.equal(snapshot.ask, 100.01);
+    assert.equal(snapshot.last, 100);
+    assert.equal(snapshot.quote_volume_usd, 2500000);
+    assert.equal(snapshot.one_hour_audit.ok, true);
+    assert.equal(snapshot.six_hour_audit.ok, true);
+    assert.equal(snapshot.one_hour_audit.valid_closed_bars, 160);
+    assert.equal(snapshot.six_hour_audit.valid_closed_bars, 160);
+    assert.equal(snapshot.data_quality.book_status, "available");
+    assert.equal(snapshot.data_quality.failover_used, true);
+    assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
+    assert.equal(snapshot.data_quality.failover_reason, "primary_provider_request_failed");
+    assert.ok(snapshot.data_quality.book_provider === snapshot.market_data_provider);
+    assert.ok(snapshot.data_quality.ticker_provider === snapshot.market_data_provider);
+    assert.ok(snapshot.data_quality.one_hour_provider === snapshot.market_data_provider);
+    assert.ok(snapshot.data_quality.six_hour_provider === snapshot.market_data_provider);
+    assert.ok(snapshot.bid_depth_quote >= 5000);
+    assert.ok(snapshot.ask_depth_quote >= 5000);
+    assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
+    assert.ok(Number.isFinite(snapshot.book_retrieved_at_ms));
+    assert.ok(calls.every((call) => !call.includes("BTC") && !call.includes("ETH")));
+    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 1);
+    assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Bitstamp OHLC pair mismatch is rejected instead of mixing another market's candles", async () => {
+  const originalFetch = globalThis.fetch;
+  const now = Date.now();
+  const interval1h = 3600000;
+  const interval6h = 21600000;
+  const last1h = Math.floor(now / interval1h) * interval1h - interval1h;
+  const last6h = Math.floor(now / interval6h) * interval6h - interval6h;
+
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    const path = parsed.pathname + parsed.search;
+    if (parsed.hostname === "api.exchange.coinbase.com") {
+      return jsonResponse({ error: "primary down" }, 404);
+    }
+    if (path === "/api/v2/ticker/solusd/") {
+      return jsonResponse({
+        timestamp: String(Math.floor(Date.now() / 1000)),
+        bid: "99.99", ask: "100.01", last: "100", volume: "25000"
+      });
+    }
+    if (path === "/api/v2/order_book/solusd/?group=1") return jsonResponse(makeBitstampBook());
+    if (path.includes("step=3600")) {
+      return jsonResponse({
+        data: { pair: "BTC/USD", ohlc: makeBitstampRows(interval1h, last1h) }
+      });
+    }
+    if (path.includes("step=21600")) {
+      return jsonResponse({
+        data: { pair: "SOL/USD", ohlc: makeBitstampRows(interval6h, last6h) }
+      });
+    }
+    return jsonResponse({ error: "unexpected_endpoint" }, 404);
+  };
+
+  try {
+    const snapshot = await fetchProductSnapshot(
+      { symbol: "SOL/USD", product: "SOL-USD" },
+      now,
+      {},
+      createCoinbaseRequestState()
+    );
+    assert.equal(snapshot.market_data_provider, "bitstamp_spot");
+    assert.equal(snapshot.one_hour_audit.ok, false);
+    assert.ok(snapshot.one_hour_audit.issues.includes("insufficient_closed_history"));
+    assert.equal(snapshot.data_quality.one_hour_refresh_status, "refresh_rejected");
+    assert.equal(snapshot.data_quality.failover_used, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("both market-data providers unavailable returns explicit combined provider error", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({ error: "unavailable" }, 404);
+  try {
+    await assert.rejects(
+      fetchProductSnapshot(
+        { symbol: "SOL/USD", product: "SOL-USD" },
+        Date.now(),
+        {},
+        createCoinbaseRequestState()
+      ),
+      (error) => error.code === "all_market_data_providers_unavailable" &&
+        error.primary_error_code === "provider_http_error" &&
+        error.backup_error_code === "provider_http_error"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
