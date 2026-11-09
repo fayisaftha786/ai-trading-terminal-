@@ -64,3 +64,30 @@ def test_market_analysis_endpoint_validates_symbol_and_candle_limit(client):
     bad_limit = client.get("/api/strategies/multi/BTC%2FUSDT?timeframe=1h&limit=100")
     assert bad_symbol.status_code == 422
     assert bad_limit.status_code == 422
+
+
+
+def test_strategy_lab_blocks_non_one_hour_primary_timeframes(client, monkeypatch):
+    async def fake_strategy(symbol, timeframe="15m", limit=300):
+        return {
+            "status": "live",
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "analysis": {"signal": "HOLD", "score": 50, "regime": "RANGE_OR_TRANSITION"},
+            "higher_timeframe": {
+                "timeframe": "6h",
+                "analysis": {"signal": "HOLD", "score": 50, "regime": "RANGE_OR_TRANSITION"},
+                "candles": [],
+            },
+            "candles": [],
+            "higher_timeframe_interval_ms": 6 * FOUR_HOURS_MS // 4,
+        }
+
+    monkeypatch.setattr(client.app.state.market_data, "cex_strategy_data", fake_strategy)
+    response = client.get("/api/strategies/multi/BTC%2FUSDT?timeframe=15m&limit=300")
+
+    assert response.status_code == 200
+    lab = response.json()["strategy_research"]
+    assert lab["status"] == "blocked"
+    assert lab["reason"] == "strategy_research_lab_requires_1h_primary_candles"
+    assert lab["execution_authorized"] is False
