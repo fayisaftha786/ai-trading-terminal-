@@ -12,11 +12,8 @@
  * printed recently. Entry eligibility still requires a fresh exchange
  * timestamp in assessCandidate/assessMarketUniverse.
  */
-export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
-  if (market?.status !== "live" ||
-      !Number.isFinite(market.bid) || market.bid <= 0 ||
-      !Number.isFinite(market.ask) || market.ask < market.bid) return false;
-
+export function isFreshQuoteObservation(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+  if (market?.status !== "live") return false;
   const receivedAt = Number(market.quote_received_at_ms);
   if (Number.isFinite(receivedAt) && receivedAt > 0) {
     const receivedAge = nowMs - receivedAt;
@@ -30,6 +27,12 @@ export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 1200
   const quoteTime = Date.parse(market.ticker_time || "");
   const age = nowMs - quoteTime;
   return Number.isFinite(quoteTime) && age >= -5000 && age <= maxQuoteAgeMs;
+}
+
+export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+  return isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs) &&
+    Number.isFinite(market.bid) && market.bid > 0 &&
+    Number.isFinite(market.ask) && market.ask >= market.bid;
 }
 
 export function buildFreshBidMarks(markets, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
@@ -393,8 +396,7 @@ export function assessCandidate({ market, primary, higher, nowMs, costs }) {
       !Number.isFinite(costs.slippageBps) || costs.slippageBps < 0) {
     return reject("execution_cost_assumptions_invalid");
   }
-  const quoteTime = Date.parse(market.ticker_time || "");
-  if (!Number.isFinite(quoteTime) || nowMs - quoteTime < -5000 || nowMs - quoteTime > 120000) {
+  if (!isFreshQuoteObservation(market, nowMs, 120000)) {
     return reject("ticker_stale_or_timestamp_invalid");
   }
   const { bid, ask, last, quote_volume_usd: quoteVolume } = market;
