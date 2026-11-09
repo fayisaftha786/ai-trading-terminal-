@@ -107,3 +107,52 @@ def test_coinbase_fallback_does_not_fabricate_unsupported_primary_timeframe(monk
     assert result["status"] == "unavailable"
     assert "exact 5m, 15m and 1h" in result["error"]
     assert result["candles"] == []
+
+
+def test_primary_ccxt_market_rows_record_actual_provider_and_quote_currency(monkeypatch):
+    import sys
+    import types
+
+    class FakeExchange:
+        markets = {"BTC/USDT": {}}
+
+        async def load_markets(self):
+            return self.markets
+
+        async def fetch_ticker(self, _symbol):
+            return {
+                "last": 100.0,
+                "bid": 99.99,
+                "ask": 100.01,
+                "quoteVolume": 2_000_000.0,
+                "percentage": 0.5,
+                "timestamp": time.time() * 1000,
+            }
+
+        async def fetch_order_book(self, _symbol, limit=10):
+            assert limit == 10
+            return {
+                "bids": [[99.99, 1000.0]],
+                "asks": [[100.01, 1000.0]],
+                "timestamp": time.time() * 1000,
+            }
+
+        async def close(self):
+            return None
+
+    package = types.ModuleType("ccxt")
+    package.__path__ = []
+    async_support = types.ModuleType("ccxt.async_support")
+    async_support.binance = lambda _config: FakeExchange()
+    package.async_support = async_support
+    monkeypatch.setitem(sys.modules, "ccxt", package)
+    monkeypatch.setitem(sys.modules, "ccxt.async_support", async_support)
+
+    config = replace(settings, cex_exchange="binance", cex_symbols=("BTC/USDT",))
+    service = MarketDataService(config)
+    result = asyncio.run(service.cex_tickers())
+
+    assert result["status"] == "live"
+    assert result["exchange"] == "binance"
+    assert result["markets"][0]["market_data_provider"] == "binance"
+    assert result["markets"][0]["quote_currency"] == "USDT"
