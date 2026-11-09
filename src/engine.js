@@ -440,7 +440,7 @@ export class TradingEngine extends DurableObject {
               if (!Number.isFinite(baseSize) || baseSize <= 0 || !Number.isFinite(quoteValue) || quoteValue <= 0) {
                 throw new Error("coinbase_advanced_fill_notional_invalid");
               }
-              const decimalText = (value, places) => value.toFixed(places).replace(/0+$/, "").replace(/\\.$/, "");
+              const decimalText = (value, places) => value.toFixed(places).replace(/0+$/, "").replace(/\.$/, "");
               const normalized = {
                 entry_id: fill.entry_id,
                 trade_id: fill.trade_id,
