@@ -50,9 +50,13 @@ All three symbols were fresh. Each had 349 valid closed candles in both 1h and 6
 
 ## Cloud backend status
 
-The Cloudflare PAPER Worker source is merged into main and passed local validation. **It is not deployed to a Cloudflare account.** The remaining deployment requires the owner to use a Cloudflare account on the Free plan, connect the GitHub repository, and configure `ADMIN_PASSWORD` (16+ characters) and `SESSION_SECRET` (32+ characters) as Cloudflare runtime secrets. Do not send these secrets in chat or commit them to GitHub.
+**Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. However, `worker_version.tag` is blank and the public health response does not include the scheduler telemetry now present in source. The endpoint is therefore reachable, but current-main production deployment and real alarm cadence remain **unverified**.
 
-After deployment, verify `/api/health`, owner authentication, all three live markets, 1h/6h candle integrity, fresh local order-book response retrieval age, ledger persistence and the alarm schedule. Keep automatic PAPER entries OFF until all checks pass.
+Current GitHub `main`: `14674f79938d21410a0ac265e197a43fa97db7f1`. Main has passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
+
+The previous GitHub Actions deployment attempt passed source checks, all 25 Worker unit tests and Wrangler dry-run build, then stopped at the credential check because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` were empty. The recommended phone-only route is Cloudflare Dashboard → Workers & Pages → GitHub integration; this can create its own deployment authorization and avoids requiring those two GitHub Actions secrets. The owner must still sign in, connect the repository, and configure Cloudflare runtime secrets `ADMIN_PASSWORD` (16+ characters) and `SESSION_SECRET` (32+ characters). Never share them in chat or commit them.
+
+After deploying, verify that `worker_version.tag` exactly equals current `main`, check the scheduler heartbeat and last healthy scheduled scan, confirm all 3 markets, candle integrity, local order-book response retrieval age, ledger persistence and kill-switch behavior. Keep automatic PAPER entries OFF until these checks pass.
 
 ## Safety boundary
 
