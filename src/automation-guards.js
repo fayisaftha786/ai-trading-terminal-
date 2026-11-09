@@ -540,7 +540,8 @@ export function classifyMarketFeedFreshness({
       reason: "last_scheduled_scan_was_healthy_but_persisted_order_book_snapshots_have_expired"
     };
   }
-  if (lastScheduledScanStatus === "completed" && expected > 0 && healthy === expected && !recent) {
+  if (lastScheduledScanStatus === "completed" && expected > 0 && healthy === expected &&
+      Number.isFinite(age) && Number.isFinite(maxAge) && age > maxAge) {
     return { state: "scheduled_scan_overdue", reason: "last_healthy_scan_is_older_than_scheduler_health_window" };
   }
   if (lastScheduledScanStatus === "partial" || lastScheduledScanStatus === "unavailable" ||
