@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "../src/strategy.js";
+import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
   return Array.from({ length: count }, (_, index) => {
@@ -233,4 +233,26 @@ test("Cloudflare dashboard inline JavaScript parses before deployment", () => {
       "Cloudflare dashboard inline JavaScript must remain syntactically valid"
     );
   });
+});
+
+
+test("fresh local ticker retrieval remains usable for paper exits when last trade timestamp is old", () => {
+  const now = Date.now();
+  const market = {
+    symbol: "BTC/USD",
+    status: "live",
+    ticker_time: new Date(now - 5 * 60 * 1000).toISOString(),
+    quote_received_at_ms: now - 1000,
+    bid: 100,
+    ask: 100.01
+  };
+  assert.equal(isFreshBidQuote(market, now), true);
+  assert.deepEqual([...buildFreshBidMarks([market], now).entries()], [["BTC/USD", 100]]);
+
+  const staleObservation = { ...market, quote_received_at_ms: now - 121000 };
+  assert.equal(isFreshBidQuote(staleObservation, now), false);
+  assert.equal(buildFreshBidMarks([staleObservation], now).size, 0);
+
+  const futureEvent = { ...market, ticker_time: new Date(now + 6000).toISOString() };
+  assert.equal(isFreshBidQuote(futureEvent, now), false);
 });
