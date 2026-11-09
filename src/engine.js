@@ -14,15 +14,11 @@ import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearch
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
+import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, migratePaperAutomationSettings, shouldAutoResumeWatchdog } from "./paper-automation-profile.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
-const DEFAULT_RISK = {
-  risk_per_trade_pct: 0.25, max_daily_loss_pct: 1.5, max_weekly_loss_pct: 4,
-  max_total_exposure_pct: 20, max_open_positions: 3, stop_loss_pct: 1,
-  take_profit_pct: 3, fee_bps_per_side: 15, slippage_bps: 10,
-  max_total_drawdown_pct: 5, daily_profit_lock_pct: 1, soft_loss_guard_fraction: 0.75
-};
+const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
 
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -58,12 +54,18 @@ export class TradingEngine extends DurableObject {
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
-      JSON.stringify({ initial_capital_usd: 100, risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, peak_equity_usd: 100 })
+      JSON.stringify({ initial_capital_usd: 10, risk: DEFAULT_RISK, auto_paper_enabled: true, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
+    const currentSettings = this.getState("settings");
+    const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
+    const migratedSettings = migratePaperAutomationSettings(currentSettings, historicalTradeCount);
+    if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
+      this.setState("settings", migratedSettings);
+    }
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "runtime",
-      JSON.stringify({ last_scan_at_ms: null, last_scan_status: "not_started", last_scan_error: null })
+      JSON.stringify({ last_scan_at_ms: null, last_scan_status: "not_started", last_scan_error: null, healthy_scheduled_scan_streak: 0 })
     );
   }
 
@@ -502,6 +504,7 @@ export class TradingEngine extends DurableObject {
         const body = await request.json();
         if (typeof body.enabled !== "boolean") return jsonResponse({ error: "enabled_boolean_required" }, 400);
         const state = this.getState("settings");
+        if (body.enabled && state.capital_setup_required) return jsonResponse({ error: "paper_capital_setup_review_required" }, 409);
         if (body.enabled && state.halted) return jsonResponse({ error: "paper_automation_halted_reset_required" }, 409);
         if (body.enabled) {
           const nowMs = Date.now();
@@ -537,6 +540,7 @@ export class TradingEngine extends DurableObject {
         const state = this.getState("settings");
         state.auto_paper_enabled = false;
         state.halted = true;
+        state.halt_reason = "owner_emergency_stop";
         this.setState("settings", state);
         this.logEvent("emergency_stop", "Paper auto-entry halted; scheduled monitoring continues");
         return jsonResponse({ stopped: true, auto_paper_enabled: false, halted: true, exit_monitoring_continues: true });
@@ -545,6 +549,7 @@ export class TradingEngine extends DurableObject {
         if (this.getOpenTrades().length > 0) return jsonResponse({ error: "open_paper_positions_must_be_closed_before_reset" }, 409);
         const state = this.getState("settings");
         state.halted = false;
+        state.halt_reason = null;
         state.auto_paper_enabled = false;
         this.setState("settings", state);
         this.logEvent("emergency_stop_reset", "Paper entry halt reset; auto-entry remains OFF");
@@ -644,6 +649,7 @@ export class TradingEngine extends DurableObject {
       runtime.last_scheduled_scan_error = String(error?.message || error).slice(0, 180);
       runtime.consecutive_unhealthy_scheduled_scans =
         Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
+      runtime.healthy_scheduled_scan_streak = 0;
       runtime.last_scan_status = "error";
       runtime.last_scan_error = runtime.last_scheduled_scan_error;
       runtime.last_scan_at_ms = nowMs;
@@ -659,6 +665,7 @@ export class TradingEngine extends DurableObject {
       if (watchdogDecision.halt) {
         settings.auto_paper_enabled = false;
         settings.halted = true;
+        settings.halt_reason = "market_data_watchdog";
         this.setState("settings", settings);
         this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted after scheduled scan failures", {
           reason: watchdogDecision.reason,
@@ -955,6 +962,9 @@ export class TradingEngine extends DurableObject {
         ? previousRuntime.last_scan_at_ms : null);
     const lastHealthyScheduledScanAtMs = source === "scheduled" && marketFeed.healthy
       ? Date.now() : previousHealthyScheduledScanAtMs;
+    const healthyScheduledScanStreak = source === "scheduled"
+      ? (marketFeed.healthy ? Math.max(0, Number(previousRuntime.healthy_scheduled_scan_streak) || 0) + 1 : 0)
+      : Math.max(0, Number(previousRuntime.healthy_scheduled_scan_streak) || 0);
     const watchdogDecision = shouldHaltPaperAutomation({
       autoEnabled: !!state.auto_paper_enabled,
       halted: !!state.halted,
@@ -968,12 +978,28 @@ export class TradingEngine extends DurableObject {
       const haltState = this.getState("settings") || state;
       haltState.auto_paper_enabled = false;
       haltState.halted = true;
+      haltState.halt_reason = "market_data_watchdog";
       this.setState("settings", haltState);
       Object.assign(state, haltState);
       this.logEvent("market_data_watchdog_halt", "Paper auto-entry halted by the market-data scheduler watchdog", {
         reason: watchdogDecision.reason,
         consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
         last_healthy_scan_at_ms: previousHealthyScanAtMs
+      });
+    }
+    const latestSettings = this.getState("settings") || state;
+    if (shouldAutoResumeWatchdog({
+      halted: latestSettings.halted,
+      haltReason: latestSettings.halt_reason,
+      healthyScheduledScanStreak
+    })) {
+      latestSettings.halted = false;
+      latestSettings.halt_reason = null;
+      latestSettings.auto_paper_enabled = !latestSettings.capital_setup_required;
+      this.setState("settings", latestSettings);
+      Object.assign(state, latestSettings);
+      this.logEvent("market_data_watchdog_recovered", "Paper auto-entry resumed after two complete healthy scheduled scans", {
+        healthy_scheduled_scan_streak: healthyScheduledScanStreak
       });
     }
     const entryResults = [];
@@ -1037,6 +1063,7 @@ export class TradingEngine extends DurableObject {
           .join("; ").slice(0, 180),
       last_healthy_scan_at_ms: lastHealthyScanAtMs,
       last_healthy_scheduled_scan_at_ms: lastHealthyScheduledScanAtMs,
+      healthy_scheduled_scan_streak: healthyScheduledScanStreak,
       healthy_market_count: marketFeed.healthy_market_count,
       expected_market_count: marketFeed.expected_market_count,
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
@@ -1737,10 +1764,11 @@ export class TradingEngine extends DurableObject {
     if (portfolio.open_positions >= risk.max_open_positions) reasons.push("max_open_positions");
     const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
     reasons.push(...protection.block_reasons);
+    if (this.getState("settings")?.capital_setup_required) reasons.push("paper_capital_setup_review_required");
     if (portfolio.drawdown_pct_from_peak >= risk.max_total_drawdown_pct) {
       reasons.push("max_total_drawdown");
       const state = this.getState("settings");
-      state.auto_paper_enabled = false; state.halted = true; this.setState("settings", state);
+      state.auto_paper_enabled = false; state.halted = true; state.halt_reason = "max_total_drawdown"; this.setState("settings", state);
       this.logEvent("drawdown_circuit_breaker", "Paper automation halted by total drawdown limit");
     }
     if (!Number.isFinite(portfolio.daily_equity_pnl_usd) || !Number.isFinite(portfolio.weekly_equity_pnl_usd)) {
@@ -1751,7 +1779,7 @@ export class TradingEngine extends DurableObject {
     }
     const dayStart = new Date(nowMs); dayStart.setUTCHours(0, 0, 0, 0);
     const entriesToday = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()).toArray()[0]?.count || 0);
-    if (entriesToday >= 3) reasons.push("daily_entry_cap");
+    if (!getDailyCycleAllowance(entriesToday, PAPER_AUTOMATION_PROFILE.max_cycles_per_day).allowed) reasons.push("daily_cycle_cap");
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     if (portfolio.exposure_usd >= maxExposure) reasons.push("max_exposure");
     return [...new Set(reasons)];
@@ -1782,27 +1810,38 @@ export class TradingEngine extends DurableObject {
 
     const entryPrice = market.ask * (1 + risk.slippage_bps / 10000);
     const feeRate = risk.fee_bps_per_side / 10000;
-    const roundTripCostRate = (2 * (risk.fee_bps_per_side + risk.slippage_bps) + assessment.spread_bps) / 10000;
+    const roundTripCostBps = 2 * (risk.fee_bps_per_side + risk.slippage_bps) + assessment.spread_bps;
+    const roundTripCostRate = roundTripCostBps / 10000;
+    const dynamicTarget = calculateDynamicTakeProfit({
+      atrPct: market.primary?.atr_pct,
+      roundTripCostBps
+    });
+    if (!dynamicTarget.ok) return { ok: false, reason: dynamicTarget.reason };
     const effectiveStopRate = risk.stop_loss_pct / 100 + roundTripCostRate;
     const effectiveRiskPct = risk.risk_per_trade_pct * adaptiveRisk.multiplier;
     const riskBudget = portfolio.equity_usd * effectiveRiskPct / 100;
     const riskLimitedNotional = riskBudget / effectiveStopRate;
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     const remainingExposure = Math.max(0, maxExposure - portfolio.exposure_usd);
-    const notional = Math.min(riskLimitedNotional, remainingExposure);
+    const positionCap = Number.isFinite(Number(risk.max_position_notional_usd)) && Number(risk.max_position_notional_usd) > 0
+      ? Number(risk.max_position_notional_usd) : PAPER_AUTOMATION_PROFILE.max_position_notional_usd;
+    const notional = Math.min(riskLimitedNotional, remainingExposure, positionCap);
     if (!Number.isFinite(notional) || notional < 2) return { ok: false, reason: "risk_or_exposure_budget_too_small" };
     const quantity = notional / entryPrice;
     const entryFee = notional * feeRate;
     const trade = {
       symbol: market.symbol, status: "OPEN", entry_price: entryPrice, quantity, notional_usd: notional,
       stop_loss: entryPrice * (1 - risk.stop_loss_pct / 100),
-      take_profit: entryPrice * (1 + risk.take_profit_pct / 100),
+      take_profit: entryPrice * (1 + dynamicTarget.target_pct / 100),
       fees_usd: entryFee, pnl_usd: null, opened_at_ms: nowMs,
       metadata_json: JSON.stringify({
         strategy_version: "cloud-paper-v1", timeframe: "1h", confirmation_timeframe: "6h",
         market_data_provider: market.market_data_provider || "coinbase_exchange",
         score: market.primary.score, regime_1h: market.primary.regime, regime_6h: market.higher.regime,
-        spread_bps: assessment.spread_bps, round_trip_cost_bps: assessment.round_trip_cost_bps,
+        spread_bps: assessment.spread_bps, round_trip_cost_bps: roundTripCostBps,
+        dynamic_take_profit_pct: dynamicTarget.target_pct,
+        dynamic_take_profit_bps: dynamicTarget.target_bps,
+        estimated_net_edge_bps: dynamicTarget.estimated_net_edge_bps,
         fee_bps_per_side: risk.fee_bps_per_side, slippage_bps: risk.slippage_bps,
         configured_risk_per_trade_pct: risk.risk_per_trade_pct,
         adaptive_risk_multiplier: adaptiveRisk.multiplier,
@@ -1903,6 +1942,12 @@ export class TradingEngine extends DurableObject {
     const lastScanAgeMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
       ? Math.max(0, nowMs - lastScanAtMs) : null;
     const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
+    const dayStart = new Date(nowMs);
+    dayStart.setUTCHours(0, 0, 0, 0);
+    const cyclesUsed = Number(this.sql.exec(
+      "SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()
+    ).toArray()[0]?.count || 0);
+    const cycleAllowance = getDailyCycleAllowance(cyclesUsed, PAPER_AUTOMATION_PROFILE.max_cycles_per_day);
     const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
       ? Math.max(0, nextAlarmAtMs - nowMs) : null;
     const scheduler = deriveSchedulerStatus({
@@ -1914,6 +1959,13 @@ export class TradingEngine extends DurableObject {
     return {
       enabled: !!settings.auto_paper_enabled,
       halted: !!settings.halted,
+      halt_reason: settings.halt_reason || null,
+      capital_setup_required: !!settings.capital_setup_required,
+      continuous_monitoring: true,
+      automatic_watchdog_recovery: true,
+      daily_cycle_limit: cycleAllowance.limit,
+      daily_cycles_used: cycleAllowance.used,
+      daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
@@ -1926,6 +1978,7 @@ export class TradingEngine extends DurableObject {
       next_alarm_in_ms: nextAlarmInMs,
       runtime,
       engine: "durable_object_alarm",
+      live_trading_enabled: false,
       mode: "paper_only"
     };
   }
