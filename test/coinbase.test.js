@@ -309,7 +309,10 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     const path = parsed.pathname + parsed.search;
     calls.push(parsed.hostname + path);
     if (parsed.hostname === "api.exchange.coinbase.com") {
-      return jsonResponse({ message: "primary feed unavailable" }, 503);
+      return new Response(JSON.stringify({ message: "primary feed unavailable" }), {
+        status: 503,
+        headers: { "content-type": "application/json", "retry-after": "0" }
+      });
     }
     if (parsed.hostname !== "www.bitstamp.net") {
       return jsonResponse({ message: "unexpected provider" }, 404);
@@ -357,7 +360,7 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     assert.equal(snapshot.six_hour_audit.valid_closed_bars, 160);
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.data_quality.failover_used, true);
-    assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
+    assert.equal(snapshot.data_quality.primary_provider_error, "provider_http_error");
     assert.equal(snapshot.data_quality.failover_reason, "primary_provider_request_failed");
     assert.ok(snapshot.data_quality.book_provider === snapshot.market_data_provider);
     assert.ok(snapshot.data_quality.ticker_provider === snapshot.market_data_provider);
@@ -368,7 +371,8 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.ok(Number.isFinite(snapshot.book_retrieved_at_ms));
     assert.ok(calls.every((call) => !call.includes("BTC") && !call.includes("ETH")));
-    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 1);
+    assert.equal(calls.filter((call) => call.includes("api.exchange.coinbase.com")).length, 3,
+      "the primary feed should honour its configured three-attempt retry policy");
     assert.equal(calls.filter((call) => call.includes("www.bitstamp.net")).length, 4);
   } finally {
     globalThis.fetch = originalFetch;
@@ -470,10 +474,10 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
         });
       }
       if (path === "/products/SOL-USD/book?level=2") {
-        return jsonResponse({ message: "order book temporarily unavailable" }, 503);
+        return jsonResponse({ message: "order book temporarily unavailable" }, 404);
       }
       if (path.includes("/candles?")) {
-        return jsonResponse({ message: "candle history temporarily unavailable" }, 503);
+        return jsonResponse({ message: "candle history temporarily unavailable" }, 404);
       }
       return jsonResponse({ message: "unexpected primary endpoint" }, 404);
     }
