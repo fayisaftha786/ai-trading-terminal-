@@ -184,7 +184,8 @@ try {
   assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
   const liveStatus = await liveStatusResponse.json();
   assert.equal(liveStatus.mode, "live_setup_locked");
-  assert.equal(liveStatus.order_submission_available, false);
+  assert.equal(liveStatus.order_submission_available, false, "static status must never claim a fresh account preflight");
+  assert.equal(liveStatus.order_submission_configured, false);
   assert.equal(liveStatus.live_trading_enabled, false);
   assert.equal(liveStatus.automatic_live_entries_enabled, false);
   assert.equal(liveStatus.credentials_configured, false, "local smoke must not rely on exchange credentials");
@@ -197,11 +198,26 @@ try {
   assert.equal(livePreflight.status, "not_configured");
   assert.equal(livePreflight.order_submission_available, false);
 
-  const blockedLiveExecute = await request("/api/live/execute", {
-    method: "POST", headers: auth, body: JSON.stringify({ product_id: "BTC-USD", quote_size: "10" })
+  const previewInDemo = await request("/api/live/order-preview", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ product_id: "BTC-USD", side: "BUY", quote_size: "5.00", limit_price: "90000.00" })
   });
-  assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
-  assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
+  assert.equal(previewInDemo.status, 409, "preview must require explicit REAL mode");
+
+  const liveFillLedgerResponse = await request("/api/live/fills", { headers: auth });
+  assert.equal(liveFillLedgerResponse.status, 200);
+  const liveFillLedger = await liveFillLedgerResponse.json();
+  assert.equal(liveFillLedger.mode, "exchange_reported_fill_ledger");
+  assert.equal(liveFillLedger.pnl_status, "not_calculated_fee_currency_and_fifo_accounting_not_yet_verified");
+
+  const blockedLiveExecute = await request("/api/live/execute", {
+    method: "POST", headers: auth,
+    body: JSON.stringify({ confirm_real_order: true, client_order_id: "12345678-1234-1234-1234-123456789012", preview_token: "00000000-0000-4000-8000-000000000000", product_id: "BTC-USD", quote_size: "10" })
+  });
+  assert.equal(blockedLiveExecute.status, 409, "manual REAL execution must require REAL mode before all other checks");
+  const blockedLiveBody = await blockedLiveExecute.json();
+  assert.ok(blockedLiveBody.blockers.includes("real_mode_must_be_selected"));
+  assert.equal(blockedLiveBody.live_trading_enabled, false);
 
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
@@ -294,6 +310,10 @@ try {
   assert.match(staticHtml, /crypto\.randomUUID\(\)/);
   assert.match(staticHtml, /REAL COINBASE ORDER CONFIRMATION/);
   assert.match(staticHtml, /withdrawals are never enabled/);
+  assert.match(staticHtml, /id="liveReconcile"/);
+  assert.match(staticHtml, /api\/live\/fills\?limit=100/);
+  assert.match(staticHtml, /preview_token:preview\.preview_token/);
+  assert.match(staticHtml, /bound server-side/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);

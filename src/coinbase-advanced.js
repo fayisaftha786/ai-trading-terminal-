@@ -155,7 +155,13 @@ export function coinbaseAdvancedStatus(env = {}) {
     max_order_quote: config.maxOrderQuoteValid ? config.maxOrderQuote : null,
     account_preflight_available: config.credentialsConfigured,
     order_preview_available: blockers.length === 0,
-    order_submission_available: config.orderExecutionEnabled && blockers.length === 0 && config.maxOpenOrders > 0 && config.maxDailyOrders > 0,
+    // Static status cannot prove the key has Trade permission or that a fresh
+    // account preflight succeeded. Only the authenticated preflight may report
+    // order_submission_available=true.
+    order_submission_available: false,
+    order_submission_configured: config.credentialsConfigured &&
+      config.orderExecutionEnabled && blockers.length === 0 &&
+      config.maxOpenOrders > 0 && config.maxDailyOrders > 0,
     order_execution_configured: config.orderExecutionEnabled,
     max_open_orders: config.maxOpenOrders || null,
     max_daily_orders: config.maxDailyOrders || null,
@@ -416,7 +422,12 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       eligible_products: eligibleProducts.map((product) => product.product_id),
       account_count: accounts.length,
       account_pagination_complete: true,
-      order_submission_available: false,
+      order_submission_available: ready && config.orderExecutionEnabled &&
+        config.maxOpenOrders > 0 && config.maxDailyOrders > 0 &&
+        permissions.can_trade === true,
+      order_submission_configured: config.credentialsConfigured &&
+        config.orderExecutionEnabled && config.maxOpenOrders > 0 &&
+        config.maxDailyOrders > 0,
       live_trading_enabled: false,
       automatic_live_entries_enabled: false,
       blockers: blocking
@@ -750,3 +761,124 @@ export async function cancelCoinbaseAdvancedOrder(
     error: result?.failure_reason ? String(result.failure_reason).slice(0, 100) : null
   };
 }
+
+// Normalize an exchange fill without inventing missing values. Coinbase may
+// emit FILL, REVERSAL, CORRECTION or SYNTHETIC records; callers must retain the
+// trade_type because corrections are not ordinary additional executions.
+function sanitizeFill(fill) {
+  if (!fill || typeof fill !== "object") return null;
+  const entryId = typeof fill.entry_id === "string" ? fill.entry_id : "";
+  const orderId = typeof fill.order_id === "string" ? fill.order_id : "";
+  const productId = typeof fill.product_id === "string" ? fill.product_id : "";
+  const side = fill.side === "BUY" || fill.side === "SELL" ? fill.side : null;
+  const tradeType = String(fill.trade_type || "").toUpperCase();
+  const tradeTime = typeof fill.trade_time === "string" ? fill.trade_time : "";
+  const price = String(fill.price ?? "");
+  const size = String(fill.size ?? "");
+  const commission = String(fill.commission ?? "");
+  if (!entryId || entryId.length > 160 || !orderId || orderId.length > 160 ||
+      !productId || productId.length > 48 || !side ||
+      !["FILL", "REVERSAL", "CORRECTION", "SYNTHETIC"].includes(tradeType) ||
+      !Number.isFinite(Date.parse(tradeTime)) ||
+      !validMoney(price) || !validMoney(size) ||
+      !validNonNegativeMoney(commission)) return null;
+  const sequenceTimestamp = typeof fill.sequence_timestamp === "string" &&
+    Number.isFinite(Date.parse(fill.sequence_timestamp)) ? fill.sequence_timestamp : null;
+  const liquidity = typeof fill.liquidity_indicator === "string"
+    ? fill.liquidity_indicator.slice(0, 40) : null;
+  return {
+    entry_id: entryId,
+    trade_id: typeof fill.trade_id === "string" ? fill.trade_id.slice(0, 160) : null,
+    order_id: orderId,
+    product_id: productId,
+    side,
+    trade_type: tradeType,
+    trade_time: tradeTime,
+    sequence_timestamp: sequenceTimestamp,
+    price,
+    size,
+    commission,
+    liquidity_indicator: liquidity,
+    size_in_quote: fill.size_in_quote === true
+  };
+}
+
+// Retrieve only fills belonging to a known exchange order. Pagination is
+// bounded; an incomplete result is explicitly reported rather than presented
+// as a complete fill history.
+export async function listCoinbaseAdvancedFills(
+  env = {},
+  { orderId, productId, limit = 100, maxPages = 5 } = {},
+  { fetchImpl = fetch } = {}
+) {
+  if (!configuration(env).credentialsConfigured) {
+    const error = new Error("coinbase_advanced_credentials_not_configured");
+    error.code = "coinbase_advanced_credentials_not_configured";
+    error.status = 503;
+    throw error;
+  }
+  const selectedOrderId = typeof orderId === "string" ? orderId.trim() : "";
+  const selectedProductId = typeof productId === "string" ? productId.trim().toUpperCase() : "";
+  if ((!selectedOrderId && !selectedProductId) ||
+      selectedOrderId.length > 160 || selectedProductId.length > 48) {
+    const error = new Error("fill_query_order_or_product_required");
+    error.code = "fill_query_order_or_product_required";
+    error.status = 400;
+    throw error;
+  }
+  const pageLimit = Math.max(1, Math.min(100, Number.isSafeInteger(limit) ? limit : 100));
+  const pageCount = Math.max(1, Math.min(5, Number.isSafeInteger(maxPages) ? maxPages : 5));
+  const fills = [];
+  const seenEntryIds = new Set();
+  let cursor = "";
+  let pages = 0;
+  let paginationComplete = true;
+  for (let page = 0; page < pageCount; page += 1) {
+    const query = new URLSearchParams({ limit: String(pageLimit) });
+    if (selectedOrderId) query.append("order_ids", selectedOrderId);
+    if (selectedProductId) query.append("product_ids", selectedProductId);
+    if (cursor) query.set("cursor", cursor);
+    const payload = await advancedRequest(
+      env, "GET", API_PREFIX + "/orders/historical/fills?" + query.toString(),
+      undefined, fetchImpl
+    );
+    if (!Array.isArray(payload.fills)) {
+      const error = new Error("coinbase_advanced_fills_response_invalid");
+      error.code = "coinbase_advanced_fills_response_invalid";
+      throw error;
+    }
+    pages += 1;
+    for (const rawFill of payload.fills) {
+      const fill = sanitizeFill(rawFill);
+      if (!fill) {
+        const error = new Error("coinbase_advanced_fill_record_invalid");
+        error.code = "coinbase_advanced_fill_record_invalid";
+        throw error;
+      }
+      if (selectedOrderId && fill.order_id !== selectedOrderId) {
+        const error = new Error("coinbase_advanced_fill_order_id_mismatch");
+        error.code = "coinbase_advanced_fill_order_id_mismatch";
+        throw error;
+      }
+      if (!seenEntryIds.has(fill.entry_id)) {
+        seenEntryIds.add(fill.entry_id);
+        fills.push(fill);
+      }
+    }
+    const nextCursor = typeof payload.cursor === "string" ? payload.cursor : "";
+    if (!nextCursor) break;
+    if (nextCursor === cursor || page === pageCount - 1) {
+      paginationComplete = false;
+      break;
+    }
+    cursor = nextCursor;
+  }
+  return {
+    fills,
+    count: fills.length,
+    pages,
+    pagination_complete: paginationComplete,
+    query: { order_id: selectedOrderId || null, product_id: selectedProductId || null }
+  };
+}
+

@@ -8,7 +8,8 @@ import {
   previewCoinbaseAdvancedLimitBuy,
   submitCoinbaseAdvancedLimitBuy,
   reconcileCoinbaseAdvancedOrder,
-  cancelCoinbaseAdvancedOrder
+  cancelCoinbaseAdvancedOrder,
+  listCoinbaseAdvancedFills
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
@@ -17,6 +18,7 @@ import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResear
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
+import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -49,7 +51,10 @@ export class TradingEngine extends DurableObject {
       "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS research_candles(exchange TEXT NOT NULL,product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,candle_open_ms INTEGER NOT NULL,open REAL NOT NULL,high REAL NOT NULL,low REAL NOT NULL,close REAL NOT NULL,volume REAL NOT NULL,received_at_ms INTEGER NOT NULL,schema_version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(exchange,product,timeframe_seconds,candle_open_ms))",
       "CREATE INDEX IF NOT EXISTS idx_research_candles_product_time ON research_candles(product,timeframe_seconds,candle_open_ms)",
-      "CREATE TABLE IF NOT EXISTS research_history_state(product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,bars_count INTEGER NOT NULL DEFAULT 0,first_candle_ms INTEGER,last_candle_ms INTEGER,cumulative_missing_intervals INTEGER NOT NULL DEFAULT 0,last_quality_check_at_ms INTEGER,last_ingested_at_ms INTEGER,last_quality_status TEXT NOT NULL DEFAULT 'not_started',PRIMARY KEY(product,timeframe_seconds))"
+      "CREATE TABLE IF NOT EXISTS research_history_state(product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,bars_count INTEGER NOT NULL DEFAULT 0,first_candle_ms INTEGER,last_candle_ms INTEGER,cumulative_missing_intervals INTEGER NOT NULL DEFAULT 0,last_quality_check_at_ms INTEGER,last_ingested_at_ms INTEGER,last_quality_status TEXT NOT NULL DEFAULT 'not_started',PRIMARY KEY(product,timeframe_seconds))",
+      "CREATE TABLE IF NOT EXISTS live_fills(entry_id TEXT PRIMARY KEY,trade_id TEXT,order_id TEXT NOT NULL,client_order_id TEXT NOT NULL,product_id TEXT NOT NULL,side TEXT NOT NULL,trade_type TEXT NOT NULL,trade_time TEXT NOT NULL,sequence_timestamp TEXT,price TEXT NOT NULL,size TEXT NOT NULL,commission TEXT NOT NULL,liquidity_indicator TEXT,size_in_quote INTEGER NOT NULL DEFAULT 0,imported_at_ms INTEGER NOT NULL,raw_json TEXT NOT NULL DEFAULT '{}')",
+      "CREATE INDEX IF NOT EXISTS idx_live_fills_order_time ON live_fills(order_id,trade_time)",
+      "CREATE INDEX IF NOT EXISTS idx_live_fills_client_time ON live_fills(client_order_id,trade_time)"
     ];
     // Durable Object SQL exec expects a single statement per call.
     for (const statement of schemaStatements) this.sql.exec(statement);
@@ -277,14 +282,24 @@ export class TradingEngine extends DurableObject {
           scan_diagnostics: diagnostics
         });
       }
-      // Coinbase Advanced account preflight and order preview are deliberately
-      // separated from execution. There is no /api/live/execute route in this build.
+      // Manual REAL execution is separate from automatic PAPER entries.
+      // Submission requires a fresh server-bound preview and explicit owner confirmation.
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
-        const executionStatus = coinbaseAdvancedStatus(this.env);
-        if (!executionStatus.order_submission_available) {
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real") {
           return jsonResponse({
             status: "blocked",
-            blockers: [...executionStatus.blockers, "guarded_live_execution_switch_or_open_order_limit_not_configured"],
+            blockers: ["real_mode_must_be_selected"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 409);
+        }
+        const executionStatus = coinbaseAdvancedStatus(this.env);
+        if (!executionStatus.order_submission_configured) {
+          return jsonResponse({
+            status: "blocked",
+            blockers: [...executionStatus.blockers, "guarded_live_execution_switch_or_credentials_or_limits_not_configured"],
             order_submission_available: false,
             live_trading_enabled: false,
             automatic_live_entries_enabled: false
@@ -294,23 +309,21 @@ export class TradingEngine extends DurableObject {
         try { rawBody = await request.text(); } catch {
           return jsonResponse({ status: "blocked", blockers: ["invalid_request_body"] }, 400);
         }
-        if (new TextEncoder().encode(rawBody).byteLength > 4096) {
+        if (new TextEncoder().encode(rawBody).byteLength > 2048) {
           return jsonResponse({ status: "blocked", blockers: ["request_too_large"] }, 413);
         }
         let body;
         try { body = JSON.parse(rawBody); } catch {
           return jsonResponse({ status: "blocked", blockers: ["invalid_json"] }, 400);
         }
-        const settings = this.getState("settings") || {};
-        if (normalizeTradingMode(settings.trading_mode) !== "real") {
-          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"], order_submission_available: false }, 409);
-        }
-        const side = String(body?.side || "BUY").toUpperCase();
         const clientOrderId = body?.client_order_id;
-        if (!["BUY", "SELL"].includes(side) || body?.confirm_real_order !== true ||
+        const previewToken = body?.preview_token;
+        if (body?.confirm_real_order !== true ||
             typeof clientOrderId !== "string" ||
-            !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId)) {
-          return jsonResponse({ status: "blocked", blockers: ["explicit_real_order_confirmation_and_client_order_id_required"] }, 400);
+            !/^[A-Za-z0-9-]{16,64}$/.test(clientOrderId) ||
+            typeof previewToken !== "string" ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(previewToken)) {
+          return jsonResponse({ status: "blocked", blockers: ["explicit_confirmation_client_order_id_and_server_preview_token_required"] }, 400);
         }
         const records = this.getState("coinbase_live_orders") || [];
         const prior = records.find((item) => item.client_order_id === clientOrderId);
@@ -320,38 +333,58 @@ export class TradingEngine extends DurableObject {
         const utcDayStart = new Date();
         utcDayStart.setUTCHours(0, 0, 0, 0);
         const ordersToday = records.filter((item) => Number(item.created_at_ms) >= utcDayStart.getTime()).length;
-        if (!status.order_submission_available || active.length >= status.max_open_orders ||
+        if (active.length >= status.max_open_orders ||
             !status.max_daily_orders || ordersToday >= status.max_daily_orders) {
           return jsonResponse({
             status: "blocked",
-            blockers: [...status.blockers,
+            blockers: [
               ...(active.length >= (status.max_open_orders || 1) ? ["maximum_open_orders_reached"] : []),
-              ...(!status.max_daily_orders || ordersToday >= status.max_daily_orders ? ["maximum_daily_order_count_reached"] : [])],
+              ...(!status.max_daily_orders || ordersToday >= status.max_daily_orders ? ["maximum_daily_order_count_reached"] : [])
+            ],
             order_submission_available: false,
             live_trading_enabled: false,
             automatic_live_entries_enabled: false
           }, 423);
         }
+        const previews = this.getState("coinbase_live_previews") || [];
+        const consume = consumeServerLivePreview(previews, previewToken, Date.now());
+        if (!consume.ok) {
+          this.setState("coinbase_live_previews", consume.previews.slice(0, 25));
+          const statusCode = consume.reason === "server_preview_expired_refresh_required" ? 410
+            : consume.reason === "preview_not_authorized_for_manual_live_submission" ? 423 : 409;
+          return jsonResponse({ status: "blocked", blockers: [consume.reason], order_submission_available: false }, statusCode);
+        }
+        const preview = consume.preview;
+        // Consume synchronously before the first external await. A second
+        // request cannot reuse this preview, including after an ambiguous
+        // network outcome; ambiguous outcomes must be reconciled, never retried.
+        this.setState("coinbase_live_previews", consume.previews.slice(0, 25));
+        const nowMs = Date.now();
         const record = {
           client_order_id: clientOrderId,
-          product_id: String(body.product_id || "").toUpperCase(),
-          side,
+          product_id: preview.product_id,
+          side: preview.side,
+          quote_size: preview.quote_size || null,
+          base_size: preview.base_size || null,
+          limit_price: preview.limit_price,
+          commission_preview: preview.commission_total,
           status: "SUBMITTING",
-          created_at_ms: Date.now(),
-          updated_at_ms: Date.now(),
-          exchange_order_id: null
+          created_at_ms: nowMs,
+          updated_at_ms: nowMs,
+          exchange_order_id: null,
+          preview_token: previewToken
         };
         records.unshift(record);
         this.setState("coinbase_live_orders", records.slice(0, 100));
         try {
           const result = await submitCoinbaseAdvancedLimitBuy(this.env, {
-            productId: body.product_id,
-            side,
-            quoteSize: body.quote_size,
-            baseSize: body.base_size,
-            limitPrice: body.limit_price,
-            commissionTotal: body.commission_total,
-            previewId: body.preview_id,
+            productId: preview.product_id,
+            side: preview.side,
+            quoteSize: preview.quote_size,
+            baseSize: preview.base_size,
+            limitPrice: preview.limit_price,
+            commissionTotal: preview.commission_total,
+            previewId: preview.provider_preview_id,
             clientOrderId
           });
           Object.assign(record, result, { updated_at_ms: Date.now() });
@@ -391,17 +424,85 @@ export class TradingEngine extends DurableObject {
             exchangeOrderId: record.exchange_order_id || undefined,
             createdAtMs: record.created_at_ms
           });
-          Object.assign(record, result.found ? result.order : {}, {
+          const reconciledOrder = result.found ? result.order : null;
+          Object.assign(record, reconciledOrder || {}, {
+            exchange_order_id: record.exchange_order_id || reconciledOrder?.order_id || null,
             status: result.status,
             last_reconciled_at_ms: Date.now(),
             updated_at_ms: Date.now()
           });
+          let fillSync = { status: "not_available", count: 0, pagination_complete: true };
+          if (record.exchange_order_id) {
+            try {
+              const fillResult = await listCoinbaseAdvancedFills(this.env, { orderId: record.exchange_order_id, limit: 100, maxPages: 5 });
+              let imported = 0;
+              for (const fill of fillResult.fills) {
+                this.sql.exec(
+                  "INSERT INTO live_fills(entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms,raw_json) " +
+                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(entry_id) DO UPDATE SET " +
+                  "trade_id=excluded.trade_id,order_id=excluded.order_id,client_order_id=excluded.client_order_id," +
+                  "product_id=excluded.product_id,side=excluded.side,trade_type=excluded.trade_type,trade_time=excluded.trade_time," +
+                  "sequence_timestamp=excluded.sequence_timestamp,price=excluded.price,size=excluded.size,commission=excluded.commission," +
+                  "liquidity_indicator=excluded.liquidity_indicator,size_in_quote=excluded.size_in_quote," +
+                  "imported_at_ms=excluded.imported_at_ms,raw_json=excluded.raw_json",
+                  fill.entry_id, fill.trade_id, fill.order_id, record.client_order_id, fill.product_id,
+                  fill.side, fill.trade_type, fill.trade_time, fill.sequence_timestamp,
+                  fill.price, fill.size, fill.commission, fill.liquidity_indicator,
+                  fill.size_in_quote ? 1 : 0, Date.now(), JSON.stringify(fill)
+                );
+                imported += 1;
+              }
+              fillSync = {
+                status: fillResult.pagination_complete ? "complete" : "partial",
+                count: fillResult.count,
+                imported,
+                pages: fillResult.pages,
+                pagination_complete: fillResult.pagination_complete,
+                synced_at_ms: Date.now()
+              };
+            } catch (fillError) {
+              fillSync = {
+                status: "error",
+                count: 0,
+                pagination_complete: false,
+                error_code: typeof fillError?.code === "string" ? fillError.code : "coinbase_fill_sync_failed",
+                synced_at_ms: Date.now()
+              };
+            }
+          }
+          record.fill_sync = fillSync;
           const latest = this.getState("coinbase_live_orders") || [];
           this.setState("coinbase_live_orders", latest.map((item) => item.client_order_id === record.client_order_id ? record : item).slice(0, 100));
-          return jsonResponse({ ...result, client_order_id: record.client_order_id });
+          return jsonResponse({ ...result, client_order_id: record.client_order_id, fill_sync: fillSync });
         } catch (error) {
           return jsonResponse({ status: "UNKNOWN", found: false, blockers: [typeof error?.code === "string" ? error.code : "order_reconciliation_failed"] }, 502);
         }
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/fills") {
+        const clientOrderId = String(url.searchParams.get("client_order_id") || "").trim();
+        const limit = Math.max(1, Math.min(200, Number.parseInt(url.searchParams.get("limit") || "100", 10) || 100));
+        const rows = clientOrderId
+          ? this.sql.exec(
+              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms " +
+              "FROM live_fills WHERE client_order_id=? ORDER BY trade_time DESC,entry_id LIMIT ?",
+              clientOrderId, limit
+            ).toArray()
+          : this.sql.exec(
+              "SELECT entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms " +
+              "FROM live_fills ORDER BY trade_time DESC,entry_id LIMIT ?",
+              limit
+            ).toArray();
+        const count = clientOrderId
+          ? Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills WHERE client_order_id=?", clientOrderId).toArray()[0]?.count || 0)
+          : Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills").toArray()[0]?.count || 0);
+        return jsonResponse({
+          fills: rows.map((row) => ({ ...row, size_in_quote: Number(row.size_in_quote) === 1 })),
+          count,
+          limit,
+          has_more: count > limit,
+          mode: "exchange_reported_fill_ledger",
+          pnl_status: "not_calculated_fee_currency_and_fifo_accounting_not_yet_verified"
+        });
       }
       if (request.method === "POST" && url.pathname === "/api/live/cancel") {
         let body;
@@ -489,6 +590,16 @@ export class TradingEngine extends DurableObject {
         try { body = JSON.parse(rawBody); } catch {
           return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["invalid_json"], order_submission_available: false }, 400);
         }
+        const settings = this.getState("settings") || {};
+        if (normalizeTradingMode(settings.trading_mode) !== "real") {
+          return jsonResponse({
+            status: "blocked", decision: "NO_ORDER",
+            blockers: ["real_mode_must_be_selected_before_order_preview"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 409);
+        }
         try {
           const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
             productId: body.product_id,
@@ -497,7 +608,24 @@ export class TradingEngine extends DurableObject {
             baseSize: body.base_size,
             limitPrice: body.limit_price
           });
-          return jsonResponse(result);
+          if (result.status !== "preview_ready") return jsonResponse(result);
+          const nowMs = Date.now();
+          const previewToken = crypto.randomUUID();
+          const previewRecord = createServerLivePreview(result, previewToken, nowMs);
+          if (!previewRecord) {
+            return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["server_preview_record_invalid"], order_submission_available: false }, 502);
+          }
+          const previews = (this.getState("coinbase_live_previews") || [])
+            .filter((item) => item && item.status === "READY" && Number(item.expires_at_ms) > nowMs)
+            .slice(0, 24);
+          previews.unshift(previewRecord);
+          this.setState("coinbase_live_previews", previews.slice(0, 25));
+          return jsonResponse({
+            ...result,
+            preview_token: previewToken,
+            preview_expires_at_ms: previewRecord.expires_at_ms,
+            warning: "Server-bound preview. It expires in 60 seconds and can authorize at most one manually confirmed order."
+          });
         } catch (error) {
           const code = typeof error?.code === "string" ? error.code : "coinbase_advanced_preview_failed";
           this.logEvent("coinbase_advanced_preview_error", "Coinbase Advanced order preview failed", { code });
