@@ -1025,6 +1025,16 @@ export class TradingEngine extends DurableObject {
         consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
       });
     } finally {
+      // This performs read-only order/fill reconciliation only. It never
+      // creates, edits or cancels orders. With no credentials or no active
+      // local orders, it exits without contacting Coinbase.
+      try {
+        await this.reconcileOpenCoinbaseLiveOrders("scheduled_alarm");
+      } catch (error) {
+        this.logEvent("coinbase_live_auto_reconcile_error", "Scheduled read-only Coinbase order reconciliation failed", {
+          error_code: typeof error?.code === "string" ? error.code : "live_order_reconciliation_failed"
+        });
+      }
       const nextAt = Date.now() + SCAN_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = nextAt;
@@ -2402,6 +2412,14 @@ export class TradingEngine extends DurableObject {
       last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 180) : null,
       next_alarm_at_ms: Number.isFinite(nextAlarmAtMs) ? nextAlarmAtMs : null,
       next_alarm_in_ms: nextAlarmInMs,
+      live_order_reconciliation: {
+        status: runtime.last_live_reconcile_failed > 0 ? "partial"
+          : runtime.last_live_reconcile_at_ms ? "completed" : "not_run",
+        last_at_ms: Number.isFinite(Number(runtime.last_live_reconcile_at_ms)) ? Number(runtime.last_live_reconcile_at_ms) : null,
+        checked: Number(runtime.last_live_reconcile_checked) || 0,
+        failed: Number(runtime.last_live_reconcile_failed) || 0,
+        scope: "read_only_active_coinbase_orders_and_actual_fills"
+      },
       runtime,
       engine: "durable_object_alarm",
       live_trading_enabled: false,
