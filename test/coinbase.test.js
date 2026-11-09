@@ -360,7 +360,7 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
     assert.equal(snapshot.six_hour_audit.valid_closed_bars, 160);
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.data_quality.failover_used, true);
-    assert.equal(snapshot.data_quality.primary_provider_error, "provider_http_error");
+    assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
     assert.equal(snapshot.data_quality.failover_reason, "primary_provider_request_failed");
     assert.ok(snapshot.data_quality.book_provider === snapshot.market_data_provider);
     assert.ok(snapshot.data_quality.ticker_provider === snapshot.market_data_provider);
@@ -521,7 +521,7 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
     assert.equal(snapshot.data_quality.one_hour_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.six_hour_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.failover_reason, "primary_snapshot_incomplete");
-    assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
+    assert.equal(snapshot.data_quality.primary_provider_error, "provider_http_error");
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
     assert.equal(snapshot.six_hour_audit.ok, true);
