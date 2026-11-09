@@ -91,3 +91,35 @@ def test_strategy_lab_blocks_non_one_hour_primary_timeframes(client, monkeypatch
     assert lab["status"] == "blocked"
     assert lab["reason"] == "strategy_research_lab_requires_1h_primary_candles"
     assert lab["execution_authorized"] is False
+
+
+
+def test_backtest_and_walk_forward_api_preserve_six_hour_confirmation_interval(client, monkeypatch):
+    import app.main as main_module
+
+    received = {"backtest": None, "walk_forward": None}
+
+    def fake_backtest(candles, higher, **kwargs):
+        received["backtest"] = kwargs["higher_timeframe_ms"]
+        return {"timeframe_assumptions": {"higher_interval_ms": kwargs["higher_timeframe_ms"]}}
+
+    def fake_walk_forward(candles, higher, folds, **kwargs):
+        received["walk_forward"] = kwargs["higher_timeframe_ms"]
+        return {"timeframe_assumptions": {"higher_interval_ms": kwargs["higher_timeframe_ms"]}}
+
+    monkeypatch.setattr(main_module, "run_signal_backtest", fake_backtest)
+    monkeypatch.setattr(main_module, "run_signal_walk_forward", fake_walk_forward)
+
+    payload = {
+        "candles": [[index * HOUR_MS, 100, 101, 99, 100, 1000] for index in range(200)],
+        "higher_timeframe_candles": [[index * FOUR_HOURS_MS, 100, 101, 99, 100, 4000] for index in range(150)],
+        "higher_timeframe_interval_ms": 21_600_000,
+        "timeframe": "1h",
+    }
+    backtest = client.post("/api/backtest/strategy", json=payload)
+    walk_forward = client.post("/api/research/strategy-walk-forward", json={**payload, "folds": 2})
+
+    assert backtest.status_code == 200, backtest.text
+    assert walk_forward.status_code == 200, walk_forward.text
+    assert received == {"backtest": 21_600_000, "walk_forward": 21_600_000}
+    assert backtest.json()["timeframe_assumptions"]["higher_interval_ms"] == 21_600_000
