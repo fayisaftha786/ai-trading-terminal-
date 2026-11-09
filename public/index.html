@@ -730,11 +730,12 @@ async function runTournament(){
       const walk=asset.walk_forward||{};
       const holdout=walk.ok?(walk.folds||[]).find((fold)=>fold.name==="untouched_holdout")?.results||{}:{};
       const stress=walk.ok?(walk.cost_stress||[]).find((item)=>item.cost_multiplier===2)?.result?.strategies||{}:{};
+      const evidence=walk.promotion_evidence?.strategies||{};
       const warmup=asset.recursive_warmup||{};
       const warmupSummary=warmup.status==="research_only"
         ? (warmup.stable?"STABLE":"WARMUP SENSITIVE")+" · "+pct(warmup.max_price_indicator_deviation_pct)+" price drift · "+num(warmup.max_rsi_deviation_points)+" RSI pts"
         : "INCONCLUSIVE · "+esc(warmup.status||"not run");
-      rows.push('<tr><td colspan="10"><strong>'+esc(asset.symbol)+'</strong> · '+String(asset.history?.bars_1h||0)+' 1H / '+String(asset.history?.bars_6h||0)+' 6H bars · '+(walk.ok?'walk-forward screening · '+String(walk.approximate_test_days_per_fold||0)+' days/fold':'walk-forward unavailable: '+esc(walk.reason||'insufficient history'))+' · '+esc(warmupSummary)+'</td></tr>');
+      rows.push('<tr><td colspan="11"><strong>'+esc(asset.symbol)+'</strong> · '+String(asset.history?.bars_1h||0)+' 1H / '+String(asset.history?.bars_6h||0)+' 6H bars · '+(walk.ok?'walk-forward screening · '+String(walk.approximate_test_days_per_fold||0)+' days/fold':'walk-forward unavailable: '+esc(walk.reason||'insufficient history'))+' · '+esc(warmupSummary)+'</td></tr>');
       for(const name of tournamentNames){
         const result=exploratory.strategies?.[name];
         const final=holdout[name];
@@ -747,11 +748,16 @@ async function runTournament(){
             : 'not run';
         const foldSample=walk.strategy_samples?.[name];
         const sampleText=foldSample?' · OOS trades '+String(foldSample.out_of_sample_trade_count||0)+' · '+String(foldSample.sample_status||''):'';
-        rows.push('<tr><td>'+esc(name.replace(/_/g," "))+'</td><td>'+String(result?.trade_count??"—")+'</td><td>'+pct(result?.net_return_pct)+'</td><td>'+num(result?.profit_factor)+'</td><td>'+pct(result?.max_drawdown_pct)+'</td><td>'+pct(final?.net_return_pct)+esc(sampleText)+'</td><td>'+pct(stressed?.net_return_pct)+'</td><td>'+num(result?.expectancy_per_trade)+'</td><td>'+esc(mcSummary)+'</td><td>'+esc(warmupSummary)+'</td></tr>');
+        const review=evidence[name]||{};
+        const reviewText=review.eligible_for_shadow_paper_review===true
+          ? 'QUALIFIED FOR SHADOW REVIEW'
+          : 'NOT QUALIFIED'+(Array.isArray(review.failed_gates)&&review.failed_gates.length?' · '+review.failed_gates.slice(0,3).join(', '):' · '+String(review.status||'insufficient evidence'));
+        const reviewCell='<span class="'+(review.eligible_for_shadow_paper_review===true?'positive':'muted')+'">'+esc(reviewText)+'</span><div class="muted">No production auto-entry authorization</div>';
+        rows.push('<tr><td>'+esc(name.replace(/_/g," "))+'</td><td>'+String(result?.trade_count??"—")+'</td><td>'+pct(result?.net_return_pct)+'</td><td>'+num(result?.profit_factor)+'</td><td>'+pct(result?.max_drawdown_pct)+'</td><td>'+pct(final?.net_return_pct)+esc(sampleText)+'</td><td>'+pct(stressed?.net_return_pct)+'</td><td>'+reviewCell+'</td><td>'+num(result?.expectancy_per_trade)+'</td><td>'+esc(mcSummary)+'</td><td>'+esc(warmupSummary)+'</td></tr>');
       }
     }
-    $("tournamentResults").innerHTML='<table><thead><tr><th>STRATEGY</th><th>TRADES</th><th>EXPLORATORY NET</th><th>PF</th><th>MAX DD</th><th>HOLDOUT NET / OOS SAMPLE</th><th>2× COST NET</th><th>EXPECTANCY</th><th>MONTE CARLO · 500 PATHS</th><th>WARMUP SENSITIVITY</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
-    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · RESEARCH HYPOTHESES ONLY — not a backtest of cloud-paper-v1 · walk-forward requires 3,000 clean 1H + 500 clean 6H bars and four non-overlapping ~28-day test folds · Monte Carlo is a resampling stress test, not a forecast · offline only, no trades placed.";
+    $("tournamentResults").innerHTML='<table><thead><tr><th>STRATEGY</th><th>TRADES</th><th>EXPLORATORY NET</th><th>PF</th><th>MAX DD</th><th>HOLDOUT NET / OOS SAMPLE</th><th>2× COST NET</th><th>SHADOW REVIEW EVIDENCE</th><th>EXPECTANCY</th><th>MONTE CARLO · 500 PATHS</th><th>WARMUP SENSITIVITY</th></tr></thead><tbody>'+rows.join("")+'</tbody></table>';
+    $("tournamentStatus").textContent="Generated "+new Date(data.generated_at_ms).toLocaleString()+" · RESEARCH HYPOTHESES ONLY — not a backtest of cloud-paper-v1 · walk-forward requires 3,000 clean 1H + 500 clean 6H bars and four non-overlapping ~28-day test folds · shadow-review evidence requires at least 30 OOS trades, 3/4 profitable folds, a positive untouched holdout with PF >=1.1 and DD <=8%, plus positive 1.5x cost stress · this never authorizes production entries · Monte Carlo is a resampling stress test, not a forecast · offline only, no trades placed.";
   }catch(error){$("tournamentStatus").textContent="Research failed: "+error.message;}
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
