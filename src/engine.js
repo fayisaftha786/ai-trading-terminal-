@@ -1971,7 +1971,7 @@ export class TradingEngine extends DurableObject {
       loss_cooldown_remaining_ms: lossCooldown.remainingMs,
       trailing_stop: {
         enabled: true,
-        activation: "cost-aware; at least 2% above entry",
+        activation: "after high-water exceeds estimated round-trip costs + trail distance + 0.2% net buffer",
         distance: "cost-aware; at least 0.9% below high-water bid",
         ratchet_only: true
       },
@@ -2016,6 +2016,7 @@ export class TradingEngine extends DurableObject {
       daily_cycles_basis: "completed_buy_sell_round_trips_by_sell_close_time_utc",
       daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
+      schedule_seconds: SCAN_INTERVAL_MS / 1000,
       scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
       last_scheduled_alarm_age_ms: scheduler.ageMs,
