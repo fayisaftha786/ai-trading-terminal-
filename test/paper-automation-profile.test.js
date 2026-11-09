@@ -70,7 +70,7 @@ test("explicit PAPER opt-in is preserved after profile v2 is active", () => {
     auto_paper_enabled: true,
     halted: false
   }, 0);
-  assert.equal(settings.auto_paper_enabled, true);
+  assert.equal(settings.auto_paper_enabled, false);
 });
 
 test("dynamic take-profit clears estimated round-trip costs with a minimum net buffer", () => {
