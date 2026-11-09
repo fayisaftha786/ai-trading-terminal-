@@ -111,7 +111,7 @@ def test_backtest_and_walk_forward_api_preserve_six_hour_confirmation_interval(c
     monkeypatch.setattr(main_module, "run_signal_walk_forward", fake_walk_forward)
 
     payload = {
-        "candles": [[index * HOUR_MS, 100, 101, 99, 100, 1000] for index in range(200)],
+        "candles": [[index * HOUR_MS, 100, 101, 99, 100, 1000] for index in range(240)],
         "higher_timeframe_candles": [[index * FOUR_HOURS_MS, 100, 101, 99, 100, 4000] for index in range(150)],
         "higher_timeframe_interval_ms": 21_600_000,
         "timeframe": "1h",
