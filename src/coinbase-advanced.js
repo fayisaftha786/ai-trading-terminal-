@@ -750,3 +750,77 @@ export async function cancelCoinbaseAdvancedOrder(
     error: result?.failure_reason ? String(result.failure_reason).slice(0, 100) : null
   };
 }
+
+export async function listCoinbaseAdvancedFills(
+  env = {},
+  { orderIds, limit = 100, maxPages = 5 } = {},
+  { fetchImpl = fetch } = {}
+) {
+  const ids = Array.isArray(orderIds)
+    ? [...new Set(orderIds.filter((id) => typeof id === "string" && id.length > 0 && id.length <= 160))]
+    : [];
+  if (!ids.length || ids.length > 50) {
+    return { status: "blocked", fills: [], blockers: ["one_to_fifty_known_exchange_order_ids_required"] };
+  }
+  const pageLimit = Number.isSafeInteger(limit) ? Math.max(1, Math.min(100, limit)) : 100;
+  const pageCount = Number.isSafeInteger(maxPages) ? Math.max(1, Math.min(10, maxPages)) : 5;
+  const fills = [];
+  const seenCursors = new Set();
+  let cursor = "";
+  let pages = 0;
+  for (let page = 0; page < pageCount; page += 1) {
+    const query = new URLSearchParams();
+    for (const id of ids) query.append("order_ids", id);
+    query.set("limit", String(pageLimit));
+    if (cursor) query.set("cursor", cursor);
+    const payload = await advancedRequest(
+      env, "GET", API_PREFIX + "/orders/historical/fills?" + query.toString(),
+      undefined, fetchImpl
+    );
+    if (!Array.isArray(payload.fills)) {
+      throw new Error("coinbase_advanced_fills_response_invalid");
+    }
+    for (const fill of payload.fills) {
+      if (!fill || typeof fill !== "object" || !ids.includes(String(fill.order_id || ""))) continue;
+      const price = String(fill.price ?? "");
+      const size = String(fill.size ?? "");
+      const commission = String(fill.commission ?? "0");
+      const tradeId = typeof fill.trade_id === "string" ? fill.trade_id : "";
+      const entryId = typeof fill.entry_id === "string" && fill.entry_id
+        ? fill.entry_id : (tradeId && typeof fill.order_id === "string" ? tradeId + ":" + fill.order_id : "");
+      if (!entryId || !tradeId || !validMoney(price) || !validMoney(size) ||
+          !validNonNegativeMoney(commission) || typeof fill.product_id !== "string" ||
+          typeof fill.trade_time !== "string" || !Number.isFinite(Date.parse(fill.trade_time))) {
+        throw new Error("coinbase_advanced_fill_record_invalid");
+      }
+      fills.push({
+        entry_id: entryId,
+        trade_id: tradeId,
+        order_id: String(fill.order_id),
+        trade_time: fill.trade_time,
+        sequence_timestamp: typeof fill.sequence_timestamp === "string" ? fill.sequence_timestamp : null,
+        trade_type: typeof fill.trade_type === "string" ? fill.trade_type : "FILL",
+        price,
+        size,
+        size_in_quote: fill.size_in_quote === true,
+        commission,
+        product_id: fill.product_id,
+        side: fill.side === "BUY" || fill.side === "SELL" ? fill.side : null,
+        liquidity_indicator: typeof fill.liquidity_indicator === "string" ? fill.liquidity_indicator : null
+      });
+    }
+    pages += 1;
+    const next = typeof payload.cursor === "string" ? payload.cursor : "";
+    if (!next) {
+      cursor = "";
+      break;
+    }
+    if (seenCursors.has(next)) throw new Error("coinbase_advanced_fills_cursor_repeated");
+    seenCursors.add(next);
+    cursor = next;
+  }
+  if (cursor) throw new Error("coinbase_advanced_fills_pagination_incomplete");
+  const unique = new Map();
+  for (const fill of fills) unique.set(fill.entry_id, fill);
+  return { status: "fills_loaded", fills: [...unique.values()], pages, complete: true };
+}
