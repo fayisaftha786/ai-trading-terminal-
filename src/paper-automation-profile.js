@@ -1,5 +1,5 @@
 export const PAPER_AUTOMATION_PROFILE = Object.freeze({
-  version: 1,
+  version: 2,
   initial_capital_usd: 10,
   max_cycles_per_day: 5,
   max_position_notional_usd: 8,
@@ -28,7 +28,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
   const base = {
     initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
     risk: { ...PAPER_AUTOMATION_RISK },
-    auto_paper_enabled: true,
+    auto_paper_enabled: false,
     halted: false,
     halt_reason: null,
     peak_equity_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
@@ -60,7 +60,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
       ...base,
       halted: existing.halted === true,
       halt_reason: existing.halt_reason || (existing.halted === true ? "legacy_manual_halt" : null),
-      auto_paper_enabled: existing.halted !== true
+      auto_paper_enabled: false
     };
   }
 
@@ -69,7 +69,7 @@ export function migratePaperAutomationSettings(existing, tradeCount = 0) {
     initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
     paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version,
     capital_setup_required: false,
-    auto_paper_enabled: existing.auto_paper_enabled === true
+    auto_paper_enabled: false
   };
 }
 
