@@ -1617,6 +1617,21 @@ export class TradingEngine extends DurableObject {
       mode: "offline_research_only",
       generated_at_ms: Date.now(),
       no_trading_side_effects: true,
+      strategy_comparability: {
+        status: "not_equivalent",
+        production_paper_strategy: {
+          version: "cloud-paper-v1",
+          entry_model: "assessCandidate with live ticker, spread, order-book depth, closed 1H/6H indicators and market-data freshness gates",
+          fill_model: "current ask plus configured slippage; exits are monitored from fresh bid marks with configured slippage",
+          exit_model: "fixed initial stop, cost-aware dynamic take-profit and one-way cost-aware trailing stop"
+        },
+        tournament_models: ["trend_continuation", "range_mean_reversion", "breakout_continuation"],
+        reason: "The offline tournament uses separate research entry hypotheses, ATR-based stop/target rules and next-1H-open fills; it does not replay cloud-paper-v1.",
+        limitations: [
+          "Archived OHLCV has no historical spread or order-book depth, so production entry-liquidity gates cannot be replayed.",
+          "Tournament results compare research hypotheses with each other only; they are not expected returns or a historical backtest of the production PAPER bot."
+        ]
+      },
       assumptions: {
         initial_equity_usd: initialEquity,
         allocation_pct: 10,
