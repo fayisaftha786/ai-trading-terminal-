@@ -48,7 +48,7 @@ The read-only market scanner now compares three separate spot-long research hypo
 - `volatility_breakout`: close above the prior 20-bar high, at least 1.5x relative volume, ADX/positive directional movement and controlled ATR.
 - `range_mean_reversion`: range regime on both timeframes, low ADX, RSI at or below 40, and a confirmed reclaim of the lower Bollinger band (not a falling-knife entry).
 
-The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. Its scores are transparent rule counts, not probabilities or model confidence. It does not connect to the automatic paper executor. Candidate strategies must undergo separate chronological out-of-sample/walk-forward tests, realistic fee/slippage stress and forward PAPER observation before any future promotion.
+The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. The existing signal backtest and walk-forward APIs also receive the actual 4h/6h confirmation interval rather than assuming 4h, including the correct bars-per-day input for indicator calculations. Its scores are transparent rule counts, not probabilities or model confidence. It does not connect to the automatic paper executor. Candidate strategies must undergo separate chronological out-of-sample/walk-forward tests, realistic fee/slippage stress and forward PAPER observation before any future promotion.
 
 ## Security and limitations
 
