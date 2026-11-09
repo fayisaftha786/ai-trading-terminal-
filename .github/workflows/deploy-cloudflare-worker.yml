@@ -1,6 +1,9 @@
 name: Deploy Cloudflare Worker
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -47,12 +50,12 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           wranglerVersion: "4"
-          command: deploy --tag ${{ github.sha }} --message "Git commit ${{ github.sha }}"
+          command: deploy --tag ${{ github.sha }} --var DEPLOY_COMMIT_SHA:${{ github.sha }} --message "Git commit ${{ github.sha }}"
 
       - name: Verify deployed Worker revision and PAPER-only safety
         env:
           WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
-          EXPECTED_WORKER_TAG: ${{ github.sha }}
+          EXPECTED_DEPLOY_COMMIT_SHA: ${{ github.sha }}
         shell: bash
         run: |
           for attempt in $(seq 1 12); do
@@ -66,7 +69,7 @@ jobs:
                   const health = JSON.parse(raw);
                   const checks = {
                     workerIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
-                    commitTagMatches: health.worker_version?.tag === process.env.EXPECTED_WORKER_TAG,
+                    deploymentCommitMatches: health.deployment_commit_sha === process.env.EXPECTED_DEPLOY_COMMIT_SHA,
                     statusOk: health.status === "ok",
                     paperOnly: health.mode === "paper_only",
                     liveTradingDisabled: health.live_trading_enabled === false,
@@ -89,5 +92,5 @@ jobs:
             echo "Deployment health check attempt $attempt/12 did not match the expected revision; retrying."
             sleep 10
           done
-          echo "::error::Production Worker did not report the expected commit tag and PAPER-only safety flags."
+          echo "::error::Production Worker did not report the expected commit SHA and PAPER-only safety flags."
           exit 1

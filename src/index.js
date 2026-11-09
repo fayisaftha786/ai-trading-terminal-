@@ -168,7 +168,17 @@ export default {
               timestamp: metadata.timestamp ?? null
             }
           : null;
-        return addSecurityHeaders(json({ ...payload, worker_version: workerVersion }));
+        // Keep source provenance separate from Cloudflare's optional version tag.
+        // The deployment workflow injects this public, non-secret Git SHA at build time.
+        const deploymentCommitSha = typeof env.DEPLOY_COMMIT_SHA === "string" &&
+          /^[a-f0-9]{40}$/i.test(env.DEPLOY_COMMIT_SHA)
+          ? env.DEPLOY_COMMIT_SHA.toLowerCase()
+          : null;
+        return addSecurityHeaders(json({
+          ...payload,
+          deployment_commit_sha: deploymentCommitSha,
+          worker_version: workerVersion
+        }));
       }
       return addSecurityHeaders(response);
     }
