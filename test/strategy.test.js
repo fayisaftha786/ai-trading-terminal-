@@ -299,3 +299,34 @@ test("fresh received bid can still mark an open PAPER position when exchange eve
   delete oldSchema.quote_received_at_ms;
   assert.equal(isFreshBidQuote(oldSchema, now), false);
 });
+
+
+test("PAPER position bid marks stay on the provider recorded at entry", () => {
+  const now = Date.now();
+  const coinbase = {
+    symbol: "SOL/USD", status: "live", market_data_provider: "coinbase_exchange",
+    quote_received_at_ms: now - 1000,
+    ticker_time: new Date(now - 60 * 1000).toISOString(),
+    bid: 100, ask: 100.01
+  };
+  const bitstamp = {
+    ...coinbase,
+    market_data_provider: "bitstamp_spot",
+    bid: 99.9, ask: 100
+  };
+
+  const coinbaseLocked = buildFreshBidMarks(
+    [bitstamp], now, 120000, new Map([["SOL/USD", "coinbase_exchange"]])
+  );
+  assert.equal(coinbaseLocked.has("SOL/USD"), false);
+
+  const bitstampLocked = buildFreshBidMarks(
+    [bitstamp], now, 120000, new Map([["SOL/USD", "bitstamp_spot"]])
+  );
+  assert.deepEqual([...bitstampLocked.entries()], [["SOL/USD", 99.9]]);
+
+  const legacyDefault = buildFreshBidMarks(
+    [coinbase], now, 120000, new Map([["SOL/USD", "coinbase_exchange"]])
+  );
+  assert.deepEqual([...legacyDefault.entries()], [["SOL/USD", 100]]);
+});
