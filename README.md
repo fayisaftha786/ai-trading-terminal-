@@ -38,7 +38,19 @@ GitHub Actions also runs a separate read-only market scanner using public Binanc
 
 A HOLD result is intentional when the configured strategy filters do not align. The strategy score is deterministic and uncalibrated; it is not a probability or a forecast.
 
-The read-only scanner now reports ticker and candle-analysis providers plus their quote currencies separately. It downgrades signals to HOLD unless both feeds match exactly, preventing a Binance USDT ticker from being paired with Coinbase USD candles during fallback.
+The read-only scanner now reports the configured exchange separately from the actual market-data adapter (including Coinbase fallback), and reports ticker and candle-analysis providers plus their quote currencies per market. It downgrades signals to HOLD unless both feeds match exactly, preventing a Binance USDT ticker from being paired with Coinbase USD candles during fallback.
+
+## Strategy research lab
+
+The research lab is shown in both the Python/FastAPI market-analysis panel and the Cloudflare Worker Market Intelligence table. The Cloudflare Worker currently evaluates its own Coinbase 1H/6H paper-market snapshots; the Python service uses the actual provider interval returned by its market-data adapter. Both implementations are research-only and remain disconnected from automatic entry.
+
+The read-only market scanner now compares three separate spot-long research hypotheses alongside the existing trend signal:
+
+- `trend_pullback`: higher-timeframe uptrend, EMA20 reclaim after a pullback, positive directional strength, controlled RSI and ATR.
+- `volatility_breakout`: close above the prior 20-bar high, at least 1.5x relative volume, ADX/positive directional movement and controlled ATR.
+- `range_mean_reversion`: range regime on both timeframes, low ADX, RSI at or below 40, and a confirmed reclaim of the lower Bollinger band (not a falling-knife entry).
+
+The lab rejects malformed, gapped, duplicate, off-grid, insufficient or future higher-timeframe candles. The existing signal backtest and walk-forward APIs also receive the actual 4h/6h confirmation interval rather than assuming 4h, including the correct bars-per-day input for indicator calculations. Its scores are transparent rule counts, not probabilities or model confidence. It does not connect to the automatic paper executor. Candidate strategies must undergo separate chronological out-of-sample/walk-forward tests, realistic fee/slippage stress and forward PAPER observation before any future promotion.
 
 ## Security and limitations
 

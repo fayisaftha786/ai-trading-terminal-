@@ -236,6 +236,125 @@ export function analyzeTimeframe(audit) {
   };
 }
 
+export function evaluateResearchCandidates(
+  primaryAudit,
+  higherAudit,
+  higherIntervalMs = 21_600_000
+) {
+  const blocked = (reason) => ({
+    status: "blocked",
+    reason,
+    candidates: [],
+    best_research_candidate: null,
+    execution_authorized: false,
+    paper_auto_entry_eligible: false,
+    live_trading_enabled: false
+  });
+  if (!primaryAudit?.ok || !higherAudit?.ok) return blocked("candle_integrity_failed");
+  if (![14_400_000, 21_600_000].includes(higherIntervalMs)) {
+    return blocked("unsupported_higher_timeframe_interval");
+  }
+  const primaryRows = primaryAudit.rows;
+  const higherRows = higherAudit.rows;
+  if (!Array.isArray(primaryRows) || !Array.isArray(higherRows) ||
+      primaryRows.length < 150 || higherRows.length < 150) {
+    return blocked("insufficient_closed_history");
+  }
+  const primaryClosedAt = primaryRows.at(-1).time + 3_600_000;
+  const higherClosedAt = higherRows.at(-1).time + higherIntervalMs;
+  if (higherClosedAt > primaryClosedAt) {
+    return blocked("higher_timeframe_data_is_from_the_future");
+  }
+
+  const primary = analyzeTimeframe(primaryAudit);
+  const higher = analyzeTimeframe(higherAudit);
+  const metricNames = ["rsi14", "atr_pct", "adx14", "plus_di14", "minus_di14", "ema50"];
+  if (!metricNames.every((name) => Number.isFinite(primary[name]) && Number.isFinite(higher[name]))) {
+    return blocked("indicator_metrics_invalid");
+  }
+
+  const closes = primaryRows.map((row) => row.close);
+  const highs = primaryRows.map((row) => row.high);
+  const volumes = primaryRows.map((row) => row.volume);
+  const close = closes.at(-1);
+  const priorHigh = Math.max(...highs.slice(-21, -1));
+  const recentVolume = volumes.slice(-20).reduce((sum, value) => sum + value, 0) / 20;
+  const previousVolume = volumes.slice(-40, -20).reduce((sum, value) => sum + value, 0) / 20;
+  const volumeRatio = previousVolume > 0 ? recentVolume / previousVolume : null;
+  const fast = ema(closes, 20);
+
+  const build = (strategyId, label, conditions) => {
+    const passed = Object.entries(conditions).filter(([, ok]) => ok).map(([name]) => name);
+    const eligible = passed.length === Object.keys(conditions).length;
+    return {
+      strategy_id: strategyId,
+      label,
+      signal: eligible ? "RESEARCH_CANDIDATE" : "HOLD",
+      eligible_for_research: eligible,
+      heuristic_score: Math.min(100, 50 + (passed.length * 8)),
+      score_is_probability: false,
+      reasons: passed.length ? passed : [strategyId + "_filters_not_aligned"],
+      execution_authorized: false
+    };
+  };
+
+  const trend = build("trend_pullback", "Trend pullback and EMA reclaim", {
+    higher_timeframe_uptrend: higher.regime === "UPTREND",
+    primary_price_above_ema50: close > primary.ema50,
+    ema20_reclaimed_after_pullback: fast.length >= 3 &&
+      closes.at(-2) <= fast.at(-2) && close > fast.at(-1),
+    directional_strength: primary.adx14 >= 18 && primary.plus_di14 > primary.minus_di14,
+    rsi_not_overextended: primary.rsi14 >= 45 && primary.rsi14 <= 68,
+    volatility_not_extreme: primary.atr_pct > 0 && primary.atr_pct < 5
+  });
+
+  const breakout = build("volatility_breakout", "20-bar breakout with volume expansion", {
+    higher_timeframe_uptrend: higher.regime === "UPTREND",
+    close_above_prior_20_bar_high: close > priorHigh,
+    relative_volume_at_least_1_5x: volumeRatio !== null && volumeRatio >= 1.5,
+    adx_at_least_20: primary.adx14 >= 20,
+    positive_directional_movement: primary.plus_di14 > primary.minus_di14,
+    volatility_not_extreme: primary.atr_pct > 0 && primary.atr_pct < 5
+  });
+
+  const average = (values) => values.reduce((sum, value) => sum + value, 0) / values.length;
+  const deviation = (values) => {
+    const center = average(values);
+    return Math.sqrt(average(values.map((value) => (value - center) ** 2)));
+  };
+  const currentWindow = closes.slice(-20);
+  const previousWindow = closes.slice(-21, -1);
+  const currentLower = average(currentWindow) - (2 * deviation(currentWindow));
+  const previousLower = average(previousWindow) - (2 * deviation(previousWindow));
+  const range = build("range_mean_reversion", "Range mean reversion after lower-band reclaim", {
+    primary_range_regime: primary.regime === "RANGE_OR_TRANSITION",
+    higher_range_regime: higher.regime === "RANGE_OR_TRANSITION",
+    adx_below_18: primary.adx14 < 18,
+    rsi_at_or_below_40: primary.rsi14 <= 40,
+    reclaimed_lower_bollinger_band: closes.at(-2) <= previousLower && close > currentLower,
+    volatility_not_extreme: primary.atr_pct > 0 && primary.atr_pct < 4
+  });
+
+  const candidates = [trend, breakout, range];
+  const eligible = candidates.filter((candidate) => candidate.eligible_for_research)
+    .sort((left, right) => right.heuristic_score - left.heuristic_score);
+  return {
+    status: "research_only",
+    primary_regime: primary.regime,
+    higher_regime: higher.regime,
+    relative_volume_20: volumeRatio === null ? null : Number(volumeRatio.toFixed(4)),
+    higher_timeframe_interval_ms: higherIntervalMs,
+    candidates,
+    best_research_candidate: eligible[0]?.strategy_id || null,
+    ranking_method: "fixed transparent rule count; not trained, calibrated or a probability",
+    execution_authorized: false,
+    paper_auto_entry_eligible: false,
+    live_trading_enabled: false,
+    warning: "Research-only strategy hypotheses. They are not approved for PAPER auto-entry or live trading."
+  };
+}
+
+
 export function assessCandidate({ market, primary, higher, nowMs, costs }) {
   const reject = (reason) => ({ eligible: false, reason });
   if (market?.status !== "live") return reject("market_data_unavailable");

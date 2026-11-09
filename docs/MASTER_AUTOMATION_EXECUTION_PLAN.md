@@ -56,7 +56,19 @@ Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger 
 
 ## Phase 2 market-data source integrity
 
-The GitHub read-only scanner must not combine a ticker from one exchange/quote currency with OHLCV candles from another. Every result reports the ticker provider, strategy-candle provider, and both quote currencies. A signal is forced to HOLD unless provider and quote currency match exactly and the market is fresh with contiguous closed candles. Coinbase fallback is allowed for read-only diagnostics, but it cannot supply a signal for a Binance market unless the ticker side also comes from the same Coinbase USD source.
+The GitHub read-only scanner must not combine a ticker from one exchange/quote currency with OHLCV candles from another. Every result reports the configured exchange separately from the actual market-data adapter, plus the ticker provider, strategy-candle provider, and both quote currencies. A signal is forced to HOLD unless provider and quote currency match exactly and the market is fresh with contiguous closed candles. Coinbase fallback is allowed for read-only diagnostics, but it cannot supply a signal for a Binance market unless the ticker side also comes from the same Coinbase USD source.
+
+## Phase 3 regime-aware strategy research
+
+Backtest and walk-forward endpoints must receive the exact higher-timeframe interval (currently supported: 4h or 6h). Indicator annualization must use the matching bars-per-day value; never reinterpret Coinbase 6h candles as 4h bars.
+
+The research-only strategy lab compares three spot-long hypotheses without changing the production PAPER entry engine:
+
+1. Trend pullback and EMA20 reclaim, requiring a higher-timeframe uptrend and positive directional strength.
+2. Volatility breakout, requiring a close above the prior 20-bar high, at least 1.5x relative volume, ADX/positive directional movement and bounded ATR.
+3. Range mean reversion, requiring a range regime on both timeframes, low ADX, RSI at/below 40 and a confirmed reclaim into the lower Bollinger band.
+
+The lab uses only closed candles and rejects gaps, duplicate/off-grid/malformed data, insufficient history and higher-timeframe candles that close after the primary timeframe. Its heuristic scores are not probabilities and are never execution authorization. Before any strategy can be promoted, require chronological out-of-sample results, walk-forward folds, look-ahead/recursive-indicator checks, realistic spread/fee/slippage stress, regime and asset segmentation, and forward PAPER evidence. Keep the existing conservative strategy as the only entry path until a separate promotion review passes.
 
 ## Next verification after deployment
 

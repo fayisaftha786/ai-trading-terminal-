@@ -113,15 +113,17 @@ async function analyzeCex(i) {
     const analysis = result.analysis || {};
     const higher = result.higher_timeframe || {};
     const higherRows = higher.candles || [];
+    const higherTimeframe = higher.timeframe || 'higher timeframe';
     const body = {
       candles: result.candles || [],
       higher_timeframe_candles: higherRows,
+      higher_timeframe_interval_ms: result.higher_timeframe_interval_ms || 14_400_000,
       timeframe: '1h'
     };
     const dataQualityOk = result.data_quality?.contiguous_closed_candles === true && result.data_quality?.sufficient_indicator_history === true;
     const primaryIntegrity = result.data_quality?.primary_integrity || {};
     const higherIntegrity = result.data_quality?.higher_timeframe_integrity || {};
-    const integrityDetails = `1h: ${primaryIntegrity.valid_unique_candles ?? 0} valid · ${primaryIntegrity.duplicate_timestamps ?? 0} duplicates · ${primaryIntegrity.off_grid_timestamps ?? 0} off-grid · ${primaryIntegrity.missing_intervals ?? 0} gaps · ${primaryIntegrity.invalid_rows ?? 0} invalid; 4h: ${higherIntegrity.valid_unique_candles ?? 0} valid · ${higherIntegrity.duplicate_timestamps ?? 0} duplicates · ${higherIntegrity.off_grid_timestamps ?? 0} off-grid · ${higherIntegrity.missing_intervals ?? 0} gaps · ${higherIntegrity.invalid_rows ?? 0} invalid.`;
+    const integrityDetails = `1h: ${primaryIntegrity.valid_unique_candles ?? 0} valid · ${primaryIntegrity.duplicate_timestamps ?? 0} duplicates · ${primaryIntegrity.off_grid_timestamps ?? 0} off-grid · ${primaryIntegrity.missing_intervals ?? 0} gaps · ${primaryIntegrity.invalid_rows ?? 0} invalid; ${higherTimeframe}: ${higherIntegrity.valid_unique_candles ?? 0} valid · ${higherIntegrity.duplicate_timestamps ?? 0} duplicates · ${higherIntegrity.off_grid_timestamps ?? 0} off-grid · ${higherIntegrity.missing_intervals ?? 0} gaps · ${higherIntegrity.invalid_rows ?? 0} invalid.`;
     let strategyTest = null;
     let strategyWalkForward = null;
     let strategyResearchError = '';
@@ -160,11 +162,22 @@ async function analyzeCex(i) {
          <span>Excess vs exposure-matched hold <b>${strategyTest.excess_return_vs_benchmark_pct ?? '—'}%</b></span>
          <span>Saved risk / stop / target <b>${strategyTest.risk_assumptions?.risk_per_trade_pct ?? '—'}% / ${strategyTest.risk_assumptions?.stop_loss_pct ?? '—'}% / ${strategyTest.risk_assumptions?.take_profit_pct ?? '—'}%</b></span>
          <span>Costs / side <b>${strategyTest.cost_assumptions?.fee_bps_per_side ?? '—'} fee + ${strategyTest.cost_assumptions?.slippage_bps_per_side ?? '—'} slip bps</b></span>`
-      : `<span>Strategy test <b>${esc(strategyResearchError || (!dataQualityOk ? 'Blocked: candle integrity/history requirements failed' : 'Not enough synchronized 1h/4h history'))}</b></span>`;
+      : `<span>Strategy test <b>${esc(strategyResearchError || (!dataQualityOk ? 'Blocked: candle integrity/history requirements failed' : 'Not enough synchronized 1h/higher-timeframe history'))}</b></span>`;
 
     const walkForwardText = Array.isArray(strategyWalkForward?.cost_stress)
       ? `Signal walk-forward: ${strategyWalkForward.positive_folds}/${strategyWalkForward.total_folds} positive windows · mean ${strategyWalkForward.mean_fold_return_pct}% · max fold drawdown ${strategyWalkForward.worst_fold_drawdown_pct}%. 1.5x / 2x cost stress: ${strategyWalkForward.cost_stress.filter(x => x.cost_multiplier > 1).map(x => `${x.cost_multiplier}x ${x.positive_folds}/${x.total_folds} positive`).join(' · ')}.`
       : (strategyResearchError || (!dataQualityOk ? 'Backtest blocked because closed candle history failed integrity gates.' : 'Signal walk-forward unavailable: insufficient aligned history.'));
+
+    const strategyLab = result.strategy_research || {};
+    const strategyLabText = strategyLab.status === 'research_only'
+      ? (strategyLab.candidates || []).map(candidate =>
+          `<span>${esc(candidate.label)} <b>${esc(candidate.signal)} · ${candidate.heuristic_score}/100</b></span>`
+        ).join('')
+      : `<span>Research lab <b>BLOCKED · ${esc(strategyLab.reason || 'not available')}</b></span>`;
+    const strategyLabBest = strategyLab.best_research_candidate
+      ? `Highest heuristic research rank: ${esc(strategyLab.best_research_candidate)}.`
+      : 'No strategy qualified for a research candidate on this sample.';
+    const strategyLabNotice = 'These are new research hypotheses, not trade instructions. Scores are rule counts, not probabilities. The strategy lab cannot authorize PAPER or live execution.';
 
     box.innerHTML = `
       <div class="analysis-title">${esc(market.symbol)} · Wilder indicator + multi-timeframe analysis</div>
@@ -194,7 +207,10 @@ async function analyzeCex(i) {
       <div class="analysis-reason"><b>Momentum read:</b> ${(analysis.momentum_reasons || []).map(esc).join(' · ') || 'Not enough momentum data'}.</div>
       <div class="analysis-reason">${(analysis.reasons || []).map(esc).join(' · ') || esc(analysis.reason || 'No strong setup')}</div>
       <div class="analysis-reason">${esc(walkForwardText)}</div>
-      <div class="analysis-reason">Research limits: the strategy walk-forward uses the same primary signal and closed 4h trend confirmation and the saved server risk profile. Historical candles cannot replay historical spread, top-book depth, live freshness, queue position or real fills. The EMA-only baseline is separate, uses fixed 10 bps fee and 10 bps slippage per side, and is not the live automatic-paper entry rules. Cost stress is an assumption, not a forecast; historical results do not guarantee future performance.</div>`;
+      <div class="analysis-title">Regime-aware strategy research lab</div>
+      <div class="analysis-metrics">${strategyLabText}</div>
+      <div class="analysis-reason">${esc(strategyLabBest)} ${esc(strategyLabNotice)}</div>
+      <div class="analysis-reason">Research limits: the existing strategy walk-forward uses the primary signal and closed ${esc(higherTimeframe)} confirmation with the saved server risk profile. Historical candles cannot replay historical spread, top-book depth, live freshness, queue position or real fills. The EMA-only baseline is separate, uses fixed 10 bps fee and 10 bps slippage per side, and is not the live automatic-paper entry rules. Cost stress is an assumption, not a forecast; historical results do not guarantee future performance.</div>`;
   } catch (error) {
     box.textContent = `Analysis unavailable: ${error.message}`;
   }

@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from statistics import mean, pstdev
 from typing import Any
 
-from app.services.strategy import ema
+from app.services.strategy import candle_integrity_report, ema
 
 
 def _validate(candles: list[list[float]]) -> list[list[float]]:
@@ -176,7 +176,9 @@ def _signal_backtest_metrics(
     if len(rows) < 200:
         raise ValueError("At least 200 valid primary 1h candles are required")
     if len(higher_rows) < 150:
-        raise ValueError("At least 150 valid higher-timeframe 4h candles are required")
+        raise ValueError("At least 150 valid higher-timeframe candles are required")
+    if higher_timeframe_ms not in {14_400_000, 21_600_000}:
+        raise ValueError("Higher timeframe must be an explicitly supported 4h or 6h interval")
     primary_quality = candle_integrity_report(rows, primary_timeframe_ms)
     if not primary_quality["is_clean"]:
         raise ValueError(
@@ -277,7 +279,7 @@ def _signal_backtest_metrics(
             confirmed_higher = [row for row in higher_rows if row[0] + higher_timeframe_ms <= decision_close_ms]
             if len(primary_history) >= 150 and len(confirmed_higher) >= 150:
                 primary_analysis = analyze_candles(primary_history, bars_per_day=24.0)
-                higher_analysis = analyze_candles(confirmed_higher, bars_per_day=6.0)
+                higher_analysis = analyze_candles(confirmed_higher, bars_per_day=86_400_000 / higher_timeframe_ms)
                 signals_evaluated += 1
                 setup_ok = (
                     primary_analysis.get("signal") == "BUY_CANDIDATE"
@@ -382,6 +384,11 @@ def _signal_backtest_metrics(
         "time_in_market_pct": round(100.0 * in_market_bars / len(equity_curve), 3) if equity_curve else 0.0,
         "evaluation_start_index": start_index,
         "evaluation_bars": len(equity_curve),
+        "timeframe_assumptions": {
+            "primary_interval_ms": primary_timeframe_ms,
+            "higher_interval_ms": higher_timeframe_ms,
+            "higher_bars_per_day": 86_400_000 / higher_timeframe_ms,
+        },
         "signals_evaluated": signals_evaluated,
         "eligible_strategy_signals": eligible_signals,
         "entries": entry_count,
@@ -425,6 +432,31 @@ def _signal_backtest_metrics(
     }
 
 
+def _strict_signal_history(
+    candles: list[list[float]],
+    higher_timeframe_candles: list[list[float]],
+    higher_timeframe_ms: int,
+) -> tuple[list[list[float]], list[list[float]]]:
+    """Audit the raw research inputs before _validate can discard bad or duplicate rows."""
+    if not isinstance(candles, list) or not isinstance(higher_timeframe_candles, list):
+        raise ValueError("Signal backtest candle histories must be arrays")
+    if higher_timeframe_ms not in {14_400_000, 21_600_000}:
+        raise ValueError("Higher timeframe must be an explicitly supported 4h or 6h interval")
+    primary_quality = candle_integrity_report(candles, 3_600_000)
+    higher_quality = candle_integrity_report(higher_timeframe_candles, higher_timeframe_ms)
+    if not primary_quality["is_clean"]:
+        raise ValueError(
+            "Signal backtest blocked by missing/off-grid candle intervals, duplicate or invalid raw primary OHLCV history before normalization "
+            f"({primary_quality})"
+        )
+    if not higher_quality["is_clean"]:
+        raise ValueError(
+            "Signal backtest blocked by missing/off-grid candle intervals, duplicate or invalid raw higher-timeframe OHLCV history before normalization "
+            f"({higher_quality})"
+        )
+    return _validate(candles), _validate(higher_timeframe_candles)
+
+
 def run_signal_backtest(
     candles: list[list[float]],
     higher_timeframe_candles: list[list[float]],
@@ -432,17 +464,20 @@ def run_signal_backtest(
     slippage_bps: float = 10,
     start_index: int = 180,
     *,
+    higher_timeframe_ms: int = 14_400_000,
     risk_per_trade_pct: float = 0.25,
     max_exposure_pct: float = 20.0,
     stop_loss_pct: float = 1.0,
     take_profit_pct: float = 2.0,
     enforce_net_reward_risk: bool = True,
 ) -> dict[str, Any]:
-    rows = _validate(candles)
-    higher_rows = _validate(higher_timeframe_candles)
+    rows, higher_rows = _strict_signal_history(
+        candles, higher_timeframe_candles, higher_timeframe_ms
+    )
     return _signal_backtest_metrics(
         rows, higher_rows, fee_bps=fee_bps, slippage_bps=slippage_bps,
-        start_index=start_index, risk_per_trade_pct=risk_per_trade_pct,
+        start_index=start_index, higher_timeframe_ms=higher_timeframe_ms,
+        risk_per_trade_pct=risk_per_trade_pct,
         max_exposure_pct=max_exposure_pct, stop_loss_pct=stop_loss_pct,
         take_profit_pct=take_profit_pct, enforce_net_reward_risk=enforce_net_reward_risk,
     )
@@ -455,13 +490,15 @@ def run_signal_walk_forward(
     fee_bps: float = 10,
     slippage_bps: float = 10,
     *,
+    higher_timeframe_ms: int = 14_400_000,
     risk_per_trade_pct: float = 0.25,
     max_exposure_pct: float = 20.0,
     stop_loss_pct: float = 1.0,
     take_profit_pct: float = 2.0,
 ) -> dict[str, Any]:
-    rows = _validate(candles)
-    higher_rows = _validate(higher_timeframe_candles)
+    rows, higher_rows = _strict_signal_history(
+        candles, higher_timeframe_candles, higher_timeframe_ms
+    )
     if folds < 2 or folds > 6:
         raise ValueError("Folds must be between 2 and 6")
     warmup = 180
@@ -470,6 +507,8 @@ def run_signal_walk_forward(
         raise ValueError(f"At least {warmup + folds * 20} valid primary candles are required for {folds} folds")
     if len(higher_rows) < 150:
         raise ValueError("At least 150 valid higher-timeframe candles are required")
+    if higher_timeframe_ms not in {14_400_000, 21_600_000}:
+        raise ValueError("Higher timeframe must be an explicitly supported 4h or 6h interval")
     fold_size = available // folds
 
     def evaluate(multiplier: float) -> list[dict[str, Any]]:
@@ -480,6 +519,7 @@ def run_signal_walk_forward(
             result = run_signal_backtest(
                 rows[:end], higher_rows, fee_bps * multiplier, slippage_bps * multiplier,
                 start_index=start,
+                higher_timeframe_ms=higher_timeframe_ms,
                 risk_per_trade_pct=risk_per_trade_pct,
                 max_exposure_pct=max_exposure_pct,
                 stop_loss_pct=stop_loss_pct,
@@ -508,6 +548,11 @@ def run_signal_walk_forward(
     return {
         "strategy": "same primary signal and higher-timeframe trend conditions as automatic paper entries",
         "method": "Expanding historical warm-up with sequential, non-overlapping test windows; fixed parameters; no parameter search",
+        "timeframe_assumptions": {
+            "primary_interval_ms": 3_600_000,
+            "higher_interval_ms": higher_timeframe_ms,
+            "higher_bars_per_day": 86_400_000 / higher_timeframe_ms,
+        },
         "folds": baseline,
         "mean_fold_return_pct": round(mean(returns), 5),
         "positive_folds": sum(value > 0 for value in returns),

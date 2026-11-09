@@ -14,6 +14,7 @@ if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
 from app.services.market_data import MarketDataService
+from app.services.strategy_lab import evaluate_strategy_candidates
 from app.settings import settings
 
 
@@ -137,6 +138,12 @@ async def collect_scan() -> dict[str, Any]:
         quality = analysis.get("data_quality", {})
         if not isinstance(quality, dict):
             quality = {}
+        strategy_research = evaluate_strategy_candidates(
+            analysis.get("candles", []),
+            higher_payload.get("candles", []),
+            higher_interval_ms=analysis.get("higher_timeframe_interval_ms", 0),
+            now_ms=now_ms,
+        )
         source_match = compare_market_sources(market, analysis)
         timeframe_aligned = timeframes_are_aligned(analysis, detail, higher)
         analysis_ready = (
@@ -178,6 +185,7 @@ async def collect_scan() -> dict[str, Any]:
             "strategy_quote_currency": source_match["strategy_quote_currency"],
             "providers_match": source_match["matched"],
             "timeframes_aligned": timeframe_aligned,
+            "strategy_research": strategy_research,
             "analysis_ready": analysis_ready,
             "signal_block_reasons": signal_block_reasons,
             "signal": safe_signal,
@@ -194,13 +202,23 @@ async def collect_scan() -> dict[str, Any]:
 
     live_count = sum(1 for row in rows if row["ticker_fresh"] and row["analysis_status"] == "live")
     analysis_ready_count = sum(1 for row in rows if row["analysis_ready"])
+    research_candidate_counts = {
+        strategy_id: sum(
+            1 for row in rows
+            for candidate in row.get("strategy_research", {}).get("candidates", [])
+            if candidate.get("strategy_id") == strategy_id and candidate.get("eligible_for_research")
+        )
+        for strategy_id in ("trend_pullback", "volatility_breakout", "range_mean_reversion")
+    }
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "mode": "READ_ONLY_MARKET_SCAN",
-        "exchange": settings.cex_exchange,
+        "exchange": tickers.get("exchange", settings.cex_exchange) if isinstance(tickers, dict) else settings.cex_exchange,
+        "configured_exchange": settings.cex_exchange,
         "symbols": symbols,
         "live_symbol_count": live_count,
         "analysis_ready_count": analysis_ready_count,
+        "research_candidate_counts": research_candidate_counts,
         "ticker_provider_status": tickers.get("status", "error") if isinstance(tickers, dict) else "error",
         "results": rows,
         "safety": {
@@ -217,10 +235,12 @@ def render_markdown(report: dict[str, Any]) -> str:
         "# Scheduled crypto market scan",
         "",
         f"- Generated: {report['generated_at']}",
-        f"- Exchange: {report['exchange']}",
+        f"- Configured exchange: {report['configured_exchange']}",
+        f"- Actual market-data adapter: {report['exchange']}",
         f"- Mode: `{report['mode']}`",
         f"- Fresh symbols with strategy data: {report['live_symbol_count']}/{len(report['results'])}",
         f"- Source-, quote- and timeframe-verified analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
+        f"- Research-only candidates: trend pullback {report['research_candidate_counts']['trend_pullback']}, breakout {report['research_candidate_counts']['volatility_breakout']}, range reversion {report['research_candidate_counts']['range_mean_reversion']}",
         "",
         "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | TF aligned | Spread (bps) |",
         "|---|---:|---:|---|---:|---|---|---|---|---:|",
@@ -234,8 +254,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{'yes' if row['timeframes_aligned'] else 'no'} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
-        if row.get("error") or row.get("reason") or row.get("signal_block_reasons"):
-            notes = [row.get("error"), row.get("reason"), *row.get("signal_block_reasons", [])]
+        source_note = (
+            f"ticker={row['ticker_provider'] or 'unknown'}/{row['ticker_quote_currency'] or 'unknown'}; "
+            f"candles={row['strategy_provider'] or 'unknown'}/{row['strategy_quote_currency'] or 'unknown'}"
+        )
+        if row.get("error") or row.get("reason") or row.get("signal_block_reasons") or source_note:
+            notes = [source_note, row.get("error"), row.get("reason"), *row.get("signal_block_reasons", [])]
             note = "; ".join(item for item in notes if item)
             lines.append(f"\n**{row['symbol']} note:** {note}\n")
     lines.extend([
@@ -246,6 +270,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "- No real orders and no paper positions are created by this scheduled scanner.",
         "- Stale ticker data, candle-integrity failures, provider mismatches, quote-currency mismatches or unconfirmed timeframe alignment are downgraded to HOLD.",
         "- A fallback provider may supply research candles, but its signals are blocked unless ticker and candle provider plus quote currency match.",
+        "- Strategy-lab candidates are deterministic research hypotheses only; they are not paper-entry authorization or profit predictions.",
         "- GitHub scheduled runs are best-effort, not a continuous 24/7 trading server.",
         "",
     ])
