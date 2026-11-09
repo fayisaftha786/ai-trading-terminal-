@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -170,78 +170,8 @@ export class TradingEngine extends DurableObject {
         const currentMarkets = this.getMarkets().slice(0, PRODUCTS.length);
         const diagnosticIssues = normalizeScanIssueRows(runtime);
         const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
-        const safeDiagnosticCode = (value) => typeof value === "string" &&
-          /^[a-z0-9_]{1,80}$/.test(value) ? value : null;
-        const marketDataProviders = currentMarkets.map((market) => {
-          const quality = market.data_quality || {};
-          const quoteReceivedAtMs = Number(market.quote_received_at_ms);
-          const bookRetrievedAtMs = Number(market.book_retrieved_at_ms);
-          const bookEventTimeMs = Number(market.book_event_time_ms);
-          const oneHourLastOpenMs = Number(market.one_hour_audit_summary?.last_closed_candle_ms);
-          const sixHourLastOpenMs = Number(market.six_hour_audit_summary?.last_closed_candle_ms);
-          const oneHourClosedAtMs = Number.isFinite(oneHourLastOpenMs) && oneHourLastOpenMs > 0
-            ? oneHourLastOpenMs + 3600000 : Number.NaN;
-          const sixHourClosedAtMs = Number.isFinite(sixHourLastOpenMs) && sixHourLastOpenMs > 0
-            ? sixHourLastOpenMs + 21600000 : Number.NaN;
-          return {
-            symbol: typeof market.symbol === "string" ? market.symbol.slice(0, 24) : null,
-            status: market.status === "live" ? "live" : "error",
-            provider: safeDiagnosticCode(market.market_data_provider),
-            failover_used: quality.failover_used === true,
-            failover_attempted: quality.failover_attempted === true,
-            failover_reason: safeDiagnosticCode(quality.failover_reason),
-            failover_error: safeDiagnosticCode(quality.failover_error),
-            primary_provider_error: safeDiagnosticCode(quality.primary_provider_error),
-            quote_age_ms: Number.isFinite(quoteReceivedAtMs) && quoteReceivedAtMs > 0
-              ? Math.max(0, nowMs - quoteReceivedAtMs) : null,
-            book_age_ms: Number.isFinite(bookRetrievedAtMs) && bookRetrievedAtMs > 0
-              ? Math.max(0, nowMs - bookRetrievedAtMs) : null,
-            book_event_age_ms: Number.isFinite(bookEventTimeMs) && bookEventTimeMs > 0
-              ? Math.max(0, nowMs - bookEventTimeMs) : null,
-            book_status: safeDiagnosticCode(quality.book_status) || "unknown",
-            book_error: safeDiagnosticCode(quality.book_error),
-            one_hour_refresh_status: safeDiagnosticCode(quality.one_hour_refresh_status),
-            one_hour_refresh_error: safeDiagnosticCode(quality.one_hour_refresh_error),
-            one_hour_closed_age_ms: Number.isFinite(oneHourClosedAtMs) && oneHourClosedAtMs > 0
-              ? Math.max(0, nowMs - oneHourClosedAtMs) : null,
-            six_hour_refresh_status: safeDiagnosticCode(quality.six_hour_refresh_status),
-            six_hour_refresh_error: safeDiagnosticCode(quality.six_hour_refresh_error),
-            six_hour_closed_age_ms: Number.isFinite(sixHourClosedAtMs) && sixHourClosedAtMs > 0
-              ? Math.max(0, nowMs - sixHourClosedAtMs) : null,
-            market_candidate_eligible: market.entry_gate?.eligible === true
-          };
-        });
-        const currentProviderFailures = currentMarkets.flatMap((market) => {
-          const quality = market.data_quality || {};
-          const failures = [];
-          if (market.status !== "live") {
-            failures.push({
-              symbol: market.symbol,
-              reason: safeDiagnosticCode(market.error_code) || "provider_unavailable",
-              primary_error_code: safeDiagnosticCode(market.primary_error_code),
-              backup_error_code: safeDiagnosticCode(market.backup_error_code)
-            });
-          }
-          if (quality.book_status === "provider_error" || quality.book_status === "invalid_or_missing") {
-            failures.push({
-              symbol: market.symbol,
-              reason: safeDiagnosticCode(quality.book_error) || "orderbook_unavailable"
-            });
-          }
-          if (quality.one_hour_refresh_error && market.one_hour_audit_summary?.ok !== true) {
-            failures.push({
-              symbol: market.symbol,
-              reason: safeDiagnosticCode(quality.one_hour_refresh_error) || "one_hour_candle_provider_error"
-            });
-          }
-          if (quality.six_hour_refresh_error && market.six_hour_audit_summary?.ok !== true) {
-            failures.push({
-              symbol: market.symbol,
-              reason: safeDiagnosticCode(quality.six_hour_refresh_error) || "six_hour_candle_provider_error"
-            });
-          }
-          return failures;
-        });
+        const currentProviderFailures = summarizeCurrentProviderFailures(currentMarkets);
+        const marketDataProviders = buildMarketDataProviderDiagnostics(currentMarkets, nowMs, PRODUCTS.length);
         const diagnostics = {
           last_scan_status: runtime.last_scan_status || "not_started",
           last_scan_age_ms: Number.isFinite(Number(runtime.last_scan_at_ms)) && Number(runtime.last_scan_at_ms) > 0
@@ -275,30 +205,7 @@ export class TradingEngine extends DurableObject {
                 ? failure.backup_error_code.slice(0, 80) : null,
               inferred_from_scan_summary: failure?.inferred_from_scan_summary === true
             })),
-          market_data_providers: marketDataProviders.map((item) => ({
-              symbol: typeof item?.symbol === "string" ? item.symbol.slice(0, 24) : null,
-              status: typeof item?.status === "string" ? item.status.slice(0, 24) : "unknown",
-              provider: typeof item?.provider === "string" ? item.provider.slice(0, 40) : null,
-              failover_used: item?.failover_used === true,
-              failover_attempted: item?.failover_attempted === true,
-              failover_reason: typeof item?.failover_reason === "string"
-                ? item.failover_reason.slice(0, 80) : null,
-              failover_error: typeof item?.failover_error === "string"
-                ? item.failover_error.slice(0, 80) : null,
-              primary_provider_error: item.primary_provider_error,
-              quote_age_ms: item.quote_age_ms,
-              book_age_ms: item.book_age_ms,
-              book_event_age_ms: item.book_event_age_ms,
-              book_status: item.book_status,
-              book_error: item.book_error,
-              one_hour_refresh_status: item.one_hour_refresh_status,
-              one_hour_refresh_error: item.one_hour_refresh_error,
-              one_hour_closed_age_ms: item.one_hour_closed_age_ms,
-              six_hour_refresh_status: item.six_hour_refresh_status,
-              six_hour_refresh_error: item.six_hour_refresh_error,
-              six_hour_closed_age_ms: item.six_hour_closed_age_ms,
-              market_candidate_eligible: item.market_candidate_eligible
-            }))
+          market_data_providers: marketDataProviders
         };
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
