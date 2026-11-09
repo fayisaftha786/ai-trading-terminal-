@@ -125,68 +125,212 @@ function convertCandles(raw) {
   }).filter(Boolean);
 }
 
+function providerErrorCode(error) {
+  const status = Number(error?.status);
+  if (status === 429) return "provider_rate_limited";
+  if (Number.isFinite(status) && status >= 500) return "provider_server_error";
+  if (Number.isFinite(status) && status >= 400) return "provider_http_error";
+  if (error?.name === "TimeoutError" || error?.name === "AbortError") return "provider_timeout";
+  return "provider_network_error";
+}
+
+function auditIsFresh(audit, intervalMs, nowMs, maxAgeMs) {
+  const lastOpenMs = Number(audit?.rows?.at(-1)?.time);
+  if (audit?.ok !== true || !Number.isFinite(lastOpenMs)) return false;
+  const closeMs = lastOpenMs + intervalMs;
+  const ageMs = nowMs - closeMs;
+  return ageMs >= -1000 && ageMs <= maxAgeMs;
+}
+
+async function loadCandleHistory({
+  product,
+  timeframeSeconds,
+  intervalMs,
+  cachedRows,
+  cachedAudit,
+  requestState,
+  nowMs,
+  maxStaleMs
+}) {
+  const useCache = cachedAudit?.ok === true &&
+    !shouldRefreshCandleHistory(cachedRows, intervalMs, nowMs, 150);
+  if (useCache) {
+    return {
+      audit: cachedAudit,
+      source: "durable_object_archive",
+      refresh_status: "cache_reused",
+      refresh_error: null
+    };
+  }
+
+  try {
+    const raw = await getJson(
+      "/products/" + encodeURIComponent(product) + "/candles?granularity=" + timeframeSeconds,
+      requestState
+    );
+    const rows = convertCandles(raw);
+    const audit = auditCandles(rows, intervalMs, nowMs, 150);
+    if (audit.ok) {
+      return {
+        audit,
+        source: "coinbase_exchange_rest",
+        refresh_status: "refreshed",
+        refresh_error: null
+      };
+    }
+
+    // Do not throw away the last known-good candles merely because a newly
+    // fetched response is malformed. Reuse them only while their close age is
+    // inside the strategy's explicit stale-data tolerance.
+    if (auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs)) {
+      return {
+        audit: cachedAudit,
+        source: "durable_object_archive_fallback",
+        refresh_status: "invalid_refresh_cache_fallback",
+        refresh_error: "candle_integrity_failed"
+      };
+    }
+    return {
+      audit,
+      source: "coinbase_exchange_rest",
+      refresh_status: "refresh_rejected",
+      refresh_error: "candle_integrity_failed"
+    };
+  } catch (error) {
+    const canUseCache = cachedAudit?.ok === true &&
+      auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs);
+    return {
+      audit: cachedAudit || auditCandles([], intervalMs, nowMs, 150),
+      source: canUseCache ? "durable_object_archive_fallback" : "durable_object_archive_stale",
+      refresh_status: canUseCache ? "provider_error_cache_fallback" : "provider_error_no_fresh_cache",
+      refresh_error: providerErrorCode(error)
+    };
+  }
+}
+
 export async function fetchProductSnapshot({ symbol, product }, nowMs = Date.now(), cachedCandles = {}, requestState = DEFAULT_REQUEST_STATE) {
   const encoded = encodeURIComponent(product);
-  // Public endpoint pacing: keep one shared request stream below Coinbase's documented rate.
+
+  // The ticker is the minimum required input for valuing an existing PAPER
+  // position. Capture its local response time separately from the embedded
+  // timestamp, which describes the last trade and can legitimately be older
+  // than a fresh best-bid/best-ask snapshot.
   const ticker = await getJson("/products/" + encoded + "/ticker", requestState);
-  const stats = await getJson("/products/" + encoded + "/stats", requestState);
-  const book = await getJson("/products/" + encoded + "/book?level=2", requestState);
-  // Coinbase Exchange L2 REST snapshots expose sequence/bids/asks, not a reliable
-  // exchange event timestamp. Record when this response was received locally.
-  const bookRetrievedAtMs = Date.now();
+  const quoteReceivedAtMs = Date.now();
+  const bid = Number(ticker?.bid);
+  const ask = Number(ticker?.ask);
+  const last = Number(ticker?.price);
+  const tickerMs = Date.parse(ticker?.time || "");
+
+  // Coinbase's ticker already includes 24-hour base volume. Use it first so
+  // every scan does not need an additional /stats request. Fetch /stats only
+  // as a compatibility fallback when that field is absent or malformed.
+  let baseVolume = Number(ticker?.volume);
+  let volumeSource = "ticker_24h_volume";
+  let volumeStatus = Number.isFinite(baseVolume) && baseVolume >= 0 ? "available" : "unavailable";
+  if (volumeStatus === "unavailable") {
+    try {
+      const stats = await getJson("/products/" + encoded + "/stats", requestState);
+      baseVolume = Number(stats?.volume);
+      volumeStatus = Number.isFinite(baseVolume) && baseVolume >= 0 ? "available" : "invalid";
+      volumeSource = "product_stats_fallback";
+    } catch (error) {
+      baseVolume = Number.NaN;
+      volumeStatus = "unavailable";
+      volumeSource = "unavailable";
+    }
+  }
+  const quoteVolume = Number.isFinite(baseVolume) && Number.isFinite(last) && last > 0
+    ? baseVolume * last : Number.NaN;
+
+  // Book and candle endpoints are strategy-entry inputs, not prerequisites for
+  // marking or closing an already-open PAPER position. A failure here must not
+  // discard the valid bid captured above. All such failures still block new
+  // entries through the full-universe quality gate.
+  let book = null;
+  let bookError = null;
+  let bookRetrievedAtMs = null;
+  try {
+    book = await getJson("/products/" + encoded + "/book?level=2", requestState);
+    bookRetrievedAtMs = Date.now();
+  } catch (error) {
+    bookError = providerErrorCode(error);
+  }
+
   const cachedOneHour = Array.isArray(cachedCandles.one_hour) ? cachedCandles.one_hour : [];
   const cachedSixHour = Array.isArray(cachedCandles.six_hour) ? cachedCandles.six_hour : [];
   const cachedOneHourAudit = cachedOneHour.length
     ? auditCandles(cachedOneHour, 3600000, nowMs, 150) : null;
   const cachedSixHourAudit = cachedSixHour.length
-    ? auditCandles(cachedSixHour, 21600000, nowMs, 150) : null;
-  const useCachedOneHour = !!cachedOneHourAudit?.ok &&
-    !shouldRefreshCandleHistory(cachedOneHour, 3600000, nowMs, 150);
-  const useCachedSixHour = !!cachedSixHourAudit?.ok &&
-    !shouldRefreshCandleHistory(cachedSixHour, 21600000, nowMs, 150);
-  const oneHourRaw = useCachedOneHour ? null
-    : await getJson("/products/" + encoded + "/candles?granularity=3600", requestState);
-  const sixHourRaw = useCachedSixHour ? null
-    : await getJson("/products/" + encoded + "/candles?granularity=21600", requestState);
-  const bid = Number(ticker.bid);
-  const ask = Number(ticker.ask);
-  const last = Number(ticker.price);
-  const baseVolume = Number(stats.volume);
-  const quoteVolume = baseVolume * last;
-  const oneHour = useCachedOneHour ? cachedOneHour : convertCandles(oneHourRaw);
-  const sixHour = useCachedSixHour ? cachedSixHour : convertCandles(sixHourRaw);
-  const oneHourAudit = useCachedOneHour ? cachedOneHourAudit : auditCandles(oneHour, 3600000, nowMs, 150);
-  const sixHourAudit = useCachedSixHour ? cachedSixHourAudit : auditCandles(sixHour, 21600000, nowMs, 150);
-  const bidDepth = parseBookSide(book.bids);
-  const askDepth = parseBookSide(book.asks);
-  const tickerMs = Date.parse(ticker.time || "");
-  const bookObservedAtMs = Date.now();
+    ? auditCandles(cachedSixHour, 21600 * 1000, nowMs, 150) : null;
+
+  // Keep provider requests sequential: getJson shares one pacing/cooldown
+  // state, and parallel timeframe refreshes could bypass the 350ms request gap.
+  const oneHourResult = await loadCandleHistory({
+    product, timeframeSeconds: 3600, intervalMs: 3600000,
+    cachedRows: cachedOneHour, cachedAudit: cachedOneHourAudit,
+    requestState, nowMs, maxStaleMs: 5400000
+  });
+  const sixHourResult = await loadCandleHistory({
+    product, timeframeSeconds: 21600, intervalMs: 21600 * 1000,
+    cachedRows: cachedSixHour, cachedAudit: cachedSixHourAudit,
+    requestState, nowMs, maxStaleMs: 25200000
+  });
+
+  const oneHourAudit = oneHourResult.audit;
+  const sixHourAudit = sixHourResult.audit;
+  const bidDepth = book ? parseBookSide(book.bids) : null;
+  const askDepth = book ? parseBookSide(book.asks) : null;
+  const spreadBps = Number.isFinite(bid) && Number.isFinite(ask) && ask >= bid && ask + bid > 0
+    ? ((ask - bid) / ((ask + bid) / 2)) * 10000 : null;
+  const bookSequence = book?.sequence == null || !Number.isSafeInteger(Number(book.sequence))
+    ? null : Number(book.sequence);
+
   return {
     symbol,
     product,
     status: "live",
     fetched_at_ms: nowMs,
+    quote_received_at_ms: quoteReceivedAtMs,
     ticker_time: Number.isFinite(tickerMs) ? new Date(tickerMs).toISOString() : null,
     book_retrieved_at_ms: bookRetrievedAtMs,
-    book_age_ms: Math.max(0, bookObservedAtMs - bookRetrievedAtMs),
-    book_sequence: book.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence),
+    book_age_ms: bookRetrievedAtMs === null ? null : Math.max(0, Date.now() - bookRetrievedAtMs),
+    book_sequence: bookSequence,
     bid,
     ask,
     last,
-    spread_bps: Number.isFinite(bid) && Number.isFinite(ask) && ask >= bid && ask + bid > 0
-      ? ((ask - bid) / ((ask + bid) / 2)) * 10000 : null,
+    spread_bps: spreadBps,
     quote_volume_usd: Number.isFinite(quoteVolume) && quoteVolume >= 0 ? quoteVolume : null,
     bid_depth_quote: bidDepth,
     ask_depth_quote: askDepth,
     one_hour_audit: oneHourAudit,
     six_hour_audit: sixHourAudit,
     data_quality: {
-      one_hour: { ok: oneHourAudit.ok, issues: oneHourAudit.issues, bars: oneHourAudit.valid_closed_bars },
-      six_hour: { ok: sixHourAudit.ok, issues: sixHourAudit.issues, bars: sixHourAudit.valid_closed_bars },
-      one_hour_source: useCachedOneHour ? "durable_object_archive" : "coinbase_exchange_rest",
-      six_hour_source: useCachedSixHour ? "durable_object_archive" : "coinbase_exchange_rest",
+      ticker_status: "available",
+      quote_freshness_source: "local_ticker_response_time_for_exit_marking",
+      ticker_event_time_source: "last_trade_timestamp_for_entry_eligibility",
+      quote_volume_status: volumeStatus,
+      quote_volume_source: volumeSource,
+      book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
+      book_error: bookError,
+      one_hour: {
+        ok: oneHourAudit.ok,
+        issues: oneHourAudit.issues,
+        bars: oneHourAudit.valid_closed_bars
+      },
+      six_hour: {
+        ok: sixHourAudit.ok,
+        issues: sixHourAudit.issues,
+        bars: sixHourAudit.valid_closed_bars
+      },
+      one_hour_source: oneHourResult.source,
+      six_hour_source: sixHourResult.source,
+      one_hour_refresh_status: oneHourResult.refresh_status,
+      six_hour_refresh_status: sixHourResult.refresh_status,
+      one_hour_refresh_error: oneHourResult.refresh_error,
+      six_hour_refresh_error: sixHourResult.refresh_error,
       book_freshness_source: "local_retrieval_time",
-      book_sequence_available: book.sequence != null && Number.isSafeInteger(Number(book.sequence))
+      book_sequence_available: bookSequence !== null
     }
   };
 }

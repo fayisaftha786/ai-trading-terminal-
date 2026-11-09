@@ -24,8 +24,12 @@ function healthyMarket(symbol) {
     book_retrieved_at_ms: NOW - 1000,
     bid_depth_quote: 8000,
     ask_depth_quote: 9000,
-    one_hour_audit_summary: { ok: true, valid_closed_bars: 300, issues: [] },
-    six_hour_audit_summary: { ok: true, valid_closed_bars: 150, issues: [] }
+    one_hour_audit_summary: {
+      ok: true, valid_closed_bars: 300, issues: [], last_closed_candle_ms: NOW - (2 * 3600000)
+    },
+    six_hour_audit_summary: {
+      ok: true, valid_closed_bars: 150, issues: [], last_closed_candle_ms: NOW - (2 * 21600000)
+    }
   };
 }
 
@@ -237,4 +241,38 @@ test("trailing stop rejects invalid prices and cost assumptions", () => {
   assert.equal(updateTrailingStop({
     entryPrice: 0, currentStop: 99, currentBid: 100
   }).ok, false);
+});
+
+
+test("market-universe gate rejects missing, future and stale latest closed candles", () => {
+  const symbols = ["BTC/USD"];
+  const missing = healthyMarket("BTC/USD");
+  delete missing.one_hour_audit_summary.last_closed_candle_ms;
+  assert.ok(assessMarketUniverse([missing], symbols, NOW).issues[0].reason.includes("1h_latest_closed_candle_missing"));
+
+  const future = healthyMarket("BTC/USD");
+  future.six_hour_audit_summary.last_closed_candle_ms = NOW - 1000;
+  assert.ok(assessMarketUniverse([future], symbols, NOW).issues[0].reason.includes("6h_latest_closed_candle_from_future"));
+
+  const staleOneHour = healthyMarket("BTC/USD");
+  staleOneHour.one_hour_audit_summary.last_closed_candle_ms = NOW - (3 * 3600000);
+  assert.ok(assessMarketUniverse([staleOneHour], symbols, NOW).issues[0].reason.includes("1h_latest_closed_candle_stale"));
+
+  const staleSixHour = healthyMarket("BTC/USD");
+  staleSixHour.six_hour_audit_summary.last_closed_candle_ms = NOW - (15 * 3600000);
+  assert.ok(assessMarketUniverse([staleSixHour], symbols, NOW).issues[0].reason.includes("6h_latest_closed_candle_stale"));
+});
+
+
+test("market-universe gate uses recent local quote receipt while preserving exchange timestamp validation", () => {
+  const market = healthyMarket("BTC/USD");
+  market.ticker_time = new Date(NOW - 5 * 60 * 1000).toISOString();
+  market.quote_received_at_ms = NOW - 1000;
+  assert.equal(assessMarketUniverse([market], ["BTC/USD"], NOW).healthy, true);
+
+  const staleReceipt = { ...market, quote_received_at_ms: NOW - 121000 };
+  assert.ok(assessMarketUniverse([staleReceipt], ["BTC/USD"], NOW).issues[0].reason.includes("ticker_stale"));
+
+  const futureEvent = { ...market, ticker_time: new Date(NOW + 6000).toISOString() };
+  assert.ok(assessMarketUniverse([futureEvent], ["BTC/USD"], NOW).issues[0].reason.includes("ticker_stale"));
 });

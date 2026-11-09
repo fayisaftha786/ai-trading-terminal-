@@ -1,3 +1,5 @@
+import { isFreshQuoteObservation } from "./strategy.js";
+
 export function assessMarketUniverse(
   markets,
   expectedSymbols,
@@ -28,9 +30,7 @@ export function assessMarketUniverse(
     }
     if (market.status !== "live") marketIssues.push("provider_unavailable");
 
-    const quoteTime = Date.parse(market.ticker_time || "");
-    const quoteAge = nowMs - quoteTime;
-    if (!Number.isFinite(quoteTime) || quoteAge < -5000 || quoteAge > maxQuoteAgeMs) {
+    if (!isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs)) {
       marketIssues.push("ticker_stale_or_timestamp_invalid");
     }
     if (![market.bid, market.ask, market.last].every((value) => Number.isFinite(value) && value > 0) ||
@@ -50,9 +50,9 @@ export function assessMarketUniverse(
       marketIssues.push("orderbook_depth_unavailable_or_low");
     }
 
-    for (const [timeframe, audit] of [
-      ["1h", market.one_hour_audit_summary],
-      ["6h", market.six_hour_audit_summary]
+    for (const [timeframe, intervalMs, maxClosedAgeMs, audit] of [
+      ["1h", 3600000, 5400000, market.one_hour_audit_summary],
+      ["6h", 21600000, 25200000, market.six_hour_audit_summary]
     ]) {
       const validBars = Number(audit?.valid_closed_bars);
       if (audit?.ok !== true || !Number.isFinite(validBars) || validBars < 150) {
@@ -60,6 +60,19 @@ export function assessMarketUniverse(
           ? ":" + audit.issues.slice(0, 2).join(",")
           : "";
         marketIssues.push(timeframe + "_candle_integrity_failed" + details);
+      }
+
+      const lastOpenMs = Number(audit?.last_closed_candle_ms);
+      if (!Number.isFinite(lastOpenMs) || lastOpenMs <= 0) {
+        marketIssues.push(timeframe + "_latest_closed_candle_missing");
+      } else {
+        const closedAtMs = lastOpenMs + intervalMs;
+        const closedAgeMs = nowMs - closedAtMs;
+        if (closedAgeMs < -1000) {
+          marketIssues.push(timeframe + "_latest_closed_candle_from_future");
+        } else if (closedAgeMs > maxClosedAgeMs) {
+          marketIssues.push(timeframe + "_latest_closed_candle_stale");
+        }
       }
     }
 
