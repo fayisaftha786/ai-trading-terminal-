@@ -5,17 +5,38 @@
  * This same gate is used by scheduled scans and dashboard reads so stale cached
  * marks cannot alter persisted equity peaks or daily/weekly risk baselines.
  */
+/**
+ * A fresh HTTP snapshot can contain a valid current bid/ask even when the
+ * ticker's "time" is an older last-trade timestamp. That distinction matters
+ * for PAPER exits: never discard a just-retrieved bid merely because no trade
+ * printed recently. Entry eligibility still requires a fresh exchange
+ * timestamp in assessCandidate/assessMarketUniverse.
+ */
+export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+  if (market?.status !== "live" ||
+      !Number.isFinite(market.bid) || market.bid <= 0 ||
+      !Number.isFinite(market.ask) || market.ask < market.bid) return false;
+
+  const receivedAt = Number(market.quote_received_at_ms);
+  if (Number.isFinite(receivedAt) && receivedAt > 0) {
+    const receivedAge = nowMs - receivedAt;
+    if (receivedAge < -5000 || receivedAge > maxQuoteAgeMs) return false;
+    const eventTime = Date.parse(market.ticker_time || "");
+    return !Number.isFinite(eventTime) || eventTime <= nowMs + 5000;
+  }
+
+  // Backward compatibility for persisted snapshots created before the local
+  // retrieval timestamp was introduced.
+  const quoteTime = Date.parse(market.ticker_time || "");
+  const age = nowMs - quoteTime;
+  return Number.isFinite(quoteTime) && age >= -5000 && age <= maxQuoteAgeMs;
+}
+
 export function buildFreshBidMarks(markets, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
   const rows = Array.isArray(markets) ? markets : [];
-  return new Map(rows.filter((market) => {
-    if (market?.status !== "live") return false;
-    const quoteTime = Date.parse(market.ticker_time || "");
-    const age = nowMs - quoteTime;
-    return Number.isFinite(quoteTime) &&
-      age >= -5000 && age <= maxQuoteAgeMs &&
-      Number.isFinite(market.bid) && market.bid > 0 &&
-      Number.isFinite(market.ask) && market.ask >= market.bid;
-  }).map((market) => [market.symbol, market.bid]));
+  return new Map(rows.filter((market) =>
+    isFreshBidQuote(market, nowMs, maxQuoteAgeMs)
+  ).map((market) => [market.symbol, market.bid]));
 }
 
 /**
