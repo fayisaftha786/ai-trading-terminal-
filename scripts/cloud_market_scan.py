@@ -18,6 +18,9 @@ from app.settings import settings
 
 
 MAX_TICKER_AGE_MS = 120_000
+# Allow a small exchange/runner clock skew, but reject larger future timestamps.
+# The raw negative age remains visible in the report for auditability.
+MAX_FUTURE_CLOCK_SKEW_MS = 5_000
 
 
 def ticker_age_ms(timestamp: Any, now_ms: float) -> float | None:
@@ -34,7 +37,7 @@ def market_is_fresh(market: dict[str, Any], now_ms: float) -> bool:
     if market.get("status") != "live":
         return False
     age = ticker_age_ms(market.get("timestamp"), now_ms)
-    return age is not None and -5_000 <= age <= MAX_TICKER_AGE_MS
+    return age is not None and -MAX_FUTURE_CLOCK_SKEW_MS <= age <= MAX_TICKER_AGE_MS
 
 
 def safe_float(value: Any) -> float | None:
