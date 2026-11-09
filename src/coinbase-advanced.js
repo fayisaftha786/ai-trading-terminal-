@@ -217,7 +217,9 @@ function validMoney(value) {
 }
 
 function decimalParts(value) {
-  if (!validMoney(value)) return null;
+  if (typeof value !== "string" || value.length > 40 ||
+      !/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(value) ||
+      !Number.isFinite(Number(value)) || Number(value) < 0) return null;
   const [whole, fractional = ""] = value.split(".");
   return { digits: BigInt(whole + fractional), scale: fractional.length };
 }
