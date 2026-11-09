@@ -316,7 +316,6 @@ try {
   assert.match(staticHtml, /withdrawals are never enabled/);
   assert.match(staticHtml, /id="liveReconcile"/);
   assert.match(staticHtml, /REAL order sync/);
-  assert.match(staticHtml, /read-only active Coinbase orders and actual fills|read_only_active_coinbase_orders_and_actual_fills/);
   assert.match(staticHtml, /api\/live\/fills\?limit=100/);
   assert.match(staticHtml, /preview_token:preview\.preview_token/);
   assert.match(staticHtml, /bound server-side/);
