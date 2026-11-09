@@ -5,7 +5,7 @@ import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, a
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
-const SCAN_INTERVAL_MS = 15 * 60 * 1000;
+const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
 const DEFAULT_RISK = {
   risk_per_trade_pct: 0.25, max_daily_loss_pct: 1.5, max_weekly_loss_pct: 4,
@@ -994,8 +994,11 @@ export class TradingEngine extends DurableObject {
         "ORDER BY candle_open_ms DESC LIMIT ?",
         product, timeframeSeconds, limit
       ).toArray().reverse();
-      const candles1h = loadBars(3600, 1000);
-      const candles6h = loadBars(21600, 1000);
+      // Retention is 4,320 1H bars / 1,440 6H bars. Load enough history
+      // to meet the stricter four-fold walk-forward gate when the archive has
+      // accumulated at least ~125 days of clean provider-consistent candles.
+      const candles1h = loadBars(3600, 3500);
+      const candles6h = loadBars(21600, 1200);
       const options = {
         initialEquity,
         allocationPct: 0.1,
@@ -1003,7 +1006,8 @@ export class TradingEngine extends DurableObject {
         slippageBps: risk.slippage_bps
       };
       const exploratory = runStrategyTournament({
-        candles1h, candles6h, options,
+        candles1h, candles6h,
+        options: { ...options, includeMonteCarlo: true },
         startIndex: 100
       });
       const walkForward = runWalkForwardResearch({ candles1h, candles6h, options });
