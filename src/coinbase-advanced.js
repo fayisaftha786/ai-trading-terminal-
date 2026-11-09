@@ -124,6 +124,7 @@ function configuration(env = {}) {
   const maxOrderQuote = Number(env.COINBASE_ADVANCED_MAX_ORDER_QUOTE);
   const orderExecutionEnabled = String(env.COINBASE_ADVANCED_ORDER_ENABLED || "").trim().toLowerCase() === "true";
   const maxOpenOrders = Number(env.COINBASE_ADVANCED_MAX_OPEN_ORDERS || 1);
+  const maxDailyOrders = Number(env.COINBASE_ADVANCED_MAX_DAILY_ORDERS || 1);
   return {
     apiKey,
     privateKeyPem,
@@ -133,6 +134,7 @@ function configuration(env = {}) {
     maxOrderQuoteValid: Number.isFinite(maxOrderQuote) && maxOrderQuote > 0,
     orderExecutionEnabled,
     maxOpenOrders: Number.isSafeInteger(maxOpenOrders) && maxOpenOrders >= 1 && maxOpenOrders <= 3 ? maxOpenOrders : 0,
+    maxDailyOrders: Number.isSafeInteger(maxDailyOrders) && maxDailyOrders >= 1 && maxDailyOrders <= 5 ? maxDailyOrders : 0,
     credentialsConfigured: !!apiKey && !!privateKeyPem
   };
 }
@@ -156,6 +158,7 @@ export function coinbaseAdvancedStatus(env = {}) {
     order_submission_available: blockers.length === 0 && config.orderExecutionEnabled && config.maxOpenOrders > 0,
     order_execution_configured: config.orderExecutionEnabled,
     max_open_orders: config.maxOpenOrders || null,
+    max_daily_orders: config.maxDailyOrders || null,
     live_trading_enabled: false,
     automatic_live_entries_enabled: false,
     withdrawal_permission_required: false,
