@@ -220,10 +220,10 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Exchange: {report['exchange']}",
         f"- Mode: `{report['mode']}`",
         f"- Fresh symbols with strategy data: {report['live_symbol_count']}/{len(report['results'])}",
-        f"- Provider/quote-consistent analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
+        f"- Source-, quote- and timeframe-verified analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
         "",
-        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | Spread (bps) |",
-        "|---|---:|---:|---|---:|---|---|---|---:|",
+        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | TF aligned | Spread (bps) |",
+        "|---|---:|---:|---|---:|---|---|---|---|---:|",
     ]
     for row in report["results"]:
         lines.append(
@@ -231,6 +231,7 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{row['last'] if row['last'] is not None else '—'} | {row['signal']} | "
             f"{row['score']} | {row['regime_1h']} | {row['confirmation_timeframe']} {row['regime_confirmation']} | "
             f"{'match' if row['providers_match'] else 'MISMATCH'} | "
+            f"{'yes' if row['timeframes_aligned'] else 'no'} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
         if row.get("error") or row.get("reason") or row.get("signal_block_reasons"):
