@@ -122,3 +122,67 @@ def test_signal_backtest_checks_stop_and_target_on_entry_candle(monkeypatch):
     assert result["average_holding_bars"] == 1
     assert result["net_return_pct"] < 0
     assert "including the entry candle" in result["execution_model"]
+
+
+
+def test_signal_backtest_uses_actual_six_hour_confirmation_interval(monkeypatch):
+    import app.services.strategy as strategy
+
+    interval_1h = 3_600_000
+    interval_6h = 6 * interval_1h
+    base = 1_700_000_000_000
+    base -= base % interval_6h
+    primary = _candles(300, interval_1h, base,
+                       drift=0.02, amplitude=0.8, noise=0.1, seed=21)
+    # 150 valid 6h bars end before the final historical primary decision point.
+    higher = _candles(150, interval_6h, base - 606 * interval_1h,
+                      drift=0.08, amplitude=1.5, noise=0.2, seed=22)
+    observed_bars_per_day = []
+
+    def stable_hold(candles, bars_per_day=24.0):
+        observed_bars_per_day.append(bars_per_day)
+        return {
+            "signal": "HOLD",
+            "regime": "RANGE_OR_TRANSITION",
+            "atr_pct": 1.0,
+            "rsi14": 50.0,
+            "adx14": 10.0,
+            "plus_di14": 10.0,
+            "minus_di14": 10.0,
+        }
+
+    monkeypatch.setattr(strategy, "analyze_candles", stable_hold)
+    result = run_signal_backtest(
+        primary,
+        higher,
+        higher_timeframe_ms=interval_6h,
+    )
+
+    assert result["timeframe_assumptions"]["higher_interval_ms"] == interval_6h
+    assert result["timeframe_assumptions"]["higher_bars_per_day"] == 4.0
+    assert 4.0 in observed_bars_per_day
+    assert result["mode"] == "historical_research_only"
+
+
+def test_signal_walk_forward_preserves_six_hour_confirmation_interval():
+    interval_1h = 3_600_000
+    interval_6h = 6 * interval_1h
+    base = 1_700_000_000_000
+    base -= base % interval_6h
+    primary = _candles(300, interval_1h, base,
+                       drift=0.02, amplitude=0.8, noise=0.1, seed=23)
+    higher = _candles(150, interval_6h, base - 606 * interval_1h,
+                      drift=0.08, amplitude=1.5, noise=0.2, seed=24)
+
+    result = run_signal_walk_forward(
+        primary,
+        higher,
+        folds=2,
+        higher_timeframe_ms=interval_6h,
+    )
+
+    assert result["timeframe_assumptions"]["higher_interval_ms"] == interval_6h
+    assert result["timeframe_assumptions"]["higher_bars_per_day"] == 4.0
+    assert result["total_folds"] == 2
+    assert all(fold["timeframe_assumptions"]["higher_interval_ms"] == interval_6h
+               for fold in result["folds"])
