@@ -334,7 +334,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
   const balanceBox=$("coinbaseBalances");
   if(balanceBox){
     balanceBox.replaceChildren();
-    const rows=Object.entries(balances).filter(([currency,value])=>/^[A-Z0-9]{2,12}$/.test(currency)&&/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(String(value)));
+    const rows=Object.entries(balances).filter(([currency,value])=>/^[A-Z0-9]{2,12}$/.test(currency)&&/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(String(value)));
     if(!hasPreflight||!rows.length){
       const empty=document.createElement("span");
       empty.className="muted";
