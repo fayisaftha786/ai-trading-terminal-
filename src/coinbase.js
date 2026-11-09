@@ -260,18 +260,9 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     ? baseVolume * last : Number.NaN;
 
   // Book and candle endpoints are strategy-entry inputs, not prerequisites for
-  // marking or closing an already-open PAPER position. A failure here must not
-  // discard the valid bid captured above. All such failures still block new
-  // entries through the full-universe quality gate.
-  let book = null;
-  let bookError = null;
-  let bookRetrievedAtMs = null;
-  try {
-    book = await getJson("/products/" + encoded + "/book?level=2", requestState);
-    bookRetrievedAtMs = Date.now();
-  } catch (error) {
-    bookError = providerErrorCode(error);
-  }
+  // marking or closing an already-open PAPER position. Keep the book request
+  // until after all sequential candle refreshes so the 15s entry-freshness
+  // window is measured from a snapshot captured immediately before evaluation.
 
   const cachedOneMinute = Array.isArray(cachedCandles.one_minute) ? cachedCandles.one_minute : [];
   const cachedFiveMinute = Array.isArray(cachedCandles.five_minute) ? cachedCandles.five_minute : [];
@@ -306,6 +297,16 @@ async function fetchCoinbaseProductSnapshot({ symbol, product }, nowMs = Date.no
     cachedRows: cachedSixHour, cachedAudit: cachedSixHourAudit,
     requestState, nowMs, maxStaleMs: 25200000
   });
+
+  let book = null;
+  let bookError = null;
+  let bookRetrievedAtMs = null;
+  try {
+    book = await getJson("/products/" + encoded + "/book?level=2", requestState);
+    bookRetrievedAtMs = Date.now();
+  } catch (error) {
+    bookError = providerErrorCode(error);
+  }
 
   const oneMinuteAudit = oneMinuteResult.audit;
   const fiveMinuteAudit = fiveMinuteResult.audit;
@@ -700,22 +701,12 @@ async function fetchBitstampProductSnapshot(
     throw error;
   }
 
+  // Fetch the order book after candle refreshes so its strict 15s freshness
+  // window is not consumed by sequential historical-data requests.
   let book = null;
   let bookError = null;
   let bookRetrievedAtMs = null;
   let bookEventTimeMs = null;
-  try {
-    book = await getBitstampJson("/order_book/" + pair + "/?group=1", bitstampState);
-    bookRetrievedAtMs = Date.now();
-    bookEventTimeMs = Number(book?.timestamp) * 1000;
-    const bookEventAgeMs = bookRetrievedAtMs - bookEventTimeMs;
-    if (!Number.isFinite(bookEventTimeMs) || bookEventTimeMs <= 0 ||
-        bookEventAgeMs < -1000 || bookEventAgeMs > 15000) {
-      bookError = "provider_timestamp_invalid_or_stale";
-    }
-  } catch (error) {
-    bookError = providerErrorCode(error);
-  }
 
   const bitstampCache = cachedCandles?.bitstamp || {};
   const cachedOneMinute = Array.isArray(bitstampCache.one_minute) ? bitstampCache.one_minute : [];
@@ -749,6 +740,19 @@ async function fetchBitstampProductSnapshot(
     cachedRows: cachedSixHour, cachedAudit: cachedSixHourAudit,
     requestState: bitstampState, nowMs, maxStaleMs: 25200000
   });
+
+  try {
+    book = await getBitstampJson("/order_book/" + pair + "/?group=1", bitstampState);
+    bookRetrievedAtMs = Date.now();
+    bookEventTimeMs = Number(book?.timestamp) * 1000;
+    const bookEventAgeMs = bookRetrievedAtMs - bookEventTimeMs;
+    if (!Number.isFinite(bookEventTimeMs) || bookEventTimeMs <= 0 ||
+        bookEventAgeMs < -1000 || bookEventAgeMs > 15000) {
+      bookError = "provider_timestamp_invalid_or_stale";
+    }
+  } catch (error) {
+    bookError = providerErrorCode(error);
+  }
 
   const bidDepth = book ? parseBookSide(book.bids) : null;
   const askDepth = book ? parseBookSide(book.asks) : null;
