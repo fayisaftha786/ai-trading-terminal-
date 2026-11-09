@@ -100,6 +100,10 @@ def evaluate_strategy_candidates(
     higher_quality = candle_integrity_report(higher_rows, higher_interval_ms)
     if not primary_quality["is_clean"] or not higher_quality["is_clean"]:
         return _blocked("candle_integrity_failed", primary_quality, higher_quality)
+    # Provider adapters do not all guarantee identical row order. Audit raw
+    # observations first, then normalize both clean histories chronologically.
+    primary_rows.sort(key=lambda row: float(row[0]))
+    higher_rows.sort(key=lambda row: float(row[0]))
     if (
         primary_quality["valid_unique_candles"] < MIN_HISTORY_BARS
         or higher_quality["valid_unique_candles"] < MIN_HISTORY_BARS
