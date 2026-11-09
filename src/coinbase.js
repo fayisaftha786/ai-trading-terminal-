@@ -644,14 +644,36 @@ async function fetchBitstampProductSnapshot(
   };
 }
 
-function snapshotIsEntryReady(snapshot) {
-  return snapshot?.status === "live" &&
-    snapshot?.data_quality?.book_status === "available" &&
-    snapshot?.one_hour_audit?.ok === true &&
-    snapshot?.six_hour_audit?.ok === true &&
-    Number.isFinite(Date.parse(snapshot.ticker_time || "")) &&
-    Number.isFinite(snapshot.bid) && snapshot.bid > 0 &&
-    Number.isFinite(snapshot.ask) && snapshot.ask >= snapshot.bid;
+function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
+  if (snapshot?.status !== "live" ||
+      snapshot?.data_quality?.book_status !== "available" ||
+      snapshot?.one_hour_audit?.ok !== true ||
+      snapshot?.six_hour_audit?.ok !== true ||
+      typeof snapshot.market_data_provider !== "string" ||
+      !Number.isFinite(snapshot.bid) || snapshot.bid <= 0 ||
+      !Number.isFinite(snapshot.ask) || snapshot.ask < snapshot.bid ||
+      !Number.isFinite(snapshot.last) || snapshot.last <= 0) return false;
+
+  const quoteReceivedAtMs = Number(snapshot.quote_received_at_ms);
+  const quoteAgeMs = nowMs - quoteReceivedAtMs;
+  const tickerTimeMs = Date.parse(snapshot.ticker_time || "");
+  const tickerAgeMs = nowMs - tickerTimeMs;
+  const bookRetrievedAtMs = Number(snapshot.book_retrieved_at_ms);
+  const bookAgeMs = nowMs - bookRetrievedAtMs;
+  const providers = [
+    snapshot.data_quality.ticker_provider,
+    snapshot.data_quality.book_provider,
+    snapshot.data_quality.one_hour_provider,
+    snapshot.data_quality.six_hour_provider
+  ];
+  return Number.isFinite(quoteReceivedAtMs) && quoteAgeMs >= -5000 && quoteAgeMs <= 120000 &&
+    Number.isFinite(tickerTimeMs) && tickerAgeMs >= -5000 && tickerAgeMs <= 120000 &&
+    Number.isFinite(bookRetrievedAtMs) && bookAgeMs >= -1000 && bookAgeMs <= 15000 &&
+    Number.isFinite(snapshot.bid_depth_quote) && snapshot.bid_depth_quote >= 5000 &&
+    Number.isFinite(snapshot.ask_depth_quote) && snapshot.ask_depth_quote >= 5000 &&
+    providers.every((provider) => provider === snapshot.market_data_provider) &&
+    auditIsFresh(snapshot.one_hour_audit, 3600000, nowMs, 5400000) &&
+    auditIsFresh(snapshot.six_hour_audit, 21600000, nowMs, 25200000);
 }
 
 /**
