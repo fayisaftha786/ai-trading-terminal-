@@ -287,10 +287,13 @@ try {
   assert.match(staticHtml, /api\/market\/candles/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /id="capitalReview"/);
-  assert.match(staticHtml, /Live order submission is disabled in this build/);
-  assert.doesNotMatch(staticHtml, /Confirm guarded real order/);
-  assert.match(staticHtml, /Preview LIMIT order only/);
-  assert.match(staticHtml, /Live order submission unavailable/);
+  assert.match(staticHtml, /manually confirmed SPOT LIMIT GTC post-only BUY\/SELL orders/);
+  assert.match(staticHtml, /id="liveSide"/);
+  assert.match(staticHtml, /id="liveBaseSize"/);
+  assert.match(staticHtml, /Confirm &amp; submit REAL order/);
+  assert.match(staticHtml, /crypto\.randomUUID\(\)/);
+  assert.match(staticHtml, /REAL COINBASE ORDER CONFIRMATION/);
+  assert.match(staticHtml, /automatic live entries and transfers are never enabled/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);
