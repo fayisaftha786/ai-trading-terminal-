@@ -547,7 +547,8 @@ async function fetchBitstampProductSnapshot(
   const last = Number(ticker?.last);
   const tickerTimestampMs = Number(ticker?.timestamp) * 1000;
 
-  if (![bid, ask, last, tickerTimestampMs].every(Number.isFinite) ||
+  if (String(ticker?.market_type || "").toUpperCase() !== "SPOT" ||
+      ![bid, ask, last, tickerTimestampMs].every(Number.isFinite) ||
       bid <= 0 || ask < bid || last <= 0 || tickerTimestampMs <= 0 ||
       tickerTimestampMs > Date.now() + 5000) {
     const error = new Error("Bitstamp ticker response failed quote validation");
@@ -558,9 +559,16 @@ async function fetchBitstampProductSnapshot(
   let book = null;
   let bookError = null;
   let bookRetrievedAtMs = null;
+  let bookEventTimeMs = null;
   try {
     book = await getBitstampJson("/order_book/" + pair + "/?group=1", bitstampState);
     bookRetrievedAtMs = Date.now();
+    bookEventTimeMs = Number(book?.timestamp) * 1000;
+    const bookEventAgeMs = bookRetrievedAtMs - bookEventTimeMs;
+    if (!Number.isFinite(bookEventTimeMs) || bookEventTimeMs <= 0 ||
+        bookEventAgeMs < -1000 || bookEventAgeMs > 15000) {
+      bookError = "provider_timestamp_invalid_or_stale";
+    }
   } catch (error) {
     bookError = providerErrorCode(error);
   }
@@ -598,6 +606,7 @@ async function fetchBitstampProductSnapshot(
     quote_received_at_ms: quoteReceivedAtMs,
     ticker_time: new Date(tickerTimestampMs).toISOString(),
     book_retrieved_at_ms: bookRetrievedAtMs,
+    book_event_time_ms: bookEventTimeMs,
     book_age_ms: bookRetrievedAtMs === null ? null : Math.max(0, Date.now() - bookRetrievedAtMs),
     book_sequence: null,
     bid,
@@ -640,6 +649,7 @@ async function fetchBitstampProductSnapshot(
       one_hour_refresh_error: oneHourResult.refresh_error,
       six_hour_refresh_error: sixHourResult.refresh_error,
       book_freshness_source: "local_retrieval_time",
+      book_event_time_source: "bitstamp_order_book_timestamp",
       book_sequence_available: false,
       failover_used: true
     }
@@ -662,6 +672,10 @@ function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
   const tickerAgeMs = nowMs - tickerTimeMs;
   const bookRetrievedAtMs = Number(snapshot.book_retrieved_at_ms);
   const bookAgeMs = nowMs - bookRetrievedAtMs;
+  const bookEventTimeMs = Number(snapshot.book_event_time_ms);
+  const bookEventAgeMs = nowMs - bookEventTimeMs;
+  const secondaryBookTimeValid = snapshot.market_data_provider !== "bitstamp_spot" ||
+    (Number.isFinite(bookEventTimeMs) && bookEventAgeMs >= -1000 && bookEventAgeMs <= 15000);
   const providers = [
     snapshot.data_quality.ticker_provider,
     snapshot.data_quality.book_provider,
@@ -671,6 +685,7 @@ function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
   return Number.isFinite(quoteReceivedAtMs) && quoteAgeMs >= -5000 && quoteAgeMs <= 120000 &&
     Number.isFinite(tickerTimeMs) && tickerAgeMs >= -5000 && tickerAgeMs <= 120000 &&
     Number.isFinite(bookRetrievedAtMs) && bookAgeMs >= -1000 && bookAgeMs <= 15000 &&
+    secondaryBookTimeValid &&
     Number.isFinite(snapshot.bid_depth_quote) && snapshot.bid_depth_quote >= 5000 &&
     Number.isFinite(snapshot.ask_depth_quote) && snapshot.ask_depth_quote >= 5000 &&
     providers.every((provider) => provider === snapshot.market_data_provider) &&
