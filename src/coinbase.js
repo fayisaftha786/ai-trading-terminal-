@@ -5,6 +5,7 @@ const MIN_PUBLIC_REQUEST_GAP_MS = 350;
 const MAX_RETRY_ATTEMPTS = 3;
 // Avoid sleeping through most of a scheduled scan when a provider asks for a long cooldown.
 const MAX_INLINE_COOLDOWN_WAIT_MS = 30000;
+const MAX_BITSTAMP_INLINE_RETRY_WAIT_MS = 1200;
 const BITSTAMP_BASE_URL = "https://www.bitstamp.net/api/v2";
 const BITSTAMP_PAIRS = {
   "BTC-USD": "btcusd",
@@ -429,7 +430,7 @@ async function getBitstampJson(path, requestState = DEFAULT_BITSTAMP_REQUEST_STA
       Number(state.publicCooldownUntilMs) || 0,
       Date.now() + delayMs
     );
-    if (delayMs > MAX_INLINE_COOLDOWN_WAIT_MS) {
+    if (delayMs > MAX_BITSTAMP_INLINE_RETRY_WAIT_MS) {
       const error = new Error("Bitstamp public API retry deferred by provider cooldown");
       error.status = status;
       error.retryAfterMs = delayMs;
@@ -480,8 +481,8 @@ async function loadBitstampCandleHistory({
       "/ohlc/" + pair + "/?step=" + timeframeSeconds + "&limit=200&exclude_current_candle=true",
       requestState
     );
-    const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\\s+/g, "");
-    const expectedPair = symbol.toUpperCase().replace(/\\s+/g, "");
+    const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\s+/g, "");
+    const expectedPair = symbol.toUpperCase().replace(/\s+/g, "");
     if (responsePair !== expectedPair) {
       const error = new Error("Bitstamp OHLC response pair mismatch");
       error.status = 502;
@@ -617,7 +618,8 @@ async function fetchBitstampProductSnapshot(
       ticker_status: "available",
       quote_freshness_source: "local_ticker_response_time_for_exit_marking",
       ticker_event_time_source: "bitstamp_ticker_timestamp",
-      quote_volume_status: Number.isFinite(Number(ticker?.volume)) ? "available" : "unavailable",
+      quote_volume_status: Number.isFinite(Number(ticker?.volume)) && Number(ticker.volume) >= 0
+        ? "available" : "unavailable",
       quote_volume_source: "bitstamp_ticker_24h_base_volume_times_last_price",
       book_status: bookError ? "provider_error" : (bidDepth === null || askDepth === null ? "invalid_or_missing" : "available"),
       book_error: bookError,
