@@ -69,10 +69,10 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <section class="panel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
 
 <section class="panel" id="realModePanel"><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
-<p class="note">REAL mode is currently account-connection and read-only preflight only. Coinbase credentials must be stored as Cloudflare Worker secrets, never in this page or chat. This build does not submit real orders: live BUY/SELL and automatic live entries remain hard-locked. Keep Transfer permission disabled.</p><p class="note">Connection setup: create a Coinbase Developer Platform CDP API key with View permission for the initial account check, then set COINBASE_ADVANCED_API_KEY and COINBASE_ADVANCED_API_SECRET as Worker secrets. Configure an explicit spot-product allowlist and maximum quote cap. Trade permission and live execution must remain disabled until a separate, tested live-order workflow is approved.</p>
-<div class="controls"><button id="livePreflight" type="button">Check account &amp; permissions</button><span id="liveSummary" class="status">Credentials not configured · order submission disabled</span></div>
-<div class="controls"><label>Eligible SPOT product ID<br><input class="live-input" id="liveProduct" maxlength="48" placeholder="Use an eligible product from the preflight"></label><label>Quote amount for preview<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 10.00"></label><label>Limit price for preview<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order only</button><button id="liveSubmit" class="danger" type="button" disabled>Live order submission unavailable</button><button id="liveOrders" type="button">View prior order records</button></div>
-<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Live order submission is disabled in this build. Add CDP key details only through Cloudflare secrets; never paste them into chat or the browser.</pre></section>
+<p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View + Trade permissions, with Transfer disabled. Configure COINBASE_ADVANCED_API_KEY, COINBASE_ADVANCED_API_SECRET, COINBASE_ADVANCED_ORDER_ENABLED=true, an explicit spot allowlist, a small quote cap, and strict open/daily order limits as Worker secrets. Do not enable this until you have verified the account, region eligibility, balances and the exact order preview.</p>
+<div class="controls"><button id="livePreflight" type="button">Check account &amp; permissions</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
+<div class="controls"><label>SPOT product ID<br><input class="live-input" id="liveProduct" maxlength="48" placeholder="Select an eligible product"></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records</button></div>
+<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Configure CDP credentials only through Cloudflare Worker secrets; never paste them into chat or the browser.</pre></section>
 <section class="panel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
 <section class="panel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
 <section class="panel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
@@ -242,6 +242,7 @@ document.addEventListener("visibilitychange",()=>{
 setInterval(updateTickerFreshness,3000);
 
 function showLogin(){closeMarketFeed();$("app").classList.add("hidden");$("login").classList.remove("hidden");}let currentTradingMode="demo";
+let livePreviewResult=null;
 function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();connectMarketFeed();loadMarketChart();}
 $("loginForm").addEventListener("submit",async(event)=>{event.preventDefault();$("loginError").textContent="Signing in…";try{const response=await fetch("/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({username:$("username").value,password:$("password").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Sign-in failed");token=data.access_token;sessionStorage.setItem("att_cf_token",token);$("password").value="";showApp();await refresh();}catch(error){$("loginError").textContent=error.message;}});
 $("logout").addEventListener("click",()=>{token="";sessionStorage.removeItem("att_cf_token");showLogin();});
@@ -255,15 +256,15 @@ async function refreshLiveOrders(){
 async function loadLiveStatus(){
   try{
     const status=await api("/api/live/status");
-    $("liveState").textContent=status.credentials_configured?"CREDENTIALS SET · PREVIEW ONLY":"LIVE LOCKED · SETUP REQUIRED";
-    $("liveState").className="tag bad";
+    $("liveState").textContent=status.order_submission_available?"MANUAL LIVE ORDERS CONFIGURED":"LIVE ORDERS LOCKED · SETUP REQUIRED";
+    $("liveState").className="tag "+(status.order_submission_available?"good":"bad");
     $("liveSummary").textContent=(status.credentials_configured?"CDP credentials configured":"CDP credentials not configured")+
       " · allowlist "+(status.allowed_products_configured?"set":"missing")+
       " · quote cap "+(status.max_order_quote_configured?String(status.max_order_quote):"missing")+
-      " · submit OFF";
+      " · manual submit "+(status.order_submission_available?"armed after preview/confirmation":"OFF");
     $("livePreview").disabled=!status.order_preview_available;
     $("liveSubmit").disabled=true;
-    $("liveSummary").textContent += " · live order submission is disabled in this build";
+    livePreviewResult=null;
   }catch(error){
     $("liveState").textContent="PREFLIGHT UNAVAILABLE";
     $("liveState").className="tag bad";
@@ -281,16 +282,16 @@ async function loadTradingMode(){
     $("realModeBtn").classList.toggle("active",!demo);
     $("demoModeBtn").setAttribute("aria-pressed",String(demo));
     $("realModeBtn").setAttribute("aria-pressed",String(!demo));
-    $("modeBadge").textContent=demo?"DEMO ACTIVE":"REAL SELECTED · ORDERS LOCKED";
+    $("modeBadge").textContent=demo?"DEMO ACTIVE":(state.real?.order_submission_available===true?"REAL SELECTED · MANUAL CONFIRMATION":"REAL SELECTED · ORDERS LOCKED");
     $("modeBadge").className="tag "+(demo?"good":"bad");
     $("modeNote").textContent=demo
       ?"DEMO is selected. Coinbase public market data feeds the market scanner; BUY/SELL are recorded only in the virtual paper ledger. No real funds are used. Auto-entry remains OFF until you explicitly enable it."
-      :"REAL account mode is selected. Paper auto-entry has been switched OFF. Coinbase account preflight is available below, but this build cannot submit real BUY/SELL orders or run automatic live entries.";
+      :"REAL account mode is selected. Paper auto-entry is OFF. Coinbase SPOT LIMIT BUY/SELL requires a fresh preview and your explicit confirmation. Automatic live entries and transfers are disabled.";
     $("autoToggle").disabled=!demo;
     $("autoToggle").title=demo?"Paper-only automatic entries. No real funds are used.":"Switch back to DEMO before enabling paper auto-entry.";
     $("realModeBtn").title=state.real?.order_submission_available===true
       ?"Real order route reported available; confirm safety review before proceeding."
-      :"Coinbase connection/preflight only; live order submission remains disabled.";
+      :"Manual spot orders require configured CDP Trade permission, execution secret, balance, preview and explicit confirmation.";
   }catch(error){
     $("modeBadge").textContent="MODE STATUS UNAVAILABLE";
     $("modeBadge").className="tag bad";
@@ -330,21 +331,60 @@ $("livePreflight").addEventListener("click",async()=>{
   }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
   finally{$("livePreflight").disabled=false;$("livePreflight").textContent="Check account & permissions";}
 });
+function clearLivePreview(){
+  livePreviewResult=null;
+  $("liveSubmit").disabled=true;
+}
+["liveSide","liveProduct","liveQuoteSize","liveBaseSize","liveLimitPrice"].forEach(id=>{
+  $(id).addEventListener("input",clearLivePreview);
+  $(id).addEventListener("change",clearLivePreview);
+});
 $("livePreview").addEventListener("click",async()=>{
+  clearLivePreview();
   $("livePreview").disabled=true;$("livePreview").textContent="Previewing…";
   try{
-    const result=await api("/api/live/order-preview",{method:"POST",body:JSON.stringify({
-      product_id:$("liveProduct").value,quote_size:$("liveQuoteSize").value,limit_price:$("liveLimitPrice").value
-    })});
-    $("liveSubmit").disabled=true;
+    const side=$("liveSide").value;
+    const payload={product_id:$("liveProduct").value,side,limit_price:$("liveLimitPrice").value};
+    if(side==="BUY")payload.quote_size=$("liveQuoteSize").value;
+    else payload.base_size=$("liveBaseSize").value;
+    const result=await api("/api/live/order-preview",{method:"POST",body:JSON.stringify(payload)});
+    livePreviewResult=result.status==="preview_ready"?result:null;
     $("liveDetails").textContent=JSON.stringify(result,null,2);
+    const canSubmit=result.status==="preview_ready"&&result.order_submission_available===true&&result.permissions?.can_trade===true&&currentTradingMode==="real";
+    $("liveSubmit").disabled=!canSubmit;
     $("liveSummary").textContent=result.status==="preview_ready"
-      ?"Preview valid · fee "+String(result.commission_total)+" "+String(result.quote_currency)+" · NO ORDER SENT"
+      ?"Preview valid · "+side+" "+String(side==="BUY"?result.quote_size:result.base_size)+" · fee "+String(result.commission_total)+" "+String(result.quote_currency)+" · NO ORDER SENT"
       :(result.blockers||result.preview_errors||[]).join(" · ")||result.status;
-    $("liveState").textContent="PREVIEW ONLY · LIVE SUBMISSION DISABLED";
-    $("liveState").className="tag bad";
-  }catch(error){$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
-  finally{$("livePreview").disabled=false;$("livePreview").textContent="Preview LIMIT order only";}
+    $("liveState").textContent=canSubmit?"PREVIEW READY · MANUAL CONFIRM REQUIRED":"PREVIEW ONLY · SUBMISSION LOCKED";
+    $("liveState").className="tag "+(canSubmit?"good":"bad");
+  }catch(error){livePreviewResult=null;$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
+  finally{$("livePreview").disabled=false;$("livePreview").textContent="Preview LIMIT order";}
+});
+$("liveSubmit").addEventListener("click",async()=>{
+  const preview=livePreviewResult;
+  if(!preview||preview.status!=="preview_ready"||currentTradingMode!=="real")return;
+  const size=preview.side==="BUY"?preview.quote_size:preview.base_size;
+  const message="REAL COINBASE ORDER CONFIRMATION\n\n"+preview.side+" "+preview.product_id+
+    "\nSize: "+size+(preview.side==="BUY"?" "+preview.quote_currency:" base")+
+    "\nLimit price: "+preview.limit_price+" "+preview.quote_currency+
+    "\nEstimated fee: "+preview.commission_total+" "+preview.quote_currency+
+    "\nOrder type: LIMIT GTC POST-ONLY\n\nThis uses REAL funds if accepted. The order may remain open or partially fill. Confirm only if every detail is correct.";
+  if(!confirm(message))return;
+  $("liveSubmit").disabled=true;$("liveSubmit").textContent="Submitting…";
+  try{
+    const clientOrderId=crypto.randomUUID();
+    const payload={confirm_real_order:true,client_order_id:clientOrderId,product_id:preview.product_id,
+      side:preview.side,quote_size:preview.quote_size,base_size:preview.base_size,limit_price:preview.limit_price,
+      commission_total:preview.commission_total,preview_id:preview.preview_id};
+    const result=await api("/api/live/execute",{method:"POST",body:JSON.stringify(payload)});
+    livePreviewResult=null;
+    $("liveDetails").textContent=JSON.stringify(result,null,2);
+    $("liveSummary").textContent="Order status: "+String(result.status||"UNKNOWN")+" · "+String(result.decision||"");
+    $("liveState").textContent=result.status==="PENDING"?"ORDER ACCEPTED · RECONCILE STATUS":"ORDER RESULT · CHECK DETAILS";
+    $("liveState").className="tag "+(result.status==="PENDING"?"good":"bad");
+    await refreshLiveOrders();
+  }catch(error){livePreviewResult=null;$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
+  finally{$("liveSubmit").disabled=true;$("liveSubmit").textContent="Confirm & submit REAL order";}
 });
 
 $("liveOrders").addEventListener("click",async()=>{try{await refreshLiveOrders();}catch(error){$("liveSummary").textContent=error.message;}});
