@@ -15,6 +15,7 @@ import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthySc
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
+import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -54,7 +55,7 @@ export class TradingEngine extends DurableObject {
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
-      JSON.stringify({ initial_capital_usd: 10, risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
+      JSON.stringify({ initial_capital_usd: 10, trading_mode: "demo", risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
     const currentSettings = this.getState("settings");
     const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
@@ -414,6 +415,61 @@ export class TradingEngine extends DurableObject {
         this.setState("coinbase_live_orders", records.slice(0, 100));
         return jsonResponse(result);
       }
+      if (request.method === "GET" && url.pathname === "/api/trading/mode") {
+        const settings = this.getState("settings") || {};
+        const mode = normalizeTradingMode(settings.trading_mode);
+        const live = coinbaseAdvancedStatus(this.env);
+        return jsonResponse({
+          mode,
+          demo: {
+            data_source: "coinbase_public_market_data",
+            execution: "simulated_paper_ledger",
+            automation_enabled: settings.auto_paper_enabled === true
+          },
+          real: {
+            provider: "coinbase_advanced_trade",
+            connection_status: live.credentials_configured ? "credentials_configured_preflight_required" : "not_configured",
+            account_preflight_available: live.account_preflight_available,
+            order_preview_available: live.order_preview_available,
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false,
+            withdrawal_permission_required: false,
+            blockers: live.blockers
+          }
+        });
+      }
+      if (request.method === "PUT" && url.pathname === "/api/trading/mode") {
+        let body;
+        try { body = await request.json(); } catch {
+          return jsonResponse({ error: "invalid_json" }, 400);
+        }
+        const settings = this.getState("settings") || {};
+        const liveOrders = this.getState("coinbase_live_orders") || [];
+        const selected = selectTradingMode(settings, body?.mode, {
+          openPaperPositions: this.getOpenTrades().length,
+          liveOrders
+        });
+        if (!selected.ok) return jsonResponse({ error: selected.reason }, 409);
+        this.setState("settings", selected.settings);
+        if (selected.changed) {
+          this.logEvent(
+            "trading_mode_changed",
+            selected.settings.trading_mode === "real"
+              ? "Owner selected REAL account connection mode; paper auto-entry disabled"
+              : "Owner selected DEMO mode; paper auto-entry remains OFF until explicitly enabled",
+            { mode: selected.settings.trading_mode }
+          );
+        }
+        const live = coinbaseAdvancedStatus(this.env);
+        return jsonResponse({
+          mode: selected.settings.trading_mode,
+          changed: selected.changed,
+          paper_auto_enabled: selected.settings.auto_paper_enabled === true,
+          live_execution_enabled: false,
+          real_connection_status: live.credentials_configured ? "credentials_configured_preflight_required" : "not_configured"
+        });
+      }
       if (request.method === "GET" && url.pathname === "/api/live/status") {
         return jsonResponse(coinbaseAdvancedStatus(this.env));
       }
@@ -498,12 +554,13 @@ export class TradingEngine extends DurableObject {
       }
       if (request.method === "GET" && url.pathname === "/api/automation/paper-trading") {
         const state = this.getState("settings");
-        return jsonResponse({ enabled: !!state.auto_paper_enabled, halted: !!state.halted, mode: "paper_only" });
+        return jsonResponse({ enabled: !!state.auto_paper_enabled, halted: !!state.halted, mode: "paper_only", trading_mode: normalizeTradingMode(state.trading_mode) });
       }
       if (request.method === "PUT" && url.pathname === "/api/automation/paper-trading") {
         const body = await request.json();
         if (typeof body.enabled !== "boolean") return jsonResponse({ error: "enabled_boolean_required" }, 400);
         const state = this.getState("settings");
+        if (body.enabled && normalizeTradingMode(state.trading_mode) !== "demo") return jsonResponse({ error: "select_demo_mode_before_enabling_paper_automation" }, 409);
         if (body.enabled && state.capital_setup_required) return jsonResponse({ error: "paper_capital_setup_review_required" }, 409);
         if (body.enabled && state.halted) return jsonResponse({ error: "paper_automation_halted_reset_required" }, 409);
         if (body.enabled) {
