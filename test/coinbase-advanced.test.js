@@ -218,7 +218,7 @@ test("preview rejects off-increment size and price before external preview", asy
   const env = makeEnv();
   const { fetchImpl, calls } = mockApi(env);
   const result = await previewCoinbaseAdvancedLimitBuy(
-    env, { productId: "BTC-USD", quoteSize: "10.005", limitPrice: "99000.001" }, { fetchImpl }
+    env, { productId: "BTC-USD", quoteSize: "9.995", limitPrice: "99000.001" }, { fetchImpl }
   );
   assert.equal(result.status, "blocked");
   assert.ok(result.blockers.includes("quote_size_not_aligned_to_exchange_increment"));
