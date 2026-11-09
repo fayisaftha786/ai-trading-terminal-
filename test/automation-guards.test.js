@@ -18,6 +18,9 @@ function healthyMarket(symbol) {
     bid: 100,
     ask: 100.01,
     last: 100,
+    book_retrieved_at_ms: NOW - 1000,
+    bid_depth_quote: 8000,
+    ask_depth_quote: 9000,
     one_hour_audit_summary: { ok: true, valid_closed_bars: 300, issues: [] },
     six_hour_audit_summary: { ok: true, valid_closed_bars: 150, issues: [] }
   };
@@ -39,6 +42,26 @@ test("market-universe gate requires every configured market and clean closed can
   const rejected = assessMarketUniverse(broken, symbols, NOW);
   assert.equal(rejected.healthy, false);
   assert.ok(rejected.issues.some((issue) => issue.symbol === "ETH/USD" && issue.reason.includes("6h_candle_integrity_failed")));
+});
+
+test("market-universe gate requires a fresh L2 snapshot and adequate depth on both sides", () => {
+  const symbols = ["BTC/USD"];
+
+  const staleBook = healthyMarket("BTC/USD");
+  staleBook.book_retrieved_at_ms = NOW - 15001;
+  assert.ok(assessMarketUniverse([staleBook], symbols, NOW).issues[0].reason.includes("orderbook_snapshot_stale_or_missing"));
+
+  const missingBookTime = healthyMarket("BTC/USD");
+  delete missingBookTime.book_retrieved_at_ms;
+  assert.ok(assessMarketUniverse([missingBookTime], symbols, NOW).issues[0].reason.includes("orderbook_snapshot_stale_or_missing"));
+
+  const shallowBid = healthyMarket("BTC/USD");
+  shallowBid.bid_depth_quote = 4999.99;
+  assert.ok(assessMarketUniverse([shallowBid], symbols, NOW).issues[0].reason.includes("orderbook_depth_unavailable_or_low"));
+
+  const shallowAsk = healthyMarket("BTC/USD");
+  shallowAsk.ask_depth_quote = 100;
+  assert.ok(assessMarketUniverse([shallowAsk], symbols, NOW).issues[0].reason.includes("orderbook_depth_unavailable_or_low"));
 });
 
 test("market-universe gate rejects stale and crossed quotes", () => {
