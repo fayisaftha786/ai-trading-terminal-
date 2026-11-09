@@ -50,6 +50,10 @@ Cloudflare's Workers Builds documentation lists `WORKERS_CI_COMMIT_SHA` as a bui
 
 Keep `ADMIN_PASSWORD` and `SESSION_SECRET` configured as Cloudflare runtime secrets. The owner must change them only through Cloudflare's secret manager; do not paste credentials into chat, issues or source code. The separate manual GitHub Actions deploy workflow requires GitHub repository secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`; these are not required by the existing Workers Builds integration.
 
+## Current market health vs scheduler heartbeat
+
+The health response recalculates current market freshness from persisted snapshots on every request and reports it separately from the last completed scan and scheduled-alarm heartbeat. A recent alarm does not make an 11-minute-old ticker fresh; `market_data_status` may therefore be `unavailable` while `scheduler.status` is still `healthy`. The dashboard separately labels “Last scan markets” and “Current snapshots”. This prevents a previous 3/3 result from appearing to mean the current feed is still fresh. PR #65 adds this distinction and tests the initial no-snapshot state.
+
 ## What remains before optional PAPER auto-entry
 
 1. Merge and deploy the provider-integrity/health-diagnostics hardening currently under review.
