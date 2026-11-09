@@ -867,11 +867,13 @@ export class TradingEngine extends DurableObject {
           processed += 1;
         }
         fillSync = {
-          status: fillResult.pagination_complete ? "complete" : "partial",
+          status: fillResult.proof_token_required ? "proof_required"
+            : fillResult.pagination_complete ? "complete" : "partial",
           count: fillResult.count,
           processed,
           pages: fillResult.pages,
           pagination_complete: fillResult.pagination_complete,
+          proof_token_required: fillResult.proof_token_required === true,
           synced_at_ms: Date.now()
         };
       } catch (error) {
