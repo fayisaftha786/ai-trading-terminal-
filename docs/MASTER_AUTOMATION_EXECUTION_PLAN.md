@@ -5,7 +5,7 @@
 The project has two distinct PAPER surfaces:
 
 1. **Android Local PAPER:** Android app, public market data and a local virtual ledger. Manual entry and close require fresh quotes; stale cached prices fail closed.
-2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor. Production is currently 15-minute; PR #66 proposes a 90-second cadence, not yet deployed.
+2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor. Main configures a 90-second delay between cycles; a cache-busting production probe after PR #66 merge reported `schedule_seconds: 90`, but the first pending alarm was inherited from the prior 15-minute schedule.
 
 The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet execution remain disabled. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
 
@@ -56,8 +56,8 @@ The health response recalculates current market freshness from persisted snapsho
 
 ## What remains before optional PAPER auto-entry
 
-1. Merge and deploy the provider-integrity/health-diagnostics hardening currently under review.
-2. Verify the Worker version tag matches the new main SHA.
+1. Verify the merged main SHA is the deployed Worker version; configure the Workers Builds deploy tag if it is still blank.
+2. Verify the pending alarm fires and subsequent scheduler cycles remain around 90 seconds apart.
 3. Confirm the health endpoint reports all configured market/provider rows, including quote age, local book age, exchange book age where available, 1H/6H candle age, fallback reason and sanitized provider errors.
 4. Confirm all three markets remain healthy over multiple consecutive scheduled scans—not merely one snapshot.
 5. Confirm provider switching never changes the valuation venue of an open position, and that a position is marked unpriced rather than cross-marked when its entry venue is unavailable.
