@@ -224,10 +224,11 @@ test("adaptive risk only scales down and pauses at high drawdown", () => {
   assert.equal(assessAdaptiveRisk({ drawdownPct: null, lossStreak: 0 }).allowed, false);
 });
 
-test("cost-aware trailing stop activates only after a profit buffer and never loosens", () => {
+test("cost-aware trailing stop activates before the dynamic take-profit at realistic fee assumptions", () => {
+  const roundTripCostBps = 165;
   const dormant = updateTrailingStop({
     entryPrice: 100, currentStop: 99, previousHighWater: 100,
-    currentBid: 101.9, roundTripCostBps: 55
+    currentBid: 102.1, roundTripCostBps
   });
   assert.equal(dormant.ok, true);
   assert.equal(dormant.active, false);
@@ -235,16 +236,16 @@ test("cost-aware trailing stop activates only after a profit buffer and never lo
 
   const activated = updateTrailingStop({
     entryPrice: 100, currentStop: 99, previousHighWater: 100,
-    currentBid: 102.1, roundTripCostBps: 55
+    currentBid: 102.4, roundTripCostBps
   });
   assert.equal(activated.active, true);
-  assert.ok(activated.stopLoss > 100);
-  assert.ok(activated.stopLoss < 102.1);
+  assert.ok(activated.stopLoss > 101.65, "stop must exceed estimated round-trip cost break-even");
+  assert.ok(activated.stopLoss < 102.4);
 
   const pullback = updateTrailingStop({
     entryPrice: 100, currentStop: activated.stopLoss,
     previousHighWater: activated.highWaterBid, currentBid: 100.5,
-    roundTripCostBps: 55
+    roundTripCostBps
   });
   assert.equal(pullback.stopLoss, activated.stopLoss);
   assert.equal(pullback.highWaterBid, activated.highWaterBid);
