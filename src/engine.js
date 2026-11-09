@@ -11,7 +11,7 @@ import {
   cancelCoinbaseAdvancedOrder
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
@@ -1120,7 +1120,7 @@ export class TradingEngine extends DurableObject {
       updatedPortfolio.open_positions, updatedPortfolio.drawdown_pct_from_peak
     );
     this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
-    const runtime = {
+    const runtimeUpdate = {
       next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
       last_scheduled_alarm_at_ms: previousRuntime.last_scheduled_alarm_at_ms ?? null,
       last_scheduled_scan_status: previousRuntime.last_scheduled_scan_status || "not_run",
@@ -1158,6 +1158,7 @@ export class TradingEngine extends DurableObject {
         entry_ready: market.entry_gate?.eligible === true
       })).slice(0, 3)
     };
+    const runtime = mergeScanRuntimeState(previousRuntime, runtimeUpdate, source);
     this.setState("runtime", runtime);
     this.logEvent("market_scan", "Market scan cycle completed", {
       source, cycle_key: cycleKey, successful_markets: markets.filter((market) => market.status === "live").length,
