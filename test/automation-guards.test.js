@@ -617,4 +617,13 @@ test("market feed freshness explains normal snapshot expiry without changing ent
     lastScheduledScanAgeMs: 1000,
     staleAfterMs: 270000
   }).state, "last_scan_degraded");
+
+  assert.equal(classifyMarketFeedFreshness({
+    currentFeedHealthy: false,
+    lastScheduledScanStatus: "completed",
+    lastScheduledHealthyMarketCount: 3,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: null,
+    staleAfterMs: 270000
+  }).state, "scheduled_scan_overdue");
 });
