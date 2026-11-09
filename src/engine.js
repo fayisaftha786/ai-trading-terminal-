@@ -177,8 +177,12 @@ export class TradingEngine extends DurableObject {
           const quoteReceivedAtMs = Number(market.quote_received_at_ms);
           const bookRetrievedAtMs = Number(market.book_retrieved_at_ms);
           const bookEventTimeMs = Number(market.book_event_time_ms);
-          const oneHourClosedAtMs = Number(market.one_hour_audit_summary?.last_closed_candle_ms) + 3600000;
-          const sixHourClosedAtMs = Number(market.six_hour_audit_summary?.last_closed_candle_ms) + 21600000;
+          const oneHourLastOpenMs = Number(market.one_hour_audit_summary?.last_closed_candle_ms);
+          const sixHourLastOpenMs = Number(market.six_hour_audit_summary?.last_closed_candle_ms);
+          const oneHourClosedAtMs = Number.isFinite(oneHourLastOpenMs) && oneHourLastOpenMs > 0
+            ? oneHourLastOpenMs + 3600000 : Number.NaN;
+          const sixHourClosedAtMs = Number.isFinite(sixHourLastOpenMs) && sixHourLastOpenMs > 0
+            ? sixHourLastOpenMs + 21600000 : Number.NaN;
           return {
             symbol: typeof market.symbol === "string" ? market.symbol.slice(0, 24) : null,
             status: market.status === "live" ? "live" : "error",
@@ -204,7 +208,7 @@ export class TradingEngine extends DurableObject {
             six_hour_refresh_error: safeDiagnosticCode(quality.six_hour_refresh_error),
             six_hour_closed_age_ms: Number.isFinite(sixHourClosedAtMs) && sixHourClosedAtMs > 0
               ? Math.max(0, nowMs - sixHourClosedAtMs) : null,
-            entry_ready: market.entry_gate?.eligible === true
+            market_candidate_eligible: market.entry_gate?.eligible === true
           };
         });
         const currentProviderFailures = currentMarkets.flatMap((market) => {
@@ -293,7 +297,7 @@ export class TradingEngine extends DurableObject {
               six_hour_refresh_status: item.six_hour_refresh_status,
               six_hour_refresh_error: item.six_hour_refresh_error,
               six_hour_closed_age_ms: item.six_hour_closed_age_ms,
-              entry_ready: item.entry_ready
+              market_candidate_eligible: item.market_candidate_eligible
             }))
         };
         return jsonResponse({
