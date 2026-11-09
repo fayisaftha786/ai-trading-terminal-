@@ -14,8 +14,10 @@
  */
 export function isFreshQuoteObservation(market, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
   if (market?.status !== "live") return false;
-  const receivedAt = Number(market.quote_received_at_ms);
-  if (Number.isFinite(receivedAt) && receivedAt > 0) {
+  const hasReceivedAt = Object.prototype.hasOwnProperty.call(market, "quote_received_at_ms");
+  if (hasReceivedAt) {
+    const receivedAt = Number(market.quote_received_at_ms);
+    if (!Number.isFinite(receivedAt) || receivedAt <= 0) return false;
     const receivedAge = nowMs - receivedAt;
     if (receivedAge < -5000 || receivedAge > maxQuoteAgeMs) return false;
     const eventTime = Date.parse(market.ticker_time || "");
