@@ -122,6 +122,25 @@ export function assessMarketUniverse(
   };
 }
 
+export function hasRecentHealthyScheduledScan({
+  status,
+  scanAtMs,
+  healthyMarketCount,
+  expectedMarketCount,
+  nowMs = Date.now(),
+  maxAgeMs = 3 * 90 * 1000
+}) {
+  const scanAt = Number(scanAtMs);
+  const healthy = Number(healthyMarketCount);
+  const expected = Number(expectedMarketCount);
+  return status === "completed" &&
+    Number.isFinite(nowMs) &&
+    Number.isFinite(scanAt) && scanAt > 0 && scanAt <= nowMs + 5000 &&
+    nowMs - scanAt <= maxAgeMs &&
+    Number.isSafeInteger(healthy) && Number.isSafeInteger(expected) &&
+    expected > 0 && healthy === expected;
+}
+
 export function advanceUnhealthyScanStreak(previousCount, source, marketFeedHealthy) {
   const previous = Number.isSafeInteger(previousCount) && previousCount > 0 ? previousCount : 0;
   if (source !== "scheduled") return previous;

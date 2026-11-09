@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { calculateDynamicTakeProfit } from "../src/paper-automation-profile.js";
 import {
   assessMarketUniverse,
+  hasRecentHealthyScheduledScan,
   advanceUnhealthyScanStreak,
   buildMarketDataProviderDiagnostics,
   assessAdaptiveRisk,
@@ -99,6 +100,19 @@ test("market-universe gate rejects stale and crossed quotes", () => {
   delete missingBarCount.one_hour_audit_summary.valid_closed_bars;
   assert.ok(assessMarketUniverse([missingBarCount], symbols, NOW).issues[0].reason.includes("1h_candle_integrity_failed"));
 
+});
+
+test("paper auto-entry enable gate uses the last completed healthy scheduled scan, not aging persisted L2 snapshots", () => {
+  const recent = {
+    status: "completed", scanAtMs: NOW - 60_000,
+    healthyMarketCount: 3, expectedMarketCount: 3, nowMs: NOW
+  };
+  assert.equal(hasRecentHealthyScheduledScan(recent), true);
+  assert.equal(hasRecentHealthyScheduledScan({ ...recent, scanAtMs: NOW - 271_000 }), false);
+  assert.equal(hasRecentHealthyScheduledScan({ ...recent, status: "partial" }), false);
+  assert.equal(hasRecentHealthyScheduledScan({ ...recent, healthyMarketCount: 2 }), false);
+  assert.equal(hasRecentHealthyScheduledScan({ ...recent, expectedMarketCount: 2 }), false);
+  assert.equal(hasRecentHealthyScheduledScan({ ...recent, scanAtMs: NOW + 6000 }), false);
 });
 
 test("only scheduled unhealthy scans increase the consecutive failure streak", () => {
