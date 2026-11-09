@@ -114,6 +114,28 @@ test("live readiness status defaults closed and exposes no API secret", () => {
   assert.equal(JSON.stringify(status).includes("PRIVATE KEY"), false);
 });
 
+test("guarded order switch remains closed by default and requires strict daily/open-order caps", () => {
+  const off = coinbaseAdvancedStatus(makeEnv());
+  assert.equal(off.order_submission_available, false);
+  assert.equal(off.automatic_live_entries_enabled, false);
+  const on = coinbaseAdvancedStatus(makeEnv({
+    COINBASE_ADVANCED_ORDER_ENABLED: "true",
+    COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
+    COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
+  }));
+  assert.equal(on.order_submission_available, true);
+  assert.equal(on.max_open_orders, 1);
+  assert.equal(on.max_daily_orders, 1);
+  const invalid = coinbaseAdvancedStatus(makeEnv({
+    COINBASE_ADVANCED_ORDER_ENABLED: "true",
+    COINBASE_ADVANCED_MAX_OPEN_ORDERS: "9",
+    COINBASE_ADVANCED_MAX_DAILY_ORDERS: "9"
+  }));
+  assert.equal(invalid.order_submission_available, false);
+  assert.equal(invalid.max_open_orders, null);
+  assert.equal(invalid.max_daily_orders, null);
+});
+
 test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact request URI", async () => {
   const env = makeEnv();
   const jwt = await createCoinbaseAdvancedJwt({
