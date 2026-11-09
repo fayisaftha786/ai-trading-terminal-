@@ -47,6 +47,8 @@ export function assessMarketUniverse(
     ];
     if (typeof selectedProvider !== "string" || !selectedProvider) {
       marketIssues.push("market_data_provider_missing");
+    } else if (!["coinbase_exchange", "bitstamp_spot"].includes(selectedProvider)) {
+      marketIssues.push("market_data_provider_unsupported");
     } else if (declaredProviders.some((provider) => provider !== selectedProvider)) {
       marketIssues.push("market_data_provider_mismatch");
     }
