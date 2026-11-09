@@ -227,8 +227,8 @@ try {
   assert.match(staticHtml, /last_scan_error/);
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
-  assert.match(staticHtml, /Coinbase Advanced preflight/);
-  assert.match(staticHtml, /Automatic live entries remain OFF/);
+  assert.match(staticHtml, /Coinbase Advanced · read-only preflight/);
+  assert.match(staticHtml, /Automatic PAPER entries start OFF/);
   assert.match(staticHtml, /Live order submission is disabled in this build/);
   assert.doesNotMatch(staticHtml, /Confirm guarded real order/);
   assert.match(staticHtml, /Automatic PAPER entries start OFF/);
