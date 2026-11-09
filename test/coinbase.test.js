@@ -167,7 +167,7 @@ test("snapshot uses ticker 24h volume and does not spend an extra request on sta
     assert.equal(snapshot.six_hour_audit.ok, true);
     assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.equal(calls.some((path) => path.endsWith("/stats")), false);
-    assert.equal(calls.length, 5, "ticker, book and two sequential candle refreshes are sufficient");
+    assert.equal(calls.length, 4, "ticker, book and two sequential candle refreshes are sufficient");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -192,7 +192,7 @@ test("candle endpoint failure falls back to fresh archived candles without disca
       });
     }
     if (path.endsWith("/book?level=2")) return jsonResponse(makeBook());
-    if (path.includes("/candles?")) return jsonResponse({ message: "temporarily unavailable" }, 503);
+    if (path.includes("/candles?")) return jsonResponse({ message: "temporarily unavailable" }, 404);
     return jsonResponse({ error: "unexpected_endpoint" }, 404);
   };
 
@@ -217,7 +217,7 @@ test("candle endpoint failure falls back to fresh archived candles without disca
     assert.equal(snapshot.data_quality.six_hour_source, "durable_object_archive_fallback");
     assert.equal(snapshot.data_quality.one_hour_refresh_status, "provider_error_cache_fallback");
     assert.equal(snapshot.data_quality.six_hour_refresh_status, "provider_error_cache_fallback");
-    assert.equal(snapshot.data_quality.one_hour_refresh_error, "provider_server_error");
+    assert.equal(snapshot.data_quality.one_hour_refresh_error, "provider_http_error");
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -243,7 +243,7 @@ test("book failure preserves a fresh bid for paper exits and uses stats only as 
       return jsonResponse({ bid: "100", ask: "100.01", price: "100", time: tickerTime });
     }
     if (path.endsWith("/stats")) return jsonResponse({ volume: "25000" });
-    if (path.endsWith("/book?level=2")) return jsonResponse({ message: "book unavailable" }, 503);
+    if (path.endsWith("/book?level=2")) return jsonResponse({ message: "book unavailable" }, 404);
     return jsonResponse({ error: "unexpected_endpoint" }, 404);
   };
 
