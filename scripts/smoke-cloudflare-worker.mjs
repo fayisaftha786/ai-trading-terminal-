@@ -313,7 +313,7 @@ try {
   assert.match(staticHtml, /id="liveReconcile"/);
   assert.match(staticHtml, /api\/live\/fills\?limit=100/);
   assert.match(staticHtml, /preview_token:preview\.preview_token/);
-  assert.match(staticHtml, /server-bound preview/i);
+  assert.match(staticHtml, /bound server-side/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);
