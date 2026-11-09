@@ -210,6 +210,41 @@ test("list fills normalizes exchange records, filters by order and paginates", a
   assert.ok(fake.calls.every((call) => call.path.includes("order_ids=order-test-1")));
 });
 
+test("list fills explicitly reports required 2FA proof token as incomplete", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, {
+    fillsPages: [{ fills: [], cursor: "", proof_token_required: true }]
+  });
+  const result = await listCoinbaseAdvancedFills(
+    env, { orderId: "order-test-1" }, { fetchImpl: fake.fetchImpl }
+  );
+  assert.equal(result.proof_token_required, true);
+  assert.equal(result.pagination_complete, false);
+  assert.equal(result.pages, 1);
+  assert.equal(result.count, 0);
+});
+
+test("list fills stops repeated pagination cursors without claiming completeness", async () => {
+  const env = makeEnv();
+  const fill = {
+    entry_id: "entry-repeat", order_id: "order-test-1", product_id: "BTC-USD",
+    side: "BUY", trade_type: "FILL", trade_time: "2026-11-09T12:00:00Z",
+    price: "100000", size: "0.0001", commission: "0"
+  };
+  const fake = mockApi(env, {
+    fillsPages: [
+      { fills: [fill], cursor: "repeated-cursor" },
+      { fills: [fill], cursor: "repeated-cursor" }
+    ]
+  });
+  const result = await listCoinbaseAdvancedFills(
+    env, { orderId: "order-test-1" }, { fetchImpl: fake.fetchImpl }
+  );
+  assert.equal(result.count, 1, "entry_id deduplication should remain effective");
+  assert.equal(result.pages, 2);
+  assert.equal(result.pagination_complete, false);
+});
+
 test("list fills rejects malformed records and mismatched exchange order IDs", async () => {
   const env = makeEnv();
   const malformed = mockApi(env, {
