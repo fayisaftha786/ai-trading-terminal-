@@ -68,7 +68,7 @@ async function refresh(){try{const data=await api("/api/dashboard");$("apiState"
         String(candidate.strategy_id || "strategy").replace(/_/g, " ") + " " + String(candidate.signal || "HOLD")
       ).join(" · ")
     : "BLOCKED · " + String(research.reason || "not available").replace(/_/g, " ");
-  return '<tr><td><strong>' + esc(m.symbol) + '</strong></td><td>'
+  return '<tr><td><strong>' + esc(m.symbol) + '</strong></td><td>' +
     (m.last == null ? "—" : money(m.last)) + ' / ' + (m.bid == null ? "—" : money(m.bid)) +
     '</td><td>' + (m.spread_bps == null ? "—" : Number(m.spread_bps).toFixed(2) + " bps") +
     '</td><td>' + esc(m.signal || "HOLD") + ' · ' + Number(m.score || 0) + '/100</td><td>' +
