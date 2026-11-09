@@ -324,8 +324,19 @@ export class TradingEngine extends DurableObject {
         if (!isFreshBidQuote(market, Date.now(), MAX_QUOTE_AGE_MS)) {
           return jsonResponse({ error: "fresh_bid_required_run_market_scan_first" }, 409);
         }
+        const entryProvider = typeof trade.metadata?.market_data_provider === "string"
+          ? trade.metadata.market_data_provider : "coinbase_exchange";
+        if (market.market_data_provider !== entryProvider) {
+          return jsonResponse({
+            error: "same_entry_provider_quote_required",
+            entry_provider: entryProvider,
+            current_provider: market.market_data_provider || null
+          }, 409);
+        }
         const risk = { ...DEFAULT_RISK, ...(this.getState("settings")?.risk || {}) };
-        const closed = this.closeTradeAt(trade, market.bid, risk, Date.now(), "manual_owner_close");
+        const closed = this.closeTradeAt(
+          trade, market.bid, risk, Date.now(), "manual_owner_close", market.market_data_provider
+        );
         return jsonResponse({ trade: closed, mode: "paper_only" });
       }
       if (request.method === "POST" && url.pathname === "/api/scan") return jsonResponse(await this.runCycle("manual"));
@@ -618,7 +629,7 @@ export class TradingEngine extends DurableObject {
     const marketFeed = assessMarketUniverse(
       markets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
     );
-    const markBySymbol = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
+    const markBySymbol = this.buildPositionLockedBidMarks(markets, Date.now());
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
     const portfolio = this.portfolio(markBySymbol, risk, Date.now());
@@ -1004,6 +1015,20 @@ export class TradingEngine extends DurableObject {
       .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
   }
 
+  buildPositionLockedBidMarks(markets, nowMs = Date.now()) {
+    const requiredProviders = new Map(
+      this.getOpenTrades().map((trade) => [
+        trade.symbol,
+        typeof trade.metadata?.market_data_provider === "string" && trade.metadata.market_data_provider
+          ? trade.metadata.market_data_provider
+          : "coinbase_exchange"
+      ])
+    );
+    return buildFreshBidMarks(
+      markets, nowMs, MAX_QUOTE_AGE_MS, requiredProviders
+    );
+  }
+
   getTrades(limit = 100, offset = 0) {
     const safeLimit = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 100)));
     const safeOffset = Math.max(0, Math.trunc(Number(offset) || 0));
@@ -1147,22 +1172,38 @@ export class TradingEngine extends DurableObject {
       this.sql.exec(
         "UPDATE trades SET status='CLOSED',closed_at_ms=?,exit_price=?,fees_usd=?,pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN'",
         nowMs, exitPrice, trade.fees_usd + exitFee, netPnl,
-        JSON.stringify({ ...trade.metadata, close_reason: reason, close_reference_price: reference }), trade.id
+        JSON.stringify({
+          ...trade.metadata,
+          close_reason: reason,
+          close_reference_price: reference,
+          close_market_data_provider: trade.metadata?.market_data_provider || "coinbase_exchange"
+        }), trade.id
       );
-      this.logEvent("paper_exit", "Paper position closed by " + reason, { trade_id: trade.id, symbol: trade.symbol, net_pnl_usd: netPnl });
+      this.logEvent("paper_exit", "Paper position closed by " + reason, {
+        trade_id: trade.id,
+        symbol: trade.symbol,
+        net_pnl_usd: netPnl,
+        market_data_provider: trade.metadata?.market_data_provider || "coinbase_exchange"
+      });
       closed.push({ trade_id: trade.id, symbol: trade.symbol, reason, net_pnl_usd: netPnl });
     }
     return closed;
   }
 
-  closeTradeAt(trade, bid, risk, nowMs, reason) {
+  closeTradeAt(trade, bid, risk, nowMs, reason, exitMarketDataProvider = null) {
     const exitPrice = bid * (1 - risk.slippage_bps / 10000);
     const exitFee = exitPrice * trade.quantity * risk.fee_bps_per_side / 10000;
     const netPnl = (exitPrice - trade.entry_price) * trade.quantity - trade.fees_usd - exitFee;
     const updated = this.sql.exec(
       "UPDATE trades SET status='CLOSED',closed_at_ms=?,exit_price=?,fees_usd=?,pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN' RETURNING id",
       nowMs, exitPrice, trade.fees_usd + exitFee, netPnl,
-      JSON.stringify({ ...trade.metadata, close_reason: reason, close_reference_price: bid }), trade.id
+      JSON.stringify({
+        ...trade.metadata,
+        close_reason: reason,
+        close_reference_price: bid,
+        close_market_data_provider: exitMarketDataProvider ||
+          trade.metadata?.market_data_provider || "coinbase_exchange"
+      }), trade.id
     ).toArray();
     if (updated.length !== 1) throw new Error("paper_trade_already_closed");
     this.logEvent("paper_exit", "Paper position closed by owner", {
@@ -1310,6 +1351,7 @@ export class TradingEngine extends DurableObject {
       fees_usd: entryFee, pnl_usd: null, opened_at_ms: nowMs,
       metadata_json: JSON.stringify({
         strategy_version: "cloud-paper-v1", timeframe: "1h", confirmation_timeframe: "6h",
+        market_data_provider: market.market_data_provider || "coinbase_exchange",
         score: market.primary.score, regime_1h: market.primary.regime, regime_6h: market.higher.regime,
         spread_bps: assessment.spread_bps, round_trip_cost_bps: assessment.round_trip_cost_bps,
         fee_bps_per_side: risk.fee_bps_per_side, slippage_bps: risk.slippage_bps,
@@ -1445,7 +1487,7 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
-    const marks = buildFreshBidMarks(markets, Date.now(), MAX_QUOTE_AGE_MS);
+    const marks = this.buildPositionLockedBidMarks(markets, Date.now());
     const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now());
     return {
       mode: "paper_only", live_trading_enabled: false, binance_testnet_enabled: false,

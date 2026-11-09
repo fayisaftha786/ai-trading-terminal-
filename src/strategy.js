@@ -69,11 +69,21 @@ export function isFreshBidQuote(market, nowMs = Date.now(), maxQuoteAgeMs = 1200
   return !Number.isFinite(eventTime) || eventTime <= nowMs + 5000;
 }
 
-export function buildFreshBidMarks(markets, nowMs = Date.now(), maxQuoteAgeMs = 120000) {
+export function buildFreshBidMarks(
+  markets,
+  nowMs = Date.now(),
+  maxQuoteAgeMs = 120000,
+  requiredProvidersBySymbol = null
+) {
   const rows = Array.isArray(markets) ? markets : [];
-  return new Map(rows.filter((market) =>
-    isFreshBidQuote(market, nowMs, maxQuoteAgeMs)
-  ).map((market) => [market.symbol, market.bid]));
+  return new Map(rows.filter((market) => {
+    if (!isFreshBidQuote(market, nowMs, maxQuoteAgeMs)) return false;
+    if (requiredProvidersBySymbol instanceof Map &&
+        requiredProvidersBySymbol.has(market.symbol)) {
+      return market.market_data_provider === requiredProvidersBySymbol.get(market.symbol);
+    }
+    return true;
+  }).map((market) => [market.symbol, market.bid]));
 }
 
 /**
