@@ -186,3 +186,20 @@ def test_signal_walk_forward_preserves_six_hour_confirmation_interval():
     assert result["total_folds"] == 2
     assert all(fold["timeframe_assumptions"]["higher_interval_ms"] == interval_6h
                for fold in result["folds"])
+
+
+
+def test_signal_backtest_rejects_raw_duplicate_and_malformed_higher_timeframe_rows():
+    import pytest
+
+    primary, higher = _history()
+    duplicate = [row.copy() for row in higher]
+    duplicate[100] = duplicate[99].copy()
+    with pytest.raises(ValueError, match="duplicate_timestamps"):
+        run_signal_backtest(primary, duplicate)
+
+    primary, higher = _history()
+    malformed = [row.copy() for row in higher]
+    malformed[100] = [malformed[100][0], None, 101.0, 99.0, 100.0, 1000.0]
+    with pytest.raises(ValueError, match="invalid_rows"):
+        run_signal_backtest(primary, malformed)
