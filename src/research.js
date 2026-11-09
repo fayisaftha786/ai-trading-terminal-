@@ -39,6 +39,7 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
     const coverageDays = expected === null || expected <= 0 ? 0 : (last - first + intervalMs) / 86400000;
     const quality = String(record.last_quality_status || "not_started");
     return {
+      exchange: String(record.exchange || "coinbase_exchange"),
       product: String(record.product || ""),
       symbol: String(record.product || "").replace("-", "/"),
       timeframe_seconds: intervalSeconds,
