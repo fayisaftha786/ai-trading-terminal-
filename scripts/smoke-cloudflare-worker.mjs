@@ -61,10 +61,19 @@ try {
   assert.equal(health.mode, "paper_only");
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
+  assert.equal(health.market_data_status, "unavailable", "no current snapshots must not be reported as healthy");
   assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
   assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
   assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
   assert.equal(health.scan_diagnostics.expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.current_market_feed.status, "unavailable");
+  assert.equal(health.scan_diagnostics.current_market_feed.healthy_market_count, 0);
+  assert.equal(health.scan_diagnostics.current_market_feed.expected_market_count, 3);
+  assert.deepEqual(health.scan_diagnostics.current_market_feed.issues, [
+    { symbol: "BTC/USD", reason: "market_snapshot_missing" },
+    { symbol: "ETH/USD", reason: "market_snapshot_missing" },
+    { symbol: "SOL/USD", reason: "market_snapshot_missing" }
+  ]);
   assert.deepEqual(health.scan_diagnostics.issues, []);
   assert.deepEqual(health.scan_diagnostics.provider_failures, []);
   assert.deepEqual(health.scan_diagnostics.market_data_providers, []);
