@@ -282,8 +282,8 @@ export class TradingEngine extends DurableObject {
           scan_diagnostics: diagnostics
         });
       }
-      // Coinbase Advanced account preflight and order preview are deliberately
-      // separated from execution. There is no /api/live/execute route in this build.
+      // Manual REAL execution is separate from automatic PAPER entries.
+      // Submission requires a fresh server-bound preview and explicit owner confirmation.
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
         const settings = this.getState("settings") || {};
         if (normalizeTradingMode(settings.trading_mode) !== "real") {
