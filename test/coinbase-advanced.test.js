@@ -6,7 +6,8 @@ import {
   createCoinbaseAdvancedJwt,
   preflightCoinbaseAdvanced,
   previewCoinbaseAdvancedLimitBuy,
-  submitCoinbaseAdvancedLimitBuy
+  submitCoinbaseAdvancedLimitBuy,
+  listCoinbaseAdvancedFills
 } from "../src/coinbase-advanced.js";
 
 globalThis.crypto ||= webcrypto;
@@ -61,7 +62,8 @@ async function verifyJwt(token, publicKeyPem) {
   return { header, payload, valid };
 }
 
-function mockApi(env, { permissions, accounts, product, preview, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsResponses = [], calls = [] } = {}) {
+  let fillsPage = 0;
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -98,6 +100,11 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
         order_total: "10.00", best_bid: "99000.00", best_ask: "99010.00",
         slippage: "0.00", errs: [], warning: []
       });
+    }
+    if (parsed.pathname.endsWith("/orders/historical/fills")) {
+      const payload = fillsResponses[fillsPage] || { fills: [], cursor: "" };
+      fillsPage += 1;
+      return Response.json(payload);
     }
     throw new Error("Unexpected endpoint " + parsed.pathname);
   };
@@ -306,6 +313,46 @@ test("manual submission requires explicit execution switch and Coinbase Trade pe
   assert.equal(blocked.status, "blocked");
   assert.ok(blocked.blockers.includes("api_key_trade_permission_required_for_manual_orders"));
   assert.equal(noTrade.calls.some((call) => call.path === "/api/v3/brokerage/orders"), false);
+});
+
+test("Coinbase fills adapter paginates and restricts results to requested bot order IDs", async () => {
+  const env = makeEnv();
+  const firstFill = {
+    entry_id: "entry-1", trade_id: "trade-1", order_id: "order-1",
+    trade_time: "2026-11-09T10:00:00Z", price: "10000", size: "0.001",
+    commission: "0.10", product_id: "BTC-USD", side: "BUY", size_in_quote: false
+  };
+  const secondFill = {
+    ...firstFill, entry_id: "entry-2", trade_id: "trade-2", order_id: "order-2",
+    trade_time: "2026-11-09T10:01:00Z", side: "SELL"
+  };
+  const fake = mockApi(env, {
+    fillsResponses: [
+      { fills: [firstFill], cursor: "cursor-next" },
+      { fills: [secondFill, { ...secondFill, order_id: "outside-order", entry_id: "unlinked" }], cursor: "" }
+    ]
+  });
+  const result = await listCoinbaseAdvancedFills(env, {
+    orderIds: ["order-1", "order-2"], limit: 50, maxPages: 3
+  }, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "fills_loaded");
+  assert.equal(result.complete, true);
+  assert.equal(result.pages, 2);
+  assert.equal(result.fills.length, 2);
+  assert.ok(fake.calls[0].path.includes("order_ids=order-1"));
+  assert.ok(fake.calls[0].path.includes("order_ids=order-2"));
+  assert.ok(fake.calls[1].path.includes("cursor=cursor-next"));
+});
+
+test("Coinbase fills adapter fails closed when fill pagination does not finish", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, {
+    fillsResponses: [{ fills: [], cursor: "still-more" }]
+  });
+  await assert.rejects(
+    listCoinbaseAdvancedFills(env, { orderIds: ["order-1"], maxPages: 1 }, { fetchImpl: fake.fetchImpl }),
+    /fills_pagination_incomplete/
+  );
 });
 
 test("account pagination uncertainty and incomplete provider data fail closed", async () => {
