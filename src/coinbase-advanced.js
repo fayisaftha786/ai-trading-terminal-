@@ -475,18 +475,22 @@ export async function previewCoinbaseAdvancedLimitBuy(
 
   if (selectedSide === "BUY") {
     if (compareDecimalStrings(quoteSize, product.quote_min_size) < 0 ||
-        compareDecimalStrings(quoteSize, product.quote_max_size) > 0 ||
-        !isIncrementMultiple(quoteSize, product.quote_increment)) {
-      return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_outside_exchange_limits_or_increment"], order_submission_available: false };
+        compareDecimalStrings(quoteSize, product.quote_max_size) > 0) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_outside_exchange_product_limits"], order_submission_available: false };
+    }
+    if (!isIncrementMultiple(quoteSize, product.quote_increment)) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["quote_size_not_aligned_to_exchange_increment"], order_submission_available: false };
     }
   } else {
     if (!validMoney(String(product.base_min_size || "")) ||
         !validMoney(String(product.base_max_size || "")) ||
         !validMoney(String(product.base_increment || "")) ||
         compareDecimalStrings(baseSize, product.base_min_size) < 0 ||
-        compareDecimalStrings(baseSize, product.base_max_size) > 0 ||
-        !isIncrementMultiple(baseSize, product.base_increment)) {
-      return { status: "blocked", decision: "NO_ORDER", blockers: ["base_size_limits_or_increment_unavailable_or_invalid"], order_submission_available: false };
+        compareDecimalStrings(baseSize, product.base_max_size) > 0) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["base_size_outside_exchange_product_limits"], order_submission_available: false };
+    }
+    if (!isIncrementMultiple(baseSize, product.base_increment)) {
+      return { status: "blocked", decision: "NO_ORDER", blockers: ["base_size_not_aligned_to_exchange_increment"], order_submission_available: false };
     }
   }
   if (!isIncrementMultiple(limitPrice, product.price_increment)) {
