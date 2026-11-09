@@ -287,7 +287,13 @@ export class TradingEngine extends DurableObject {
       if (request.method === "POST" && url.pathname === "/api/live/execute") {
         const settings = this.getState("settings") || {};
         if (normalizeTradingMode(settings.trading_mode) !== "real") {
-          return jsonResponse({ status: "blocked", blockers: ["real_mode_must_be_selected"], order_submission_available: false }, 409);
+          return jsonResponse({
+            status: "blocked",
+            blockers: ["real_mode_must_be_selected"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 409);
         }
         const executionStatus = coinbaseAdvancedStatus(this.env);
         if (!executionStatus.order_submission_configured) {
@@ -586,7 +592,13 @@ export class TradingEngine extends DurableObject {
         }
         const settings = this.getState("settings") || {};
         if (normalizeTradingMode(settings.trading_mode) !== "real") {
-          return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["real_mode_must_be_selected_before_order_preview"], order_submission_available: false }, 409);
+          return jsonResponse({
+            status: "blocked", decision: "NO_ORDER",
+            blockers: ["real_mode_must_be_selected_before_order_preview"],
+            order_submission_available: false,
+            live_trading_enabled: false,
+            automatic_live_entries_enabled: false
+          }, 409);
         }
         try {
           const result = await previewCoinbaseAdvancedLimitBuy(this.env, {
