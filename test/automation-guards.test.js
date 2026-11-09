@@ -262,3 +262,17 @@ test("market-universe gate rejects missing, future and stale latest closed candl
   staleSixHour.six_hour_audit_summary.last_closed_candle_ms = NOW - (9 * 3600000);
   assert.ok(assessMarketUniverse([staleSixHour], symbols, NOW).issues[0].reason.includes("6h_latest_closed_candle_stale"));
 });
+
+
+test("market-universe gate uses recent local quote receipt while preserving exchange timestamp validation", () => {
+  const market = healthyMarket("BTC/USD");
+  market.ticker_time = new Date(NOW - 5 * 60 * 1000).toISOString();
+  market.quote_received_at_ms = NOW - 1000;
+  assert.equal(assessMarketUniverse([market], ["BTC/USD"], NOW).healthy, true);
+
+  const staleReceipt = { ...market, quote_received_at_ms: NOW - 121000 };
+  assert.ok(assessMarketUniverse([staleReceipt], ["BTC/USD"], NOW).issues[0].reason.includes("ticker_stale"));
+
+  const futureEvent = { ...market, ticker_time: new Date(NOW + 6000).toISOString() };
+  assert.ok(assessMarketUniverse([futureEvent], ["BTC/USD"], NOW).issues[0].reason.includes("ticker_stale"));
+});
