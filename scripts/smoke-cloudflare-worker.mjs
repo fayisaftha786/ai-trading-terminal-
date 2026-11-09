@@ -183,7 +183,7 @@ try {
   const liveStatusResponse = await request("/api/live/status", { headers: auth });
   assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
   const liveStatus = await liveStatusResponse.json();
-  assert.equal(liveStatus.mode, "live_setup_locked");
+  assert.equal(liveStatus.mode, "live_manual_spot_only");
   assert.equal(liveStatus.order_submission_available, false);
   assert.equal(liveStatus.live_trading_enabled, false);
   assert.equal(liveStatus.automatic_live_entries_enabled, false);
@@ -197,11 +197,27 @@ try {
   assert.equal(livePreflight.status, "not_configured");
   assert.equal(livePreflight.order_submission_available, false);
 
-  const blockedLiveExecute = await request("/api/live/execute", {
+  const blockedLiveExecuteInDemo = await request("/api/live/execute", {
     method: "POST", headers: auth, body: JSON.stringify({ product_id: "BTC-USD", quote_size: "10" })
   });
-  assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
-  assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
+  assert.equal(blockedLiveExecuteInDemo.status, 409, "REAL order submission must never run while DEMO is selected");
+  assert.equal((await blockedLiveExecuteInDemo.json()).live_trading_enabled, false);
+
+  const selectRealForDisabledGate = await request("/api/trading/mode", {
+    method: "PUT", headers: auth, body: JSON.stringify({ mode: "real" })
+  });
+  assert.equal(selectRealForDisabledGate.status, 200);
+  const disabledRealExecute = await request("/api/live/execute", {
+    method: "POST", headers: auth, body: JSON.stringify({ product_id: "BTC-USD", quote_size: "10" })
+  });
+  assert.equal(disabledRealExecute.status, 423, "REAL execution must stay blocked while credentials and the explicit gate are absent");
+  assert.equal((await disabledRealExecute.json()).live_trading_enabled, false);
+
+  const returnDemoAfterRealGate = await request("/api/trading/mode", {
+    method: "PUT", headers: auth, body: JSON.stringify({ mode: "demo" })
+  });
+  assert.equal(returnDemoAfterRealGate.status, 200);
+  assert.equal((await returnDemoAfterRealGate.json()).paper_auto_enabled, false);
 
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
