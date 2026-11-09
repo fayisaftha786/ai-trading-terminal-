@@ -1,5 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
@@ -215,4 +217,20 @@ test("research lab blocks dirty and future confirmation candle histories", () =>
   assert.equal(future.status, "blocked");
   assert.equal(future.reason, "higher_timeframe_data_is_from_the_future");
   assert.equal(future.execution_authorized, false);
+});
+
+
+
+test("Cloudflare dashboard inline JavaScript parses before deployment", () => {
+  const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+  const scripts = [...html.matchAll(/<script([^>]*)>([\\s\\S]*?)<\\/script>/gi)]
+    .map((match) => match[2].trim())
+    .filter(Boolean);
+  assert.equal(scripts.length, 1, "expected the Cloudflare dashboard inline application script");
+  scripts.forEach((source, index) => {
+    assert.doesNotThrow(
+      () => new vm.Script(source, { filename: `public/index.html:inline-${index + 1}` }),
+      "Cloudflare dashboard inline JavaScript must remain syntactically valid"
+    );
+  });
 });
