@@ -70,6 +70,7 @@ try {
   assert.equal(health.scan_diagnostics.current_market_feed.healthy_market_count, 0);
   assert.equal(health.scan_diagnostics.current_market_feed.expected_market_count, 3);
   assert.deepEqual(health.scan_diagnostics.current_market_feed.issues, [
+    { symbol: null, reason: "market_universe_incomplete" },
     { symbol: "BTC/USD", reason: "market_snapshot_missing" },
     { symbol: "ETH/USD", reason: "market_snapshot_missing" },
     { symbol: "SOL/USD", reason: "market_snapshot_missing" }
