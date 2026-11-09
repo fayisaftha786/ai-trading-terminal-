@@ -18,6 +18,7 @@ import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResear
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
+import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -340,34 +341,19 @@ export class TradingEngine extends DurableObject {
           }, 423);
         }
         const previews = this.getState("coinbase_live_previews") || [];
-        const preview = previews.find((item) => item?.preview_token === previewToken);
-        if (!preview) {
-          return jsonResponse({ status: "blocked", blockers: ["server_preview_not_found_or_already_consumed"], order_submission_available: false }, 409);
+        const consume = consumeServerLivePreview(previews, previewToken, Date.now());
+        if (!consume.ok) {
+          this.setState("coinbase_live_previews", consume.previews.slice(0, 25));
+          const statusCode = consume.reason === "server_preview_expired_refresh_required" ? 410
+            : consume.reason === "preview_not_authorized_for_manual_live_submission" ? 423 : 409;
+          return jsonResponse({ status: "blocked", blockers: [consume.reason], order_submission_available: false }, statusCode);
         }
-        if (preview.status !== "READY") {
-          return jsonResponse({ status: "blocked", blockers: ["server_preview_already_consumed"], order_submission_available: false }, 409);
-        }
-        const nowMs = Date.now();
-        if (!Number.isFinite(preview.expires_at_ms) || preview.expires_at_ms <= nowMs ||
-            nowMs - Number(preview.created_at_ms) > 60_000) {
-          preview.status = "EXPIRED";
-          preview.expired_at_ms = nowMs;
-          this.setState("coinbase_live_previews", previews.slice(0, 25));
-          return jsonResponse({ status: "blocked", blockers: ["server_preview_expired_refresh_required"], order_submission_available: false }, 410);
-        }
-        if (preview.order_submission_available !== true ||
-            !preview.provider_preview_id || !preview.product_id ||
-            !["BUY", "SELL"].includes(preview.side) ||
-            !preview.limit_price || !preview.commission_total) {
-          return jsonResponse({ status: "blocked", blockers: ["preview_not_authorized_for_manual_live_submission"], order_submission_available: false }, 423);
-        }
+        const preview = consume.preview;
         // Consume synchronously before the first external await. A second
         // request cannot reuse this preview, including after an ambiguous
         // network outcome; ambiguous outcomes must be reconciled, never retried.
-        preview.status = "CONSUMED";
-        preview.consumed_at_ms = nowMs;
-        preview.consumed_by_client_order_id = clientOrderId;
-        this.setState("coinbase_live_previews", previews.slice(0, 25));
+        this.setState("coinbase_live_previews", consume.previews.slice(0, 25));
+        const nowMs = Date.now();
         const record = {
           client_order_id: clientOrderId,
           product_id: preview.product_id,
@@ -613,26 +599,13 @@ export class TradingEngine extends DurableObject {
           if (result.status !== "preview_ready") return jsonResponse(result);
           const nowMs = Date.now();
           const previewToken = crypto.randomUUID();
+          const previewRecord = createServerLivePreview(result, previewToken, nowMs);
+          if (!previewRecord) {
+            return jsonResponse({ status: "blocked", decision: "NO_ORDER", blockers: ["server_preview_record_invalid"], order_submission_available: false }, 502);
+          }
           const previews = (this.getState("coinbase_live_previews") || [])
             .filter((item) => item && item.status === "READY" && Number(item.expires_at_ms) > nowMs)
             .slice(0, 24);
-          const previewRecord = {
-            preview_token: previewToken,
-            status: "READY",
-            created_at_ms: nowMs,
-            expires_at_ms: nowMs + 60_000,
-            order_submission_available: result.order_submission_available === true,
-            product_id: result.product_id,
-            side: result.side,
-            quote_size: result.quote_size,
-            base_size: result.base_size,
-            limit_price: result.limit_price,
-            commission_total: result.commission_total,
-            provider_preview_id: result.preview_id,
-            quote_currency: result.quote_currency,
-            balance_currency: result.balance_currency,
-            order_type: result.order_type
-          };
           previews.unshift(previewRecord);
           this.setState("coinbase_live_previews", previews.slice(0, 25));
           return jsonResponse({
