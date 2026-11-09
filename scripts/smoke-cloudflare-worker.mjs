@@ -53,6 +53,11 @@ try {
   assert.equal(health.mode, "paper_only");
   assert.equal(health.live_trading_enabled, false);
   assert.equal(health.binance_testnet_enabled, false);
+  assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
+  assert.equal(health.scheduler.status, "starting", "scheduler must be explicit before its first alarm");
+  assert.equal(health.scheduler.last_alarm_age_ms, null, "alarm age must be null before the first alarm");
+  assert.equal(health.scheduler.last_scheduled_scan_status, "not_run");
+  assert.equal(health.scheduler.last_healthy_scan_age_ms, null);
   assert.ok(Object.hasOwn(health, "worker_version"), "health must expose deployment version metadata");
   assert.ok(
     health.worker_version === null ||
