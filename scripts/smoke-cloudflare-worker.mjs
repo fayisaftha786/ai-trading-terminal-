@@ -287,6 +287,11 @@ try {
   assert.match(staticHtml, /Live order submission unavailable/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
+  assert.match(staticHtml, /Paper equity curve/);
+  assert.match(staticHtml, /Actual stored portfolio snapshots/);
+  assert.match(staticHtml, /renderEquityHistory\(x\.equity_history\|\|\[\]\)/);
+  assert.match(staticHtml, /VERIFIED SAMPLES/);
+  assert.match(staticHtml, /no synthetic points/);
 
   process.stdout.write("CLOUDFLARE_LOCAL_RUNTIME_SMOKE_OK\n");
 } catch (error) {
