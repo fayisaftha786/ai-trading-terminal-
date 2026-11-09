@@ -14,7 +14,7 @@ import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearch
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
-import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, migratePaperAutomationSettings, shouldAutoResumeWatchdog } from "./paper-automation-profile.js";
+import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog } from "./paper-automation-profile.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -1778,8 +1778,12 @@ export class TradingEngine extends DurableObject {
       if (portfolio.weekly_equity_pnl_usd <= -(portfolio.initial_capital_usd * risk.max_weekly_loss_pct / 100)) reasons.push("weekly_loss_limit");
     }
     const dayStart = new Date(nowMs); dayStart.setUTCHours(0, 0, 0, 0);
-    const entriesToday = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()).toArray()[0]?.count || 0);
-    if (!getDailyCycleAllowance(entriesToday, PAPER_AUTOMATION_PROFILE.max_cycles_per_day).allowed) reasons.push("daily_cycle_cap");
+    const completedCyclesToday = countCompletedPaperCyclesInWindow(
+      this.sql, dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000
+    );
+    if (!getDailyCycleAllowance(completedCyclesToday, PAPER_AUTOMATION_PROFILE.max_cycles_per_day).allowed) {
+      reasons.push("daily_cycle_cap");
+    }
     const maxExposure = portfolio.equity_usd * risk.max_total_exposure_pct / 100;
     if (portfolio.exposure_usd >= maxExposure) reasons.push("max_exposure");
     return [...new Set(reasons)];
@@ -1944,10 +1948,10 @@ export class TradingEngine extends DurableObject {
     const nextAlarmAtMs = runtime.next_alarm_at_ms == null ? null : Number(runtime.next_alarm_at_ms);
     const dayStart = new Date(nowMs);
     dayStart.setUTCHours(0, 0, 0, 0);
-    const cyclesUsed = Number(this.sql.exec(
-      "SELECT COUNT(*) AS count FROM trades WHERE opened_at_ms>=?", dayStart.getTime()
-    ).toArray()[0]?.count || 0);
-    const cycleAllowance = getDailyCycleAllowance(cyclesUsed, PAPER_AUTOMATION_PROFILE.max_cycles_per_day);
+    const cyclesCompleted = countCompletedPaperCyclesInWindow(
+      this.sql, dayStart.getTime(), dayStart.getTime() + 24 * 60 * 60 * 1000
+    );
+    const cycleAllowance = getDailyCycleAllowance(cyclesCompleted, PAPER_AUTOMATION_PROFILE.max_cycles_per_day);
     const nextAlarmInMs = nextAlarmAtMs !== null && Number.isFinite(nextAlarmAtMs)
       ? Math.max(0, nextAlarmAtMs - nowMs) : null;
     const scheduler = deriveSchedulerStatus({
@@ -1965,6 +1969,7 @@ export class TradingEngine extends DurableObject {
       automatic_watchdog_recovery: true,
       daily_cycle_limit: cycleAllowance.limit,
       daily_cycles_used: cycleAllowance.used,
+      daily_cycles_basis: "completed_buy_sell_round_trips_by_sell_close_time_utc",
       daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       scanner_status: scheduler.status,
