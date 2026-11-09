@@ -11,6 +11,7 @@ import {
   deriveSchedulerStatus,
   normalizeProviderFailureRows,
   normalizeScanIssueRows,
+  mergeScanRuntimeState,
   parseScanIssueSummaries,
   runAfterActiveScan,
   shouldHaltPaperAutomation,
@@ -47,6 +48,59 @@ function healthyMarket(symbol) {
     }
   };
 }
+
+
+test("manual scans preserve scheduled completion, heartbeat and watchdog metadata", () => {
+  const previous = {
+    last_scheduled_alarm_at_ms: NOW - 90_000,
+    last_scheduled_scan_status: "completed",
+    last_scheduled_scan_error: null,
+    last_scheduled_scan_at_ms: NOW - 90_000,
+    last_scheduled_scan_healthy_market_count: 3,
+    last_scheduled_scan_expected_market_count: 3,
+    last_scheduled_scan_issues: [],
+    last_healthy_scheduled_scan_at_ms: NOW - 90_000,
+    healthy_scheduled_scan_streak: 4,
+    consecutive_unhealthy_scheduled_scans: 0,
+    next_alarm_at_ms: NOW + 30_000
+  };
+  const manualUpdate = {
+    source: "manual",
+    last_scan_at_ms: NOW,
+    last_scan_status: "completed",
+    healthy_market_count: 3,
+    expected_market_count: 3,
+    last_scheduled_scan_status: "not_run",
+    last_scheduled_scan_error: null
+  };
+  const merged = mergeScanRuntimeState(previous, manualUpdate, "manual");
+  for (const field of [
+    "last_scheduled_alarm_at_ms", "last_scheduled_scan_status",
+    "last_scheduled_scan_at_ms", "last_scheduled_scan_healthy_market_count",
+    "last_scheduled_scan_expected_market_count", "last_healthy_scheduled_scan_at_ms",
+    "healthy_scheduled_scan_streak", "consecutive_unhealthy_scheduled_scans",
+    "next_alarm_at_ms"
+  ]) assert.equal(merged[field], previous[field], field);
+  assert.equal(merged.last_scan_at_ms, NOW);
+  assert.equal(merged.source, "manual");
+});
+
+test("scheduled scans can update scheduler-owned metadata", () => {
+  const previous = {
+    last_scheduled_scan_status: "completed",
+    last_scheduled_scan_at_ms: NOW - 90_000,
+    last_scheduled_scan_healthy_market_count: 2
+  };
+  const scheduledUpdate = {
+    last_scheduled_scan_status: "running",
+    last_scheduled_scan_at_ms: NOW,
+    last_scheduled_scan_healthy_market_count: 3
+  };
+  assert.deepEqual(
+    mergeScanRuntimeState(previous, scheduledUpdate, "scheduled"),
+    scheduledUpdate
+  );
+});
 
 test("market-universe gate requires every configured market and clean closed candles", () => {
   const symbols = ["BTC/USD", "ETH/USD", "SOL/USD"];
