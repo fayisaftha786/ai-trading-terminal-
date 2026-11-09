@@ -253,7 +253,7 @@ test("preview blocks insufficient quote balance and provider preview errors", as
 test("account pagination uncertainty and incomplete provider data fail closed", async () => {
   const env = makeEnv();
   const fake = mockApi(env, {
-    accounts: { accounts: [], has_next: true, cursor: "next" }
+    accounts: { accounts: [], has_next: true }
   });
   const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
   assert.equal(result.status, "provider_check_failed");
