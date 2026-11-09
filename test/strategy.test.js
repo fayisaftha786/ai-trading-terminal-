@@ -343,10 +343,11 @@ test("engine persists entry venue and locks automatic and manual PAPER exits to 
 
 test("market regime classifier recognises directional trend without authorising a trade", () => {
   const now = Date.now();
+  const lastClosed = Math.floor(now / 3600000) * 3600000 - 3600000;
   const candles = Array.from({ length: 240 }, (_, index) => {
     const close = 100 + index * 0.2 + Math.sin(index / 7) * 0.03;
     return {
-      time: now - ((239 - index) * 3600000) - 3600000,
+      time: lastClosed - ((239 - index) * 3600000),
       open: close - 0.04,
       high: close + 0.08,
       low: close - 0.08,
@@ -367,10 +368,11 @@ test("market regime classifier recognises directional trend without authorising 
 
 test("market regime classifier distinguishes quiet choppy/range conditions from volatility expansion", () => {
   const now = Date.now();
+  const lastClosed = Math.floor(now / 3600000) * 3600000 - 3600000;
   const flat = Array.from({ length: 240 }, (_, index) => {
     const close = 100 + Math.sin(index * 1.7) * 0.08;
     return {
-      time: now - ((239 - index) * 3600000) - 3600000,
+      time: lastClosed - ((239 - index) * 3600000),
       open: close - 0.01,
       high: close + 0.1,
       low: close - 0.1,
