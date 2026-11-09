@@ -64,14 +64,18 @@ These checks do not certify a strategy. The archive must accumulate roughly 125 
 
 ## Current boundaries
 
-- Cloudflare Worker: PAPER only. Live exchange orders and Binance Testnet execution remain disabled.
-- Auto PAPER entry: defaults OFF and requires a separate owner opt-in after a fresh complete scheduled scan.
-- Market universe: BTC/USD, ETH/USD and SOL/USD.
-- Signal: deterministic 1H trend continuation with 6H confirmation; other strategy families remain research-only.
-- Exit: simulated on a Durable Object alarm; no guarantee of exact trigger-price fills.
-- 90-second cadence: proposed in PR #66, not yet confirmed in production.
-- Android v0.7.1 debug APK is older than the Cloudflare source and has not been physically installed/verified in this workflow.
-- PR #66 GitHub checks are being run independently of Cloudflare Workers Builds. The Cloudflare branch-build check currently fails without accessible logs; production deployment is not claimed.
+- This branch is PAPER-only for strategy automation. The Coinbase live-order route remains hard-locked with HTTP 423; no real order can be submitted from the automated strategy.
+- Fresh empty PAPER ledgers use a $10 virtual balance, one open position, an $8 notional ceiling (leaving $2 unallocated), and no more than five position openings per UTC day. Five is a hard ceiling, not a target.
+- New empty ledgers automatically start PAPER monitoring after the Durable Object alarm is initialized. The alarm runs a periodic 90-second scan/exit-monitor cycle; this is not a continuously running process, tick feed, or exchange WebSocket stream.
+- Three consecutive unhealthy scheduled scans pause new entries. The watchdog can resume after two consecutive complete healthy scheduled scans. Owner emergency stops and total-drawdown halts require explicit owner review and do not auto-resume.
+- Exits are simulated against fresh same-provider bid marks on a scheduled alarm; exact stop/target fills are not guaranteed. A network outage or stale quote can delay simulated exit detection.
+- The daily hard loss guard is 1% of the initial paper capital ($0.10 at $10), with a 75% soft pause ($0.075). These are simulation limits, not a cap on possible live-market loss.
+- Fee-aware sizing currently uses a conservative 60 bps/side paper fee placeholder, 10 bps/side slippage and the observed spread. It is not the account's verified Coinbase tier.
+- Automatic target selection compares the estimated round-trip costs, a fraction of the 1H ATR and a 1% minimum gross move; it rejects targets above 5%. This is a deterministic risk heuristic, not a prediction or probability.
+- Market decision data includes validated closed 1H/6H candles, EMA20/EMA50 trend, RSI14, ATR14, ADX14, directional movement, volume context, fresh quote, spread, order-book depth and provider consistency. The 1M/5M scanner remains research-only.
+- Not included as a production signal source: trained ML forecasts, news/sentiment, social/on-chain flows, tick-level order-book stream or exchange-native protective orders.
+- PR #66 changes are not production-deployed by this update. The Android v0.7.1 debug APK is older than the Cloudflare source and has not been physically installed/verified in this workflow.
+- CI and local Cloudflare Worker smoke tests must pass before merge/deploy. No production deployment is claimed.
 
 ## Official references
 
@@ -172,3 +176,12 @@ The Coinbase Advanced Trade v3 adapter supports a deliberately narrow real-order
 - Fill-level accounting and daily realized-loss automation are not yet complete. Therefore automatic live entries remain OFF and this phase is not unattended/fully automated trading.
 
 Required Cloudflare secrets/vars are listed in .env.example. Keep COINBASE_ADVANCED_ORDER_ENABLED=false until the account's Advanced Trade API is eligible and the owner has independently reviewed limits. Never enable Transfer permission or put private keys in Git, browser storage, or chat.
+
+
+## Continuous small-capital PAPER automation profile
+
+The small-capital profile is implemented in `src/paper-automation-profile.js` and wired into the Durable Object engine. It preserves historical paper ledgers: an old $100 ledger containing trades is not silently rebased to $10; it is paused for owner review. An empty legacy ledger can migrate safely to the $10 profile. The dashboard exposes the schedule heartbeat, current halt reason, daily opening count and remaining allowance.
+
+Automation is periodic, not a daemon that holds a process open continuously. The Durable Object alarm fetches public market data and evaluates existing paper exits and new entries every 90 seconds. It reschedules itself after each invocation, including handled scan failures. Cloudflare platform availability, worker errors and external data-provider downtime can still interrupt this loop. Open paper positions are only checked when a fresh compatible market snapshot is available.
+
+The decision engine is a transparent indicator/rule system rather than a trained ML model. A score is a rule score, not a probability of profit. News, sentiment, social activity, on-chain flows and real-time WebSocket order-book pressure are not currently part of the entry decision. The 1M/5M micro-scalping module remains research-only and is deliberately not connected to automatic position creation.
