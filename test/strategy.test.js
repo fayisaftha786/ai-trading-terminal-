@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "../src/strategy.js";
+import { ema, rsiWilder, auditCandles, analyzeTimeframe, classifyMarketRegime, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
   return Array.from({ length: count }, (_, index) => {
@@ -338,4 +338,68 @@ test("engine persists entry venue and locks automatic and manual PAPER exits to 
   assert.match(engineSource, /buildPositionLockedBidMarks\(markets, Date\.now\(\)\)/);
   assert.match(engineSource, /same_entry_provider_quote_required/);
   assert.match(engineSource, /close_market_data_provider/);
+});
+
+
+test("market regime classifier recognises directional trend without authorising a trade", () => {
+  const now = Date.now();
+  const candles = Array.from({ length: 240 }, (_, index) => {
+    const close = 100 + index * 0.2 + Math.sin(index / 7) * 0.03;
+    return {
+      time: now - ((239 - index) * 3600000) - 3600000,
+      open: close - 0.04,
+      high: close + 0.08,
+      low: close - 0.08,
+      close,
+      volume: 1000 + (index % 5) * 10
+    };
+  });
+  const audit = auditCandles(candles, 3600000, now, 150);
+  const result = classifyMarketRegime(audit, 3600000);
+  assert.equal(result.status, "classified");
+  assert.equal(result.regime, "TRENDING_UP");
+  assert.equal(result.direction, "UP");
+  assert.ok(result.directional_efficiency_24 > 0.8);
+  assert.ok(result.evidence.includes("adx_directional_strength"));
+  assert.equal(result.method, "rule_based_closed_ohlcv_regime_v1");
+  assert.ok(result.caveat.includes("not forecasts"));
+});
+
+test("market regime classifier distinguishes quiet choppy/range conditions from volatility expansion", () => {
+  const now = Date.now();
+  const flat = Array.from({ length: 240 }, (_, index) => {
+    const close = 100 + Math.sin(index * 1.7) * 0.08;
+    return {
+      time: now - ((239 - index) * 3600000) - 3600000,
+      open: close - 0.01,
+      high: close + 0.1,
+      low: close - 0.1,
+      close,
+      volume: 1000
+    };
+  });
+  const flatAudit = auditCandles(flat, 3600000, now, 150);
+  const flatResult = classifyMarketRegime(flatAudit);
+  assert.ok(["CHOPPY", "RANGING"].includes(flatResult.regime));
+
+  const volatile = flat.map((bar, index) => index > 225 ? {
+    ...bar,
+    high: bar.close + 2.5,
+    low: bar.close - 2.5
+  } : bar);
+  const volatileAudit = auditCandles(volatile, 3600000, now, 150);
+  const volatileResult = classifyMarketRegime(volatileAudit);
+  assert.equal(volatileResult.regime, "HIGH_VOLATILITY");
+  assert.ok(volatileResult.atr_percentile_lookback >= 90 ||
+    volatileResult.atr_expansion_ratio >= 1.8);
+});
+
+test("market regime classifier fails closed for missing, invalid and discontinuous candle data", () => {
+  assert.equal(classifyMarketRegime(null).regime, "UNCLASSIFIED");
+  const now = Date.now();
+  const broken = makeCandles(100, 3600000, now - (101 * 3600000));
+  broken.splice(25, 1);
+  const result = classifyMarketRegime(auditCandles(broken, 3600000, now, 80));
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.regime, "UNCLASSIFIED");
 });
