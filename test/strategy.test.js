@@ -282,3 +282,20 @@ test("candidate gate blocks a newly retrieved quote when no recent exchange trad
   assert.equal(result.eligible, false);
   assert.equal(result.reason, "ticker_stale_or_timestamp_invalid");
 });
+
+
+test("fresh received bid can still mark an open PAPER position when exchange event time is missing", () => {
+  const now = Date.now();
+  const market = {
+    symbol: "ETH/USD",
+    status: "live",
+    quote_received_at_ms: now - 500,
+    bid: 2000,
+    ask: 2000.1
+  };
+  assert.equal(isFreshBidQuote(market, now), true);
+  assert.deepEqual([...buildFreshBidMarks([market], now).entries()], [["ETH/USD", 2000]]);
+  const oldSchema = { ...market };
+  delete oldSchema.quote_received_at_ms;
+  assert.equal(isFreshBidQuote(oldSchema, now), false);
+});
