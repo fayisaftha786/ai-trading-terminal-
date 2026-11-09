@@ -5,6 +5,7 @@ import {
   PAPER_AUTOMATION_RISK,
   calculateDynamicTakeProfit,
   getDailyCycleAllowance,
+  countCompletedPaperCyclesInWindow,
   migratePaperAutomationSettings,
   shouldAutoResumeWatchdog
 } from "../src/paper-automation-profile.js";
@@ -68,7 +69,7 @@ test("dynamic take-profit rejects invalid costs and extreme targets", () => {
   assert.equal(calculateDynamicTakeProfit({ atrPct: 0, roundTripCostBps: 100 }).ok, false);
 });
 
-test("daily cycle allowance stops at five openings and never forces a trade", () => {
+test("daily cycle allowance stops at five completed BUY/SELL cycles and never forces a trade", () => {
   assert.deepEqual(getDailyCycleAllowance(0), { limit: 5, used: 0, remaining: 5, allowed: true });
   assert.deepEqual(getDailyCycleAllowance(4), { limit: 5, used: 4, remaining: 1, allowed: true });
   assert.deepEqual(getDailyCycleAllowance(5), { limit: 5, used: 5, remaining: 0, allowed: false });
@@ -88,4 +89,34 @@ test("watchdog pause auto-recovers after two healthy scheduled scans but manual 
   assert.equal(shouldAutoResumeWatchdog({
     halted: false, haltReason: "market_data_watchdog", healthyScheduledScanStreak: 10
   }), false);
+});
+
+
+test("daily cycle count includes only SELL-completed positions inside the UTC day window", () => {
+  const calls = [];
+  const sql = {
+    exec(statement, startMs, endMs) {
+      calls.push({ statement, startMs, endMs });
+      return { toArray: () => [{ count: 2 }] };
+    }
+  };
+  const count = countCompletedPaperCyclesInWindow(sql, 1000, 2000);
+  assert.equal(count, 2);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].statement, /status='CLOSED'/);
+  assert.match(calls[0].statement, /closed_at_ms>=\?/);
+  assert.match(calls[0].statement, /closed_at_ms<\?/);
+  assert.deepEqual([calls[0].startMs, calls[0].endMs], [1000, 2000]);
+});
+
+test("daily cycle counting fails closed when the ledger count is malformed", () => {
+  const sql = { exec: () => ({ toArray: () => [{ count: "not-a-count" }] }) };
+  assert.throws(
+    () => countCompletedPaperCyclesInWindow(sql, 1000, 2000),
+    /paper_cycle_count_unavailable/
+  );
+  assert.throws(
+    () => countCompletedPaperCyclesInWindow(sql, 2000, 1000),
+    /paper_cycle_count_window_invalid/
+  );
 });
