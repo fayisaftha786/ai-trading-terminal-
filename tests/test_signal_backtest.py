@@ -135,7 +135,7 @@ def test_signal_backtest_uses_actual_six_hour_confirmation_interval(monkeypatch)
     primary = _candles(300, interval_1h, base,
                        drift=0.02, amplitude=0.8, noise=0.1, seed=21)
     # 150 valid 6h bars end before the final historical primary decision point.
-    higher = _candles(150, interval_6h, base - 606 * interval_1h,
+    higher = _candles(180, interval_6h, base - 786 * interval_1h,
                       drift=0.08, amplitude=1.5, noise=0.2, seed=22)
     observed_bars_per_day = []
 
