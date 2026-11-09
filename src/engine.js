@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, fetchBitstampResearchHistory, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
@@ -26,6 +26,7 @@ export class TradingEngine extends DurableObject {
     super(ctx, env);
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
+    this.researchBackfillPromise = null;
     const schemaStatements = [
       "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL)",
@@ -281,6 +282,30 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/research/tournament") {
         return jsonResponse(this.researchTournament());
       }
+      if (request.method === "POST" && url.pathname === "/api/research/backfill") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request_body" }, 400); }
+        const selected = PRODUCTS.find((item) => item.symbol === body?.symbol);
+        if (!selected) return jsonResponse({ error: "configured_market_symbol_required" }, 400);
+        if (this.scanPromise || this.researchBackfillPromise) {
+          return jsonResponse({ error: "scan_or_research_backfill_in_progress" }, 409);
+        }
+        const task = this.backfillBitstampResearchHistory(selected);
+        this.researchBackfillPromise = task.finally(() => { this.researchBackfillPromise = null; });
+        try {
+          return jsonResponse(await this.researchBackfillPromise);
+        } catch (error) {
+          this.logEvent("research_backfill_error", "Historical research backfill failed", {
+            symbol: selected.symbol,
+            error_code: typeof error?.code === "string" ? error.code.slice(0, 80) : "research_backfill_failed"
+          });
+          return jsonResponse({
+            error: "research_backfill_failed",
+            detail: String(error?.message || error).slice(0, 180),
+            code: typeof error?.code === "string" ? error.code.slice(0, 80) : null
+          }, Number(error?.status) >= 400 && Number(error?.status) < 500 ? Number(error.status) : 502);
+        }
+      }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
       }
@@ -386,7 +411,7 @@ export class TradingEngine extends DurableObject {
     const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
       const result = await runAfterActiveScan(
-        () => this.scanPromise,
+        () => this.scanPromise || this.researchBackfillPromise,
         () => this.runCycle("scheduled", cycleKey)
       );
       const runtime = this.getState("runtime") || {};
@@ -471,6 +496,9 @@ export class TradingEngine extends DurableObject {
   }
 
   async runCycle(source, cycleKey = null) {
+    if (this.researchBackfillPromise) {
+      await this.researchBackfillPromise.catch(() => null);
+    }
     if (this.scanPromise) return this.scanPromise;
     this.scanPromise = this.performCycle(source, cycleKey).finally(() => { this.scanPromise = null; });
     return this.scanPromise;
