@@ -74,6 +74,7 @@ test("daily cycle allowance stops at five completed BUY/SELL cycles and never fo
   assert.deepEqual(getDailyCycleAllowance(4), { limit: 5, used: 4, remaining: 1, allowed: true });
   assert.deepEqual(getDailyCycleAllowance(5), { limit: 5, used: 5, remaining: 0, allowed: false });
   assert.equal(getDailyCycleAllowance(100).allowed, false);
+  assert.equal(getDailyCycleAllowance(Number.NaN).allowed, false, "an unreadable completed-cycle count must pause new entries");
 });
 
 test("watchdog pause auto-recovers after two healthy scheduled scans but manual halt does not", () => {
