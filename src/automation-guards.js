@@ -469,3 +469,33 @@ export async function runAfterActiveScan(getActiveScan, startScheduledScan) {
     }
   }
 }
+
+
+/**
+ * Manual scans update current market diagnostics but must never erase scheduler-owned
+ * heartbeat, completion, or watchdog state. Scheduled scans may update their own state.
+ */
+export function mergeScanRuntimeState(previousRuntime, nextRuntime, source) {
+  const previous = previousRuntime && typeof previousRuntime === "object" ? previousRuntime : {};
+  const next = nextRuntime && typeof nextRuntime === "object" ? nextRuntime : {};
+  const merged = { ...previous, ...next };
+  if (source !== "scheduled") {
+    const schedulerFields = [
+      "last_scheduled_alarm_at_ms",
+      "last_scheduled_scan_status",
+      "last_scheduled_scan_error",
+      "last_scheduled_scan_at_ms",
+      "last_scheduled_scan_healthy_market_count",
+      "last_scheduled_scan_expected_market_count",
+      "last_scheduled_scan_issues",
+      "last_healthy_scheduled_scan_at_ms",
+      "healthy_scheduled_scan_streak",
+      "consecutive_unhealthy_scheduled_scans"
+    ];
+    for (const field of schedulerFields) {
+      if (Object.prototype.hasOwnProperty.call(previous, field)) merged[field] = previous[field];
+      else delete merged[field];
+    }
+  }
+  return merged;
+}
