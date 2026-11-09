@@ -167,8 +167,77 @@ export class TradingEngine extends DurableObject {
         const allowedScanStatuses = new Set(["running", "completed", "partial", "unavailable", "error"]);
         const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
           ? runtime.last_scheduled_scan_status : "not_run";
+        const currentMarkets = this.getMarkets().slice(0, PRODUCTS.length);
         const diagnosticIssues = normalizeScanIssueRows(runtime);
         const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
+        const safeDiagnosticCode = (value) => typeof value === "string" &&
+          /^[a-z0-9_]{1,80}$/.test(value) ? value : null;
+        const marketDataProviders = currentMarkets.map((market) => {
+          const quality = market.data_quality || {};
+          const quoteReceivedAtMs = Number(market.quote_received_at_ms);
+          const bookRetrievedAtMs = Number(market.book_retrieved_at_ms);
+          const bookEventTimeMs = Number(market.book_event_time_ms);
+          const oneHourClosedAtMs = Number(market.one_hour_audit_summary?.last_closed_candle_ms) + 3600000;
+          const sixHourClosedAtMs = Number(market.six_hour_audit_summary?.last_closed_candle_ms) + 21600000;
+          return {
+            symbol: typeof market.symbol === "string" ? market.symbol.slice(0, 24) : null,
+            status: market.status === "live" ? "live" : "error",
+            provider: safeDiagnosticCode(market.market_data_provider),
+            failover_used: quality.failover_used === true,
+            failover_attempted: quality.failover_attempted === true,
+            failover_reason: safeDiagnosticCode(quality.failover_reason),
+            failover_error: safeDiagnosticCode(quality.failover_error),
+            primary_provider_error: safeDiagnosticCode(quality.primary_provider_error),
+            quote_age_ms: Number.isFinite(quoteReceivedAtMs) && quoteReceivedAtMs > 0
+              ? Math.max(0, nowMs - quoteReceivedAtMs) : null,
+            book_age_ms: Number.isFinite(bookRetrievedAtMs) && bookRetrievedAtMs > 0
+              ? Math.max(0, nowMs - bookRetrievedAtMs) : null,
+            book_event_age_ms: Number.isFinite(bookEventTimeMs) && bookEventTimeMs > 0
+              ? Math.max(0, nowMs - bookEventTimeMs) : null,
+            book_status: safeDiagnosticCode(quality.book_status) || "unknown",
+            book_error: safeDiagnosticCode(quality.book_error),
+            one_hour_refresh_status: safeDiagnosticCode(quality.one_hour_refresh_status),
+            one_hour_refresh_error: safeDiagnosticCode(quality.one_hour_refresh_error),
+            one_hour_closed_age_ms: Number.isFinite(oneHourClosedAtMs) && oneHourClosedAtMs > 0
+              ? Math.max(0, nowMs - oneHourClosedAtMs) : null,
+            six_hour_refresh_status: safeDiagnosticCode(quality.six_hour_refresh_status),
+            six_hour_refresh_error: safeDiagnosticCode(quality.six_hour_refresh_error),
+            six_hour_closed_age_ms: Number.isFinite(sixHourClosedAtMs) && sixHourClosedAtMs > 0
+              ? Math.max(0, nowMs - sixHourClosedAtMs) : null,
+            entry_ready: market.entry_gate?.eligible === true
+          };
+        });
+        const currentProviderFailures = currentMarkets.flatMap((market) => {
+          const quality = market.data_quality || {};
+          const failures = [];
+          if (market.status !== "live") {
+            failures.push({
+              symbol: market.symbol,
+              reason: safeDiagnosticCode(market.error_code) || "provider_unavailable",
+              primary_error_code: safeDiagnosticCode(market.primary_error_code),
+              backup_error_code: safeDiagnosticCode(market.backup_error_code)
+            });
+          }
+          if (quality.book_status === "provider_error" || quality.book_status === "invalid_or_missing") {
+            failures.push({
+              symbol: market.symbol,
+              reason: safeDiagnosticCode(quality.book_error) || "orderbook_unavailable"
+            });
+          }
+          if (quality.one_hour_refresh_error && market.one_hour_audit_summary?.ok !== true) {
+            failures.push({
+              symbol: market.symbol,
+              reason: safeDiagnosticCode(quality.one_hour_refresh_error) || "one_hour_candle_provider_error"
+            });
+          }
+          if (quality.six_hour_refresh_error && market.six_hour_audit_summary?.ok !== true) {
+            failures.push({
+              symbol: market.symbol,
+              reason: safeDiagnosticCode(quality.six_hour_refresh_error) || "six_hour_candle_provider_error"
+            });
+          }
+          return failures;
+        });
         const diagnostics = {
           last_scan_status: runtime.last_scan_status || "not_started",
           last_scan_age_ms: Number.isFinite(Number(runtime.last_scan_at_ms)) && Number(runtime.last_scan_at_ms) > 0
@@ -179,20 +248,20 @@ export class TradingEngine extends DurableObject {
           healthy_market_count: Number(runtime.healthy_market_count) || 0,
           expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
           consecutive_unhealthy_scheduled_scans: Number(runtime.consecutive_unhealthy_scheduled_scans) || 0,
-          issues: (Array.isArray(runtime.market_feed_issues) ? runtime.market_feed_issues : [])
-            .slice(0, 6)
-            .map((issue) => ({
-              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
-              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
-            })),
           issues: diagnosticIssues
             .slice(0, 6)
             .map((issue) => ({
               symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
               reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
             })),
-          provider_failures: diagnosticProviderFailures
-            .slice(0, 3)
+          provider_failures: [
+            ...currentProviderFailures,
+            ...diagnosticProviderFailures
+          ]
+            .filter((failure, index, rows) =>
+              rows.findIndex((item) => item.symbol === failure.symbol && item.reason === failure.reason) === index
+            )
+            .slice(0, 6)
             .map((failure) => ({
               symbol: typeof failure?.symbol === "string" ? failure.symbol.slice(0, 24) : null,
               reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 120) : "unknown",
@@ -202,9 +271,7 @@ export class TradingEngine extends DurableObject {
                 ? failure.backup_error_code.slice(0, 80) : null,
               inferred_from_scan_summary: failure?.inferred_from_scan_summary === true
             })),
-          market_data_providers: (Array.isArray(runtime.market_data_providers) ? runtime.market_data_providers : [])
-            .slice(0, 3)
-            .map((item) => ({
+          market_data_providers: marketDataProviders.map((item) => ({
               symbol: typeof item?.symbol === "string" ? item.symbol.slice(0, 24) : null,
               status: typeof item?.status === "string" ? item.status.slice(0, 24) : "unknown",
               provider: typeof item?.provider === "string" ? item.provider.slice(0, 40) : null,
@@ -214,9 +281,19 @@ export class TradingEngine extends DurableObject {
                 ? item.failover_reason.slice(0, 80) : null,
               failover_error: typeof item?.failover_error === "string"
                 ? item.failover_error.slice(0, 80) : null,
-              primary_provider_error: typeof item?.primary_provider_error === "string"
-                ? item.primary_provider_error.slice(0, 80) : null,
-              entry_ready: item?.entry_ready === true
+              primary_provider_error: item.primary_provider_error,
+              quote_age_ms: item.quote_age_ms,
+              book_age_ms: item.book_age_ms,
+              book_event_age_ms: item.book_event_age_ms,
+              book_status: item.book_status,
+              book_error: item.book_error,
+              one_hour_refresh_status: item.one_hour_refresh_status,
+              one_hour_refresh_error: item.one_hour_refresh_error,
+              one_hour_closed_age_ms: item.one_hour_closed_age_ms,
+              six_hour_refresh_status: item.six_hour_refresh_status,
+              six_hour_refresh_error: item.six_hour_refresh_error,
+              six_hour_closed_age_ms: item.six_hour_closed_age_ms,
+              entry_ready: item.entry_ready
             }))
         };
         return jsonResponse({
@@ -514,6 +591,7 @@ export class TradingEngine extends DurableObject {
           bid_depth_quote: snapshot.bid_depth_quote,
           ask_depth_quote: snapshot.ask_depth_quote,
           book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
+          book_event_time_ms: snapshot.book_event_time_ms ?? null,
           book_age_ms: snapshot.book_age_ms,
           book_sequence: snapshot.book_sequence,
           data_quality: snapshot.data_quality,
