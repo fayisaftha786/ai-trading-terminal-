@@ -408,7 +408,10 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       blockers: blocking
     };
   } catch (error) {
-    const code = typeof error?.code === "string" ? error.code : "coinbase_advanced_preflight_failed";
+    const messageCode = typeof error?.message === "string" &&
+      /^[a-z0-9_]{1,100}$/.test(error.message) ? error.message : null;
+    const code = typeof error?.code === "string" ? error.code
+      : messageCode || "coinbase_advanced_preflight_failed";
     return {
       ...staticStatus,
       status: "provider_check_failed",
