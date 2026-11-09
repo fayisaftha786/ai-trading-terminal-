@@ -214,8 +214,10 @@ try {
     method: "POST", headers: auth,
     body: JSON.stringify({ confirm_real_order: true, client_order_id: "12345678-1234-1234-1234-123456789012", preview_token: "00000000-0000-4000-8000-000000000000", product_id: "BTC-USD", quote_size: "10" })
   });
-  assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
-  assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
+  assert.equal(blockedLiveExecute.status, 409, "manual REAL execution must require REAL mode before all other checks");
+  const blockedLiveBody = await blockedLiveExecute.json();
+  assert.ok(blockedLiveBody.blockers.includes("real_mode_must_be_selected"));
+  assert.equal(blockedLiveBody.live_trading_enabled, false);
 
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
