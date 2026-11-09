@@ -133,7 +133,7 @@ try {
   assert.equal(dashboardResponse.status, 200, "owner dashboard must load");
   const dashboard = await dashboardResponse.json();
   assert.equal(dashboard.mode, "paper_only");
-  assert.equal(dashboard.settings.auto_paper_enabled, true, "the owner-requested paper automation profile must start ON");
+  assert.equal(dashboard.settings.auto_paper_enabled, false, "automatic PAPER entries must start OFF until the owner explicitly opts in");
   assert.equal(dashboard.settings.paper_initial_capital_usd, 10, "fresh paper profile must use ten dollars");
   assert.equal(dashboard.settings.risk.max_open_positions, 1, "only one sequential paper position is allowed");
   assert.equal(dashboard.settings.risk.max_position_notional_usd, 8, "position notional must leave a two-dollar reserve");
@@ -194,7 +194,7 @@ try {
   assert.equal(tournament.assets.length, 3);
   assert.ok(tournament.assets.every((asset) => asset.exploratory.ok === false));
   const settingsAfterResearch = await request("/api/automation/paper-trading", { headers: auth }).then((r) => r.json());
-  assert.equal(settingsAfterResearch.enabled, true, "read-only research must not disable the owner-enabled paper automation");
+  assert.equal(settingsAfterResearch.enabled, false, "read-only research must not enable PAPER automation by itself");
 
   const enableWithoutFreshScan = await request("/api/automation/paper-trading", {
     method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
