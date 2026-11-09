@@ -422,3 +422,24 @@ export function summarizeCurrentProviderFailures(markets) {
     return failures;
   }).slice(0, 6);
 }
+
+
+/**
+ * Do not let a scheduled alarm reuse an in-flight manual scan as its own
+ * scheduled result. Wait for all currently active scans, then synchronously
+ * start the scheduled scan through the provided callback.
+ */
+export async function runAfterActiveScan(getActiveScan, startScheduledScan) {
+  if (typeof getActiveScan !== "function" || typeof startScheduledScan !== "function") {
+    throw new TypeError("scan callbacks are required");
+  }
+  while (true) {
+    const activeScan = getActiveScan();
+    if (!activeScan) return startScheduledScan();
+    try {
+      await activeScan;
+    } catch {
+      // The scheduled scan must still run after a failed manual scan.
+    }
+  }
+}
