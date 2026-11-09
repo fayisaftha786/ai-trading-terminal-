@@ -65,7 +65,7 @@ try {
   assert.ok(Object.hasOwn(health, "scheduler"), "public health must expose safe scheduler telemetry");
   assert.ok(Object.hasOwn(health, "scan_diagnostics"), "public health must expose safe scan diagnostics");
   assert.equal(health.scan_diagnostics.last_scan_status, "not_started");
-  assert.equal(health.scan_diagnostics.expected_market_count, 3);
+  assert.equal(health.scan_diagnostics.last_scan_expected_market_count, 3);
   assert.equal(health.scan_diagnostics.current_market_feed.status, "unavailable");
   assert.equal(health.scan_diagnostics.current_market_feed.healthy_market_count, 0);
   assert.equal(health.scan_diagnostics.current_market_feed.expected_market_count, 3);
