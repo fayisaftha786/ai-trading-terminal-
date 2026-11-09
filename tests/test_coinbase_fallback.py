@@ -85,6 +85,8 @@ def test_coinbase_ohlcv_fallback_uses_exact_six_hour_confirmation(monkeypatch):
 
     assert result["status"] == "live"
     assert result["provider"] == "coinbase_public_fallback"
+    assert result["provider_symbol"] == "BTC-USD"
+    assert result["quote_currency"] == "USD"
     assert result["higher_timeframe"]["timeframe"] == "6h"
     assert result["higher_timeframe_interval_ms"] == 6 * 3_600_000
     assert result["data_quality"]["contiguous_closed_candles"] is True
@@ -156,3 +158,47 @@ def test_primary_ccxt_market_rows_record_actual_provider_and_quote_currency(monk
     assert result["exchange"] == "binance"
     assert result["markets"][0]["market_data_provider"] == "binance"
     assert result["markets"][0]["quote_currency"] == "USDT"
+
+
+
+def test_primary_ccxt_strategy_rows_record_provider_and_quote_currency(monkeypatch):
+    import sys
+    import types
+
+    class FakeExchange:
+        markets = {"BTC/USDT": {}}
+
+        async def load_markets(self):
+            return self.markets
+
+        async def fetch_ohlcv(self, _symbol, timeframe, limit):
+            interval = {"1h": 3_600_000, "4h": 14_400_000}[timeframe]
+            now_ms = int(time.time() * 1000)
+            last_open = (now_ms // interval) * interval - interval
+            count = min(limit, 160)
+            start = last_open - ((count - 1) * interval)
+            rows = []
+            for index in range(count):
+                close = 100.0 + index * 0.1
+                rows.append([start + index * interval, close - 0.1, close + 0.4, close - 0.4, close, 1000.0])
+            return rows
+
+        async def close(self):
+            return None
+
+    package = types.ModuleType("ccxt")
+    package.__path__ = []
+    async_support = types.ModuleType("ccxt.async_support")
+    async_support.binance = lambda _config: FakeExchange()
+    package.async_support = async_support
+    monkeypatch.setitem(sys.modules, "ccxt", package)
+    monkeypatch.setitem(sys.modules, "ccxt.async_support", async_support)
+
+    config = replace(settings, cex_exchange="binance", cex_symbols=("BTC/USDT",))
+    service = MarketDataService(config)
+    result = asyncio.run(service.cex_strategy_data("BTC/USDT", timeframe="1h", limit=300))
+
+    assert result["status"] == "live"
+    assert result["provider"] == "binance"
+    assert result["provider_symbol"] == "BTC/USDT"
+    assert result["quote_currency"] == "USDT"

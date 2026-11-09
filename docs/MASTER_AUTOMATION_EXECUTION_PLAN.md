@@ -54,6 +54,10 @@ The research tournament must reject malformed OHLCV rows, null/empty numeric fie
 
 Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger instead of Worker-isolate memory. The ledger stores a keyed HMAC-SHA-256 source-IP fingerprint, allows at most eight attempts in a rolling ten-minute window, clears the source counter after successful authentication, and fails closed if the limiter is unavailable. Regression coverage must verify the threshold, source isolation and successful-login reset in the local Cloudflare runtime smoke test.
 
+## Phase 2 market-data source integrity
+
+The GitHub read-only scanner must not combine a ticker from one exchange/quote currency with OHLCV candles from another. Every result reports the ticker provider, strategy-candle provider, and both quote currencies. A signal is forced to HOLD unless provider and quote currency match exactly and the market is fresh with contiguous closed candles. Coinbase fallback is allowed for read-only diagnostics, but it cannot supply a signal for a Binance market unless the ticker side also comes from the same Coinbase USD source.
+
 ## Next verification after deployment
 
 - Confirm the Worker remains healthy and authentication rejects bad passwords/tokens.

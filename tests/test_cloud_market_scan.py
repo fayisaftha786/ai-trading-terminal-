@@ -1,4 +1,4 @@
-from scripts.cloud_market_scan import market_is_fresh, ticker_age_ms
+from scripts.cloud_market_scan import compare_market_sources, market_is_fresh, ticker_age_ms
 
 
 def test_market_is_fresh_requires_live_and_recent_timestamp():
@@ -20,3 +20,41 @@ def test_market_is_fresh_rejects_missing_invalid_and_far_future_timestamp():
 def test_ticker_age_ms_returns_none_for_non_finite_values():
     assert ticker_age_ms(float("nan"), 1_800_000_000_000) is None
     assert ticker_age_ms(float("inf"), 1_800_000_000_000) is None
+
+
+
+def test_market_sources_must_match_provider_and_quote_currency():
+    same_source = compare_market_sources(
+        {"market_data_provider": "binance", "quote_currency": "USDT"},
+        {"provider": "binance", "quote_currency": "USDT"},
+        "binance",
+    )
+    assert same_source["matched"] is True
+    assert same_source["issues"] == []
+
+    mismatched_provider = compare_market_sources(
+        {"market_data_provider": "binance", "quote_currency": "USDT"},
+        {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
+        "binance",
+    )
+    assert mismatched_provider["matched"] is False
+    assert "provider_mismatch:ticker=binance,strategy=coinbase_public_fallback" in mismatched_provider["issues"]
+    assert "quote_currency_mismatch:ticker=USDT,strategy=USD" in mismatched_provider["issues"]
+
+    unknown_source = compare_market_sources(
+        {"quote_currency": "USDT"},
+        {"quote_currency": "USDT"},
+        None,
+    )
+    assert unknown_source["matched"] is False
+    assert "ticker_provider_missing" in unknown_source["issues"]
+    assert "strategy_provider_missing" in unknown_source["issues"]
+
+
+def test_coinbase_fallback_is_consistent_when_both_ticker_and_candles_use_usd():
+    result = compare_market_sources(
+        {"market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
+        {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
+        "binance",
+    )
+    assert result["matched"] is True
