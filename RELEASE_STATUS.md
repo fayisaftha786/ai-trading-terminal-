@@ -34,7 +34,7 @@
 
 A further PAPER entry hardening fix was merged in PR #28 (main commit `99532b93b09c8a55543bea6b2d9a79cb3856cd97`): the last closed 1h analysis is limited to 90 minutes of age and the 6h confirmation to 7 hours; missing/non-finite timeframe metrics and invalid fee/slippage assumptions fail closed. Regression tests cover stale candles and invalid assumptions. The PR validation and post-merge `main` validation both passed syntax checks, unit tests, Wrangler dry-run build and local Durable Object/authentication/kill-switch smoke test. This is a Cloud Worker change and does not require an Android APK rebuild.
 
-**Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
+**Not verified:** physical installation on the owner's Vivo device, exact deployed Cloudflare Git commit (the version tag is blank), repeat 15-minute alarm cadence, regional Coinbase access from that account or a forward paper-trading sample.
 
 ## Latest market scan — 2026-11-09 04:24:09 UTC
 
@@ -50,7 +50,7 @@ All three markets were fresh and had 349 clean closed candles on both 1H and 6H,
 
 ## Cloud backend status
 
-**Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. However, `worker_version.tag` is blank and the public health response does not include the scheduler telemetry now present in source. The endpoint is therefore reachable, but current-main production deployment and real alarm cadence remain **unverified**.
+**Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. The `worker_version.tag` is blank, so the exact current-main revision is still **unverified**. The public response now includes scheduler telemetry and at the latest check reported `scheduler.status=healthy`, `last_scheduled_scan_status=completed`, and an alarm/healthy-scan age of approximately 8.5 minutes. This confirms a recent scheduled cycle, but a second observation is still needed to confirm recurring 15-minute cadence.
 
 Current GitHub `main`: `0d54d15209828393cd9ee457e98abae9b2c40111`. Main has passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
 
