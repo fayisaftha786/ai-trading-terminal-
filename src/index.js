@@ -101,7 +101,7 @@ async function login(request, env) {
   const ipHash = toBase64Url(await keyedFingerprint(sourceIp, env.SESSION_SECRET));
   const engineId = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
   const engine = env.TRADING_ENGINE.get(engineId);
-  const rateLimitUrl = "https://internal/auth/login-attempts";
+  const rateLimitUrl = "https://internal.local/internal/auth/login-attempts";
   let rateLimitResponse;
   try {
     rateLimitResponse = await engine.fetch(new Request(rateLimitUrl, {
