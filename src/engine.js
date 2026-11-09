@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, fetchBitstampResearchHistory, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -957,6 +957,28 @@ export class TradingEngine extends DurableObject {
       }
     }
 
+    // Candle/history requests can age the first market's L2 book while later
+    // markets are scanned. Refresh Coinbase books after all candle work and
+    // immediately before entry gates; never relax the strict 15s freshness rule.
+    const finalBookRequestState = createCoinbaseRequestState();
+    for (const market of markets) {
+      if (market.status !== "live" || market.market_data_provider !== "coinbase_exchange") continue;
+      try {
+        const freshBook = await fetchCoinbaseOrderBook(market.product, finalBookRequestState);
+        Object.assign(market, freshBook);
+        market.spread_bps = ((freshBook.ask - freshBook.bid) / ((freshBook.ask + freshBook.bid) / 2)) * 10000;
+        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+          book_status: "available", book_error: null,
+          book_freshness_source: "final_post_candle_local_retrieval_time",
+          book_sequence_available: freshBook.book_sequence !== null };
+      } catch (error) {
+        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+          book_status: "provider_error",
+          book_error: String(error?.code || error?.message || "order_book_refresh_failed").slice(0, 100) };
+        market.book_retrieved_at_ms = null; market.book_age_ms = null;
+        market.bid_depth_quote = null; market.ask_depth_quote = null;
+      }
+    }
     // Read the latest owner settings after public fetches complete so a concurrent
     // disable action cannot be hidden by a stale pre-fetch automation setting.
     const state = this.getState("settings") || {};
