@@ -168,6 +168,11 @@ export class TradingEngine extends DurableObject {
         const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
           ? runtime.last_scheduled_scan_status : "not_run";
         const currentMarkets = this.getMarkets().slice(0, PRODUCTS.length);
+        const currentMarketFeed = assessMarketUniverse(
+          currentMarkets, PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
+        );
+        const currentMarketStatus = currentMarketFeed.healthy ? "healthy"
+          : currentMarketFeed.healthy_market_count > 0 ? "partial" : "unavailable";
         const diagnosticIssues = normalizeScanIssueRows(runtime);
         const diagnosticProviderFailures = normalizeProviderFailureRows(runtime, diagnosticIssues);
         const currentProviderFailures = summarizeCurrentProviderFailures(currentMarkets);
@@ -179,8 +184,21 @@ export class TradingEngine extends DurableObject {
           last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 160) : null,
           last_scheduled_scan_error: runtime.last_scheduled_scan_error
             ? String(runtime.last_scheduled_scan_error).slice(0, 160) : null,
-          healthy_market_count: Number(runtime.healthy_market_count) || 0,
-          expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
+          // These counts describe the last completed scan, not the live age of
+          // the persisted quotes. Current snapshot health is reported separately below.
+          last_scan_healthy_market_count: Number(runtime.healthy_market_count) || 0,
+          last_scan_expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
+          current_market_feed: {
+            status: currentMarketStatus,
+            healthy: currentMarketFeed.healthy,
+            healthy_market_count: currentMarketFeed.healthy_market_count,
+            expected_market_count: currentMarketFeed.expected_market_count,
+            issues: currentMarketFeed.issues.slice(0, 9).map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 160) : "unknown"
+            })),
+            checked_at_ms: nowMs
+          },
           consecutive_unhealthy_scheduled_scans: Number(runtime.consecutive_unhealthy_scheduled_scans) || 0,
           issues: diagnosticIssues
             .slice(0, 6)
@@ -211,6 +229,7 @@ export class TradingEngine extends DurableObject {
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
           live_trading_enabled: false, binance_testnet_enabled: false,
+          market_data_status: currentMarketStatus,
           scheduler: {
             status: scheduler.status,
             last_alarm_at_ms: lastAlarmAtMs,
@@ -1496,6 +1515,9 @@ export class TradingEngine extends DurableObject {
     const settings = this.getState("settings");
     const runtime = this.getState("runtime") || {};
     const markets = this.getMarkets();
+    const currentMarketFeed = assessMarketUniverse(
+      markets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
+    );
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
     const marks = this.buildPositionLockedBidMarks(markets, Date.now());
@@ -1506,7 +1528,9 @@ export class TradingEngine extends DurableObject {
         auto_paper_enabled: !!settings.auto_paper_enabled, halted: !!settings.halted,
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
       },
-      automation: this.automationStatus(), portfolio, markets, trades, open_positions: openPositions,
+      automation: this.automationStatus(),
+      current_market_feed: currentMarketFeed,
+      portfolio, markets, trades, open_positions: openPositions,
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now()),
       runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
