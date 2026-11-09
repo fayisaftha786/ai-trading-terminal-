@@ -1,3 +1,5 @@
+import { isFreshQuoteObservation } from "./strategy.js";
+
 export function assessMarketUniverse(
   markets,
   expectedSymbols,
@@ -28,9 +30,7 @@ export function assessMarketUniverse(
     }
     if (market.status !== "live") marketIssues.push("provider_unavailable");
 
-    const quoteTime = Date.parse(market.ticker_time || "");
-    const quoteAge = nowMs - quoteTime;
-    if (!Number.isFinite(quoteTime) || quoteAge < -5000 || quoteAge > maxQuoteAgeMs) {
+    if (!isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs)) {
       marketIssues.push("ticker_stale_or_timestamp_invalid");
     }
     if (![market.bid, market.ask, market.last].every((value) => Number.isFinite(value) && value > 0) ||
