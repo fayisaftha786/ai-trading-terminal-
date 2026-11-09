@@ -403,6 +403,102 @@ export class TradingEngine extends DurableObject {
           return jsonResponse({ status: record.status, decision: "RECONCILE_BEFORE_RETRY", client_order_id: clientOrderId, error_code: record.error_code }, 502);
         }
       }
+      if (request.method === "POST" && url.pathname === "/api/live/fills/sync") {
+        const liveStatus = coinbaseAdvancedStatus(this.env);
+        if (!liveStatus.credentials_configured) {
+          return jsonResponse({ status: "blocked", blockers: liveStatus.blockers }, 423);
+        }
+        const orders = this.getState("coinbase_live_orders") || [];
+        const exchangeOrders = orders.filter((item) =>
+          typeof item.exchange_order_id === "string" && item.exchange_order_id.length > 0
+        );
+        const orderById = new Map(exchangeOrders.map((item) => [item.exchange_order_id, item]));
+        const orderIds = [...orderById.keys()];
+        const storedFills = this.getState("coinbase_live_fills") || [];
+        const merged = new Map(storedFills.map((item) => [item.entry_id, item]));
+        let pages = 0;
+        try {
+          for (let offset = 0; offset < orderIds.length; offset += 20) {
+            const batch = orderIds.slice(offset, offset + 20);
+            const result = await listCoinbaseAdvancedFills(this.env, {
+              orderIds: batch, limit: 100, maxPages: 5
+            });
+            if (result.status !== "fills_loaded" || result.complete !== true) {
+              throw new Error("coinbase_advanced_fill_sync_incomplete");
+            }
+            pages += result.pages;
+            for (const fill of result.fills) {
+              const order = orderById.get(fill.order_id);
+              if (!order || order.product_id !== fill.product_id) continue;
+              const price = Number(fill.price);
+              const rawSize = Number(fill.size);
+              if (!Number.isFinite(price) || price <= 0 || !Number.isFinite(rawSize) || rawSize <= 0) {
+                throw new Error("coinbase_advanced_fill_numeric_fields_invalid");
+              }
+              const baseSize = fill.size_in_quote === true ? rawSize / price : rawSize;
+              const quoteValue = fill.size_in_quote === true ? rawSize : rawSize * price;
+              if (!Number.isFinite(baseSize) || baseSize <= 0 || !Number.isFinite(quoteValue) || quoteValue <= 0) {
+                throw new Error("coinbase_advanced_fill_notional_invalid");
+              }
+              const decimalText = (value, places) => value.toFixed(places).replace(/0+$/, "").replace(/\\.$/, "");
+              const normalized = {
+                entry_id: fill.entry_id,
+                trade_id: fill.trade_id,
+                order_id: fill.order_id,
+                trade_time: fill.trade_time,
+                sequence_timestamp: fill.sequence_timestamp,
+                product_id: fill.product_id,
+                side: fill.side || order.side,
+                price: fill.price,
+                size: fill.size,
+                size_in_quote: fill.size_in_quote,
+                base_size: decimalText(baseSize, 18),
+                quote_value: decimalText(quoteValue, 10),
+                commission: fill.commission,
+                quote_currency: order.quote_currency || null,
+                base_currency: order.base_currency || null,
+                liquidity_indicator: fill.liquidity_indicator,
+                synced_at_ms: Date.now()
+              };
+              if (normalized.side !== "BUY" && normalized.side !== "SELL") {
+                throw new Error("coinbase_advanced_fill_side_unresolved");
+              }
+              merged.set(normalized.entry_id, normalized);
+            }
+          }
+          const fills = [...merged.values()].sort((a, b) =>
+            Date.parse(a.trade_time) - Date.parse(b.trade_time)
+          ).slice(-2000);
+          const syncedAtMs = Date.now();
+          this.setState("coinbase_live_fills", fills);
+          this.setState("coinbase_live_fill_sync", {
+            status: "complete", synced_at_ms: syncedAtMs,
+            linked_order_count: orderIds.length, fill_count: fills.length, pages
+          });
+          const report = buildLiveFillReport(fills, syncedAtMs);
+          this.logEvent("coinbase_live_fills_sync", "Synced Coinbase fills for locally recorded bot orders", {
+            order_count: orderIds.length, fill_count: fills.length, pages
+          });
+          return jsonResponse({ ...report, sync: { status: "complete", linked_order_count: orderIds.length, pages } });
+        } catch (error) {
+          const code = typeof error?.message === "string" && /^[a-z0-9_]{1,100}$/.test(error.message)
+            ? error.message : "coinbase_advanced_fill_sync_failed";
+          this.setState("coinbase_live_fill_sync", {
+            status: "error", attempted_at_ms: Date.now(), error_code: code
+          });
+          return jsonResponse({
+            status: "sync_failed",
+            blockers: [code],
+            previous_fill_count: storedFills.length,
+            previous_sync: this.getState("coinbase_live_fill_sync")
+          }, 502);
+        }
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/fills") {
+        const fills = this.getState("coinbase_live_fills") || [];
+        const sync = this.getState("coinbase_live_fill_sync") || { status: "not_started" };
+        return jsonResponse({ ...buildLiveFillReport(fills, sync.synced_at_ms), sync });
+      }
       if (request.method === "GET" && url.pathname === "/api/live/orders") {
         const records = this.getState("coinbase_live_orders") || [];
         return jsonResponse({ orders: records.slice(0, 100), count: records.length });
