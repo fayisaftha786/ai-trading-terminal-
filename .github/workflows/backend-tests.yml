@@ -9,6 +9,7 @@ on:
       - "requirements.txt"
       - "static/**"
       - "scripts/master_release.py"
+      - "scripts/cloud_market_scan.py"
       - ".github/workflows/backend-tests.yml"
   push:
     branches: [main]
@@ -18,6 +19,7 @@ on:
       - "requirements.txt"
       - "static/**"
       - "scripts/master_release.py"
+      - "scripts/cloud_market_scan.py"
       - ".github/workflows/backend-tests.yml"
   workflow_dispatch:
 

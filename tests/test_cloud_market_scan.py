@@ -48,12 +48,21 @@ def test_market_sources_must_match_provider_and_quote_currency():
     assert "strategy_provider_missing" in unknown_source["issues"]
 
 
-def test_coinbase_fallback_is_consistent_when_both_ticker_and_candles_use_usd():
-    result = compare_market_sources(
-        {"market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
+def test_coinbase_fallback_is_consistent_only_when_configured_pair_uses_usd():
+    exact_usd = compare_market_sources(
+        {"symbol": "BTC/USD", "market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
         {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
     )
-    assert result["matched"] is True
+    assert exact_usd["matched"] is True
+    assert exact_usd["quote_basis_verified"] is True
+
+    mapped_usdt = compare_market_sources(
+        {"symbol": "BTC/USDT", "market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
+        {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
+    )
+    assert mapped_usdt["matched"] is False
+    assert mapped_usdt["quote_basis_verified"] is False
+    assert "configured_pair_quote_mismatch:configured=USDT,actual=USD" in mapped_usdt["issues"]
 
 
 
@@ -118,9 +127,11 @@ def test_scan_report_discloses_configured_exchange_and_actual_fallback_provider(
             "spread_bps": 1.0,
             "ticker_provider": "coinbase_public_fallback",
             "strategy_provider": "coinbase_public_fallback",
+            "configured_quote_currency": "USDT",
             "ticker_quote_currency": "USD",
             "strategy_quote_currency": "USD",
-            "signal_block_reasons": [],
+            "quote_basis_verified": False,
+            "signal_block_reasons": ["configured_pair_quote_mismatch:configured=USDT,actual=USD"],
         }],
     }
 
@@ -129,3 +140,6 @@ def test_scan_report_discloses_configured_exchange_and_actual_fallback_provider(
     assert "Actual market-data adapter: coinbase_public_fallback" in rendered
     assert "ticker=coinbase_public_fallback/USD" in rendered
     assert "candles=coinbase_public_fallback/USD" in rendered
+    assert "Quote basis" in rendered
+    assert "UNVERIFIED" in rendered
+    assert "configured_pair=BTC/USDT; configured_quote=USDT" in rendered

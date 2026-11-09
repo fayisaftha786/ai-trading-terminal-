@@ -75,6 +75,8 @@ def compare_market_sources(
     strategy_provider = str(
         analysis.get("provider") or analysis.get("market_data_provider") or ""
     ).strip().lower()
+    configured_symbol = str(market.get("symbol") or "").strip().upper()
+    configured_quote = configured_symbol.split("/")[-1].split(":")[0] if "/" in configured_symbol else ""
     ticker_quote = str(market.get("quote_currency") or "").strip().upper()
     strategy_quote = str(
         analysis.get("quote_currency") or analysis.get("strategy_quote_currency") or ""
@@ -93,13 +95,20 @@ def compare_market_sources(
         issues.append("strategy_quote_currency_missing")
     if ticker_quote and strategy_quote and ticker_quote != strategy_quote:
         issues.append(f"quote_currency_mismatch:ticker={ticker_quote},strategy={strategy_quote}")
+    # A provider can be internally consistent while still serving a different
+    # quote basis than the configured pair (e.g. Coinbase BTC-USD for BTC/USDT).
+    # Keep it research-only and block directional signals until the basis matches.
+    if configured_quote and ticker_quote and configured_quote != ticker_quote:
+        issues.append(f"configured_pair_quote_mismatch:configured={configured_quote},actual={ticker_quote}")
 
     return {
         "matched": not issues,
         "ticker_provider": ticker_provider or None,
         "strategy_provider": strategy_provider or None,
+        "configured_quote_currency": configured_quote or None,
         "ticker_quote_currency": ticker_quote or None,
         "strategy_quote_currency": strategy_quote or None,
+        "quote_basis_verified": bool(configured_quote and ticker_quote and configured_quote == ticker_quote),
         "issues": issues,
     }
 
@@ -181,8 +190,10 @@ async def collect_scan() -> dict[str, Any]:
             "quote_volume": safe_float(market.get("quote_volume")),
             "ticker_provider": source_match["ticker_provider"],
             "strategy_provider": source_match["strategy_provider"],
+            "configured_quote_currency": source_match["configured_quote_currency"],
             "ticker_quote_currency": source_match["ticker_quote_currency"],
             "strategy_quote_currency": source_match["strategy_quote_currency"],
+            "quote_basis_verified": source_match["quote_basis_verified"],
             "providers_match": source_match["matched"],
             "timeframes_aligned": timeframe_aligned,
             "strategy_research": strategy_research,
@@ -242,8 +253,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         f"- Source-, quote- and timeframe-verified analysis-ready symbols: {report['analysis_ready_count']}/{len(report['results'])}",
         f"- Research-only candidates: trend pullback {report['research_candidate_counts']['trend_pullback']}, breakout {report['research_candidate_counts']['volatility_breakout']}, range reversion {report['research_candidate_counts']['range_mean_reversion']}",
         "",
-        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | TF aligned | Spread (bps) |",
-        "|---|---:|---:|---|---:|---|---|---|---|---:|",
+        "| Symbol | Fresh | Last | Primary signal | Score | Primary regime | Confirmation | Source match | Quote basis | TF aligned | Spread (bps) |",
+        "|---|---:|---:|---|---:|---|---|---|---|---|---:|",
     ]
     for row in report["results"]:
         lines.append(
@@ -251,10 +262,12 @@ def render_markdown(report: dict[str, Any]) -> str:
             f"{row['last'] if row['last'] is not None else '—'} | {row['signal']} | "
             f"{row['score']} | {row['regime_1h']} | {row['confirmation_timeframe']} {row['regime_confirmation']} | "
             f"{'match' if row['providers_match'] else 'MISMATCH'} | "
+            f"{'verified' if row.get('quote_basis_verified') else 'UNVERIFIED'} | "
             f"{'yes' if row['timeframes_aligned'] else 'no'} | "
             f"{round(row['spread_bps'], 2) if row['spread_bps'] is not None else '—'} |"
         )
         source_note = (
+            f"configured_pair={row['symbol']}; configured_quote={row.get('configured_quote_currency') or 'unknown'}; "
             f"ticker={row['ticker_provider'] or 'unknown'}/{row['ticker_quote_currency'] or 'unknown'}; "
             f"candles={row['strategy_provider'] or 'unknown'}/{row['strategy_quote_currency'] or 'unknown'}"
         )
@@ -268,7 +281,7 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "- Read-only public market data; no exchange credentials.",
         "- No real orders and no paper positions are created by this scheduled scanner.",
-        "- Stale ticker data, candle-integrity failures, provider mismatches, quote-currency mismatches or unconfirmed timeframe alignment are downgraded to HOLD.",
+        "- Stale ticker data, candle-integrity failures, provider mismatches, configured-pair vs actual quote-basis mismatches or unconfirmed timeframe alignment are downgraded to HOLD.",
         "- A fallback provider may supply research candles, but its signals are blocked unless ticker and candle provider plus quote currency match.",
         "- Strategy-lab candidates are deterministic research hypotheses only; they are not paper-entry authorization or profit predictions.",
         "- GitHub scheduled runs are best-effort, not a continuous 24/7 trading server.",
