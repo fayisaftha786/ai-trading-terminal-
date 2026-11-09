@@ -2474,13 +2474,34 @@ export class TradingEngine extends DurableObject {
     const settings = this.getState("settings");
     const runtime = this.getState("runtime") || {};
     const markets = this.getMarkets();
+    const nowMs = Date.now();
     const currentMarketFeed = assessMarketUniverse(
-      markets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
+      markets, PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
     );
+    const lastScheduledScanAtMs = Number(runtime.last_scheduled_scan_at_ms);
+    const lastScheduledScanAgeMs = Number.isFinite(lastScheduledScanAtMs) && lastScheduledScanAtMs > 0
+      ? Math.max(0, nowMs - lastScheduledScanAtMs) : null;
+    const marketFeedFreshness = classifyMarketFeedFreshness({
+      currentFeedHealthy: currentMarketFeed.healthy,
+      lastScheduledScanStatus: runtime.last_scheduled_scan_status || "not_run",
+      lastScheduledHealthyMarketCount: runtime.last_scheduled_scan_healthy_market_count,
+      lastScheduledExpectedMarketCount: runtime.last_scheduled_scan_expected_market_count || PRODUCTS.length,
+      lastScheduledScanAgeMs,
+      staleAfterMs: SCAN_INTERVAL_MS * 3
+    });
+    const currentMarketStatus = currentMarketFeed.healthy ? "healthy"
+      : currentMarketFeed.healthy_market_count > 0 ? "partial" : "unavailable";
+    const currentMarketFeedDiagnostics = {
+      ...currentMarketFeed,
+      status: currentMarketStatus,
+      freshness_state: marketFeedFreshness.state,
+      freshness_reason: marketFeedFreshness.reason,
+      checked_at_ms: nowMs
+    };
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
-    const marks = this.buildPositionLockedBidMarks(markets, Date.now());
-    const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now());
+    const marks = this.buildPositionLockedBidMarks(markets, nowMs);
+    const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs);
     return {
       mode: "paper_only", live_trading_enabled: false, binance_testnet_enabled: false,
       settings: {
@@ -2488,9 +2509,9 @@ export class TradingEngine extends DurableObject {
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
       },
       automation: this.automationStatus(),
-      current_market_feed: currentMarketFeed,
+      current_market_feed: currentMarketFeedDiagnostics,
       portfolio, markets, trades, open_positions: openPositions,
-      risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, Date.now()),
+      risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
       runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
