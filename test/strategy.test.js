@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, resolveRiskBaseline } from "../src/strategy.js";
+import { ema, rsiWilder, auditCandles, analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
   return Array.from({ length: count }, (_, index) => {
@@ -159,4 +159,60 @@ test("risk baseline remains stable once initialized for a period", () => {
   assert.equal(existing.initialized, true);
   assert.equal(existing.shouldPersist, false);
   assert.equal(existing.baseline, 97.5);
+});
+
+
+
+test("research lab reports three candidates but never authorizes execution", () => {
+  const sixHours = 6 * 60 * 60 * 1000;
+  const oneHour = 60 * 60 * 1000;
+  const base = 1_700_000_000_000 - (1_700_000_000_000 % sixHours);
+  const primary = makeCandles(160, oneHour, base, 0.15);
+  const higher = makeCandles(150, sixHours, base - (900 * oneHour), 0.2);
+  const nowMs = base + (161 * oneHour);
+  const primaryAudit = auditCandles(primary, oneHour, nowMs);
+  const higherAudit = auditCandles(higher, sixHours, nowMs);
+  const result = evaluateResearchCandidates(primaryAudit, higherAudit, sixHours);
+
+  assert.equal(result.status, "research_only");
+  assert.deepEqual(result.candidates.map((candidate) => candidate.strategy_id), [
+    "trend_pullback", "volatility_breakout", "range_mean_reversion"
+  ]);
+  assert.ok(result.candidates.every((candidate) =>
+    candidate.execution_authorized === false && candidate.score_is_probability === false
+  ));
+  assert.equal(result.execution_authorized, false);
+  assert.equal(result.paper_auto_entry_eligible, false);
+  assert.equal(result.live_trading_enabled, false);
+});
+
+
+test("research lab blocks dirty and future confirmation candle histories", () => {
+  const sixHours = 6 * 60 * 60 * 1000;
+  const oneHour = 60 * 60 * 1000;
+  const base = 1_700_000_000_000 - (1_700_000_000_000 % sixHours);
+  const primary = makeCandles(160, oneHour, base, 0.15);
+  const cleanHigher = makeCandles(150, sixHours, base - (900 * oneHour), 0.2);
+  const nowMs = base + (200 * oneHour);
+
+  const dirtyPrimary = primary.map((row) => ({ ...row }));
+  dirtyPrimary[80] = { ...dirtyPrimary[80], time: dirtyPrimary[79].time };
+  const dirty = evaluateResearchCandidates(
+    auditCandles(dirtyPrimary, oneHour, nowMs),
+    auditCandles(cleanHigher, sixHours, nowMs),
+    sixHours
+  );
+  assert.equal(dirty.status, "blocked");
+  assert.equal(dirty.reason, "candle_integrity_failed");
+  assert.equal(dirty.execution_authorized, false);
+
+  const futureHigher = makeCandles(150, sixHours, base - (714 * oneHour), 0.2);
+  const future = evaluateResearchCandidates(
+    auditCandles(primary, oneHour, nowMs),
+    auditCandles(futureHigher, sixHours, nowMs),
+    sixHours
+  );
+  assert.equal(future.status, "blocked");
+  assert.equal(future.reason, "higher_timeframe_data_is_from_the_future");
+  assert.equal(future.execution_authorized, false);
 });
