@@ -28,7 +28,14 @@ export function assessMarketUniverse(
       issues.push({ symbol, reason: "market_snapshot_missing" });
       continue;
     }
-    if (market.status !== "live") marketIssues.push("provider_unavailable");
+    if (market.status !== "live") {
+      const providerReason = typeof market.error_code === "string" &&
+        /^[a-z0-9_]{1,80}$/.test(market.error_code)
+        ? "provider_unavailable:" + market.error_code
+        : "provider_unavailable";
+      issues.push({ symbol, reason: providerReason });
+      continue;
+    }
 
     if (!isFreshQuoteObservation(market, nowMs, maxQuoteAgeMs)) {
       marketIssues.push("ticker_stale_or_timestamp_invalid");
