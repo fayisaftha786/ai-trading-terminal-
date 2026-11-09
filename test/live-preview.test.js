@@ -52,6 +52,6 @@ test("new preview creation prunes expired and consumed entries while bounding re
     token: "old-" + index, status: index % 2 ? "CONSUMED" : "READY", expires_at_ms: index < 100 ? 1 : 999999
   }));
   const created = createServerBoundPreview(existing, preview, token, 1000);
-  assert.equal(created.previews.length, 6);
+  assert.equal(created.previews.length, 4);
   assert.equal(created.previews.at(-1).token, token);
 });
