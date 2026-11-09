@@ -46,7 +46,7 @@ The GitHub scheduled read-only scanner used public Binance data on current main 
 | ETH/USDT | Live | $2,142.81 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.5134 bps |
 | SOL/USDT | Live | $87.50 | HOLD | 40 | DOWNTREND | DOWNTREND | 2.2860 bps |
 
-All three markets were fresh and had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. SOL's ticker age was approximately -742 ms (exchange timestamp slightly ahead of runner clock), within the scanner's documented 5-second clock-skew tolerance; the raw age remains visible. Future timestamps beyond that tolerance are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
+All three markets were fresh and had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. Ticker ages ranged from approximately -183 ms to -550 ms (exchange timestamps slightly ahead of the runner clock), within the scanner's documented 5-second clock-skew tolerance; raw ages remain visible. Future timestamps beyond that tolerance are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
 
 ## Cloud backend status
 
