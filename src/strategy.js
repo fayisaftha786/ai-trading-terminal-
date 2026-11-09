@@ -423,7 +423,12 @@ export function analyzeTimeframe(audit) {
     ? ((fast[fast.length - 1] / fast[fast.length - 6]) - 1) * 100 : 0;
   const trendUp = fast.at(-1) > slow.at(-1) && closes.at(-1) > slow.at(-1) && emaSlopePct > 0;
   const trendDown = fast.at(-1) < slow.at(-1) && closes.at(-1) < slow.at(-1) && emaSlopePct < 0;
-  const regime = atrPct >= 8 ? "HIGH_VOLATILITY"
+  // Use rolling ATR distribution as well as an absolute emergency cap.
+  // A volatility expansion can become dangerous well before ATR reaches 8%.
+  const regimeDiagnostics = classifyMarketRegime(audit);
+  const volatilityExpanded = regimeDiagnostics.status === "classified" &&
+    regimeDiagnostics.regime === "HIGH_VOLATILITY";
+  const regime = atrPct >= 8 || volatilityExpanded ? "HIGH_VOLATILITY"
     : trendUp && adx >= 18 && plusDi > minusDi ? "UPTREND"
       : trendDown && adx >= 18 && plusDi <= minusDi ? "DOWNTREND"
         : "RANGE_OR_TRANSITION";
@@ -442,7 +447,7 @@ export function analyzeTimeframe(audit) {
   if (breakout) score += 10;
   if (adx >= 22 && plusDi > minusDi) score += 10;
   else if (adx < 15) score -= 10;
-  if (atrPct >= 8) score -= 20;
+  if (regime === "HIGH_VOLATILITY") score -= 20;
   score = Math.max(0, Math.min(100, score));
   const signal = score >= 75 && regime === "UPTREND" && atrPct < 8 &&
     adx >= 18 && plusDi > minusDi && rsi < 68 ? "BUY_CANDIDATE" : "HOLD";
@@ -460,6 +465,9 @@ export function analyzeTimeframe(audit) {
     ema50: slow.at(-1),
     ema20_slope_pct: Number(emaSlopePct.toFixed(5)),
     volume_ratio_20: volumeRatio === null ? null : Number(volumeRatio.toFixed(4)),
+    atr_percentile_lookback: regimeDiagnostics.atr_percentile_lookback ?? null,
+    atr_expansion_ratio: regimeDiagnostics.atr_expansion_ratio ?? null,
+    volatility_expanded: volatilityExpanded,
     breakout_20: breakout,
     valid_candles: rows.length,
     last_closed_candle_ms: rows.at(-1).time,
@@ -644,9 +652,15 @@ export function assessCrossMarketContext(
   if (!btc) {
     return { ...base, status: "unavailable", mode: "BLOCKED", reason: "btc_benchmark_unavailable" };
   }
-  const volatilityExpansion = verified.some((row) =>
+  const highVolatilitySymbols = verified.filter((row) =>
     row.primary_regime === "HIGH_VOLATILITY" || row.higher_regime === "HIGH_VOLATILITY"
   );
+  // Isolated altcoin volatility is handled by that symbol's own entry gate.
+  // Market-wide risk-off requires BTC volatility or expansion across >=2 assets.
+  const volatilityExpansion =
+    btc.primary_regime === "HIGH_VOLATILITY" ||
+    btc.higher_regime === "HIGH_VOLATILITY" ||
+    highVolatilitySymbols.length >= 2;
   const majorityDowntrend = base.breadth_1h.downtrend >= 2 || base.breadth_6h.downtrend >= 2;
   const btcRiskOff = ["DOWNTREND", "HIGH_VOLATILITY"].includes(btc.primary_regime) ||
     ["DOWNTREND", "HIGH_VOLATILITY"].includes(btc.higher_regime);
