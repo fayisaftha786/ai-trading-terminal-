@@ -184,6 +184,21 @@ export class TradingEngine extends DurableObject {
           last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 160) : null,
           last_scheduled_scan_error: runtime.last_scheduled_scan_error
             ? String(runtime.last_scheduled_scan_error).slice(0, 160) : null,
+          last_scheduled_scan_at_ms: Number.isFinite(Number(runtime.last_scheduled_scan_at_ms)) &&
+            Number(runtime.last_scheduled_scan_at_ms) > 0
+            ? Number(runtime.last_scheduled_scan_at_ms) : null,
+          last_scheduled_scan_age_ms: Number.isFinite(Number(runtime.last_scheduled_scan_at_ms)) &&
+            Number(runtime.last_scheduled_scan_at_ms) > 0
+            ? nowMs - Number(runtime.last_scheduled_scan_at_ms) : null,
+          last_scheduled_scan_healthy_market_count:
+            Number(runtime.last_scheduled_scan_healthy_market_count) || 0,
+          last_scheduled_scan_expected_market_count:
+            Number(runtime.last_scheduled_scan_expected_market_count) || PRODUCTS.length,
+          last_scheduled_scan_issues: (Array.isArray(runtime.last_scheduled_scan_issues)
+            ? runtime.last_scheduled_scan_issues : []).slice(0, 9).map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 160) : "unknown"
+            })),
           // These counts describe the last completed scan, not the live age of
           // the persisted quotes. Current snapshot health is reported separately below.
           last_scan_healthy_market_count: Number(runtime.healthy_market_count) || 0,
@@ -236,6 +251,8 @@ export class TradingEngine extends DurableObject {
             last_alarm_age_ms: scheduler.ageMs,
             last_scheduled_scan_status: scanStatus,
             last_scheduled_scan_error: diagnostics.last_scheduled_scan_error,
+            last_scheduled_scan_at_ms: diagnostics.last_scheduled_scan_at_ms,
+            last_scheduled_scan_age_ms: diagnostics.last_scheduled_scan_age_ms,
             last_healthy_scan_at_ms: lastHealthyAtMs,
             last_healthy_scan_age_ms: lastHealthyAtMs === null ? null : Math.max(0, nowMs - lastHealthyAtMs),
             next_alarm_at_ms: nextAlarmAtMs
@@ -378,6 +395,18 @@ export class TradingEngine extends DurableObject {
         runtime.last_scheduled_scan_status = feed?.healthy === true ? "completed"
           : feed ? (Number(feed.healthy_market_count || 0) > 0 ? "partial" : "unavailable")
             : "error";
+        runtime.last_scheduled_scan_at_ms = Number(runtime.last_scan_at_ms) > 0
+          ? Number(runtime.last_scan_at_ms) : Date.now();
+        runtime.last_scheduled_scan_healthy_market_count =
+          Number(feed?.healthy_market_count) || 0;
+        runtime.last_scheduled_scan_expected_market_count =
+          Number(feed?.expected_market_count) || PRODUCTS.length;
+        runtime.last_scheduled_scan_issues = (Array.isArray(feed?.issues) ? feed.issues : [])
+          .slice(0, 9)
+          .map((issue) => ({
+            symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+            reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 160) : "unknown"
+          }));
         runtime.last_scheduled_scan_error = feed?.healthy === true ? null
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
@@ -397,6 +426,10 @@ export class TradingEngine extends DurableObject {
         (runtime.source === "scheduled" && runtime.last_scan_status === "completed" ? runtime.last_scan_at_ms : null);
       runtime.last_scheduled_alarm_at_ms = invokedAtMs;
       runtime.last_scheduled_scan_status = "error";
+      runtime.last_scheduled_scan_at_ms = nowMs;
+      runtime.last_scheduled_scan_healthy_market_count = 0;
+      runtime.last_scheduled_scan_expected_market_count = PRODUCTS.length;
+      runtime.last_scheduled_scan_issues = [{ symbol: null, reason: "scheduled_scan_failed" }];
       runtime.last_scheduled_scan_error = String(error?.message || error).slice(0, 180);
       runtime.consecutive_unhealthy_scheduled_scans =
         Math.max(0, Number(runtime.consecutive_unhealthy_scheduled_scans) || 0) + 1;
