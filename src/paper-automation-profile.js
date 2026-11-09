@@ -1,0 +1,113 @@
+export const PAPER_AUTOMATION_PROFILE = Object.freeze({
+  version: 1,
+  initial_capital_usd: 10,
+  max_cycles_per_day: 5,
+  max_position_notional_usd: 8,
+  cash_reserve_usd: 2
+});
+
+export const PAPER_AUTOMATION_RISK = Object.freeze({
+  risk_per_trade_pct: 1,
+  max_daily_loss_pct: 1,
+  max_weekly_loss_pct: 4,
+  max_total_exposure_pct: 80,
+  max_open_positions: 1,
+  stop_loss_pct: 1,
+  take_profit_pct: 3,
+  fee_bps_per_side: 60,
+  slippage_bps: 10,
+  max_total_drawdown_pct: 5,
+  daily_profit_lock_pct: 1,
+  soft_loss_guard_fraction: 0.75,
+  max_position_notional_usd: 8
+});
+
+export function migratePaperAutomationSettings(existing, tradeCount = 0) {
+  const totalTrades = Number.isSafeInteger(Number(tradeCount)) && Number(tradeCount) >= 0
+    ? Number(tradeCount) : 0;
+  const base = {
+    initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
+    risk: { ...PAPER_AUTOMATION_RISK },
+    auto_paper_enabled: true,
+    halted: false,
+    halt_reason: null,
+    peak_equity_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
+    paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version,
+    capital_setup_required: false
+  };
+  if (!existing || typeof existing !== "object" || Array.isArray(existing)) return base;
+
+  const settings = {
+    ...base,
+    ...existing,
+    risk: { ...base.risk, ...(existing.risk && typeof existing.risk === "object" ? existing.risk : {}) }
+  };
+  if (Number(existing.paper_automation_profile_version) >= PAPER_AUTOMATION_PROFILE.version) {
+    return settings;
+  }
+
+  if (totalTrades > 0 && Number(existing.initial_capital_usd) !== PAPER_AUTOMATION_PROFILE.initial_capital_usd) {
+    return {
+      ...settings,
+      auto_paper_enabled: false,
+      capital_setup_required: true,
+      capital_setup_required_reason: "existing_paper_ledger_not_rebased_automatically"
+    };
+  }
+
+  if (totalTrades === 0) {
+    return {
+      ...base,
+      halted: existing.halted === true,
+      halt_reason: existing.halt_reason || (existing.halted === true ? "legacy_manual_halt" : null),
+      auto_paper_enabled: existing.halted !== true
+    };
+  }
+
+  return {
+    ...settings,
+    initial_capital_usd: PAPER_AUTOMATION_PROFILE.initial_capital_usd,
+    paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version,
+    capital_setup_required: false,
+    auto_paper_enabled: existing.auto_paper_enabled === true
+  };
+}
+
+export function calculateDynamicTakeProfit({ atrPct, roundTripCostBps }) {
+  const atr = Number(atrPct);
+  const costs = Number(roundTripCostBps);
+  if (!Number.isFinite(atr) || atr <= 0 || !Number.isFinite(costs) || costs <= 0) {
+    return { ok: false, reason: "dynamic_target_inputs_invalid" };
+  }
+  // Target the greater of 1.5x estimated round-trip costs, 0.8x 1H ATR,
+  // or a 1% gross move. Reject exceptionally expensive/volatile setups.
+  const targetBps = Math.max(costs * 1.5, atr * 80, 100);
+  if (!Number.isFinite(targetBps) || targetBps <= costs || targetBps > 500) {
+    return { ok: false, reason: "dynamic_target_outside_safe_bounds" };
+  }
+  return {
+    ok: true,
+    target_pct: Number((targetBps / 100).toFixed(4)),
+    target_bps: Number(targetBps.toFixed(2)),
+    estimated_net_edge_bps: Number((targetBps - costs).toFixed(2))
+  };
+}
+
+export function getDailyCycleAllowance(entriesToday, limit = PAPER_AUTOMATION_PROFILE.max_cycles_per_day) {
+  const safeLimit = Number.isSafeInteger(Number(limit)) && Number(limit) > 0 ? Number(limit) : 0;
+  const used = Number.isSafeInteger(Number(entriesToday)) && Number(entriesToday) >= 0
+    ? Number(entriesToday) : 0;
+  return {
+    limit: safeLimit,
+    used,
+    remaining: Math.max(0, safeLimit - used),
+    allowed: safeLimit > 0 && used < safeLimit
+  };
+}
+
+export function shouldAutoResumeWatchdog({ halted, haltReason, healthyScheduledScanStreak }) {
+  return halted === true &&
+    haltReason === "market_data_watchdog" &&
+    Number.isSafeInteger(Number(healthyScheduledScanStreak)) &&
+    Number(healthyScheduledScanStreak) >= 2;
+}
