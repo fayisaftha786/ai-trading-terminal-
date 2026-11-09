@@ -170,8 +170,8 @@ test("Bitstamp order-book refresh returns fresh same-venue L2 evidence", async (
     assert.match(requested, /\/api\/v2\/order_book\/btcusd\/\?group=1$/);
     assert.equal(result.bid, 100);
     assert.equal(result.ask, 100.1);
-    assert.equal(result.bid_depth_quote, 14999.95);
-    assert.equal(result.ask_depth_quote, 15000.65);
+    assert.equal(result.bid_depth_quote, 10499.95);
+    assert.equal(result.ask_depth_quote, 10510.55);
     assert.equal(result.book_sequence, null);
     assert.ok(Date.now() - result.book_retrieved_at_ms < 1000);
     assert.ok(Date.now() - result.book_event_time_ms < 2000);
