@@ -5,6 +5,7 @@ import time
 
 HOUR_MS = 60 * 60 * 1000
 FOUR_HOURS_MS = 4 * HOUR_MS
+SIX_HOURS_MS = 6 * HOUR_MS
 
 
 def _bars(count: int, interval_ms: int, start_ms: int):
@@ -112,8 +113,8 @@ def test_backtest_and_walk_forward_api_preserve_six_hour_confirmation_interval(c
 
     payload = {
         "candles": [[index * HOUR_MS, 100, 101, 99, 100, 1000] for index in range(240)],
-        "higher_timeframe_candles": [[index * FOUR_HOURS_MS, 100, 101, 99, 100, 4000] for index in range(150)],
-        "higher_timeframe_interval_ms": 21_600_000,
+        "higher_timeframe_candles": [[index * SIX_HOURS_MS, 100, 101, 99, 100, 4000] for index in range(150)],
+        "higher_timeframe_interval_ms": SIX_HOURS_MS,
         "timeframe": "1h",
     }
     backtest = client.post("/api/backtest/strategy", json=payload)
@@ -121,5 +122,5 @@ def test_backtest_and_walk_forward_api_preserve_six_hour_confirmation_interval(c
 
     assert backtest.status_code == 200, backtest.text
     assert walk_forward.status_code == 200, walk_forward.text
-    assert received == {"backtest": 21_600_000, "walk_forward": 21_600_000}
+    assert received == {"backtest": SIX_HOURS_MS, "walk_forward": SIX_HOURS_MS}
     assert backtest.json()["timeframe_assumptions"]["higher_interval_ms"] == 21_600_000
