@@ -209,8 +209,13 @@ export class TradingEngine extends DurableObject {
               status: typeof item?.status === "string" ? item.status.slice(0, 24) : "unknown",
               provider: typeof item?.provider === "string" ? item.provider.slice(0, 40) : null,
               failover_used: item?.failover_used === true,
+              failover_attempted: item?.failover_attempted === true,
               failover_reason: typeof item?.failover_reason === "string"
                 ? item.failover_reason.slice(0, 80) : null,
+              failover_error: typeof item?.failover_error === "string"
+                ? item.failover_error.slice(0, 80) : null,
+              primary_provider_error: typeof item?.primary_provider_error === "string"
+                ? item.primary_provider_error.slice(0, 80) : null,
               entry_ready: item?.entry_ready === true
             }))
         };
@@ -730,7 +735,10 @@ export class TradingEngine extends DurableObject {
         status: market.status,
         provider: market.market_data_provider || null,
         failover_used: market.data_quality?.failover_used === true,
+        failover_attempted: market.data_quality?.failover_attempted === true,
         failover_reason: market.data_quality?.failover_reason || null,
+        failover_error: market.data_quality?.failover_error || null,
+        primary_provider_error: market.data_quality?.primary_provider_error || null,
         entry_ready: market.entry_gate?.eligible === true
       })).slice(0, 3)
     };
