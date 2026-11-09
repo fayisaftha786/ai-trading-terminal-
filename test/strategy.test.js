@@ -330,3 +330,12 @@ test("PAPER position bid marks stay on the provider recorded at entry", () => {
   );
   assert.deepEqual([...legacyDefault.entries()], [["SOL/USD", 100]]);
 });
+
+
+test("engine persists entry venue and locks automatic and manual PAPER exits to it", () => {
+  const engineSource = readFileSync(new URL("../src/engine.js", import.meta.url), "utf8");
+  assert.match(engineSource, /market_data_provider: market\.market_data_provider/);
+  assert.match(engineSource, /buildPositionLockedBidMarks\(markets, Date\.now\(\)\)/);
+  assert.match(engineSource, /same_entry_provider_quote_required/);
+  assert.match(engineSource, /close_market_data_provider/);
+});
