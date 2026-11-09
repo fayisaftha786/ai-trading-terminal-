@@ -503,6 +503,7 @@ export class TradingEngine extends DurableObject {
           bid_depth_quote: snapshot.bid_depth_quote,
           ask_depth_quote: snapshot.ask_depth_quote,
           book_retrieved_at_ms: snapshot.book_retrieved_at_ms,
+          book_event_time_ms: snapshot.book_event_time_ms ?? null,
           book_age_ms: snapshot.book_age_ms,
           book_sequence: snapshot.book_sequence,
           data_quality: snapshot.data_quality,
