@@ -195,7 +195,7 @@ export class TradingEngine extends DurableObject {
             .slice(0, 3)
             .map((failure) => ({
               symbol: typeof failure?.symbol === "string" ? failure.symbol.slice(0, 24) : null,
-              reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 80) : "unknown",
+              reason: typeof failure?.reason === "string" ? failure.reason.slice(0, 120) : "unknown",
               primary_error_code: typeof failure?.primary_error_code === "string"
                 ? failure.primary_error_code.slice(0, 80) : null,
               backup_error_code: typeof failure?.backup_error_code === "string"
