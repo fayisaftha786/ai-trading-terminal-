@@ -203,6 +203,15 @@ try {
   assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
   assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
 
+  const emptyFillReport = await request("/api/live/fills", { headers: auth });
+  assert.equal(emptyFillReport.status, 200, "owner actual-fill report must load without exchange credentials");
+  assert.equal((await emptyFillReport.json()).status, "no_bot_fills");
+
+  const blockedFillSync = await request("/api/live/fills/sync", {
+    method: "POST", headers: auth, body: "{}"
+  });
+  assert.equal(blockedFillSync.status, 423, "fill sync must require configured Coinbase credentials");
+
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
   const scheduler = await initialScheduler.json();
@@ -294,6 +303,13 @@ try {
   assert.match(staticHtml, /crypto\.randomUUID\(\)/);
   assert.match(staticHtml, /REAL COINBASE ORDER CONFIRMATION/);
   assert.match(staticHtml, /withdrawals are never enabled/);
+  assert.match(staticHtml, /preview_token/);
+  assert.match(staticHtml, /server-bound one-time preview/i);
+  assert.match(staticHtml, /id="liveFillSync"/);
+  assert.match(staticHtml, /id="liveFillReport"/);
+  assert.match(staticHtml, /FIFo realized/);
+  assert.match(staticHtml, /FIFO realized P/);
+  assert.match(staticHtml, /external\/manual Coinbase trades are not included/i);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /NOT A BACKTEST OF THE PRODUCTION PAPER BOT/);
   assert.match(staticHtml, /cloud-paper-v1/);
