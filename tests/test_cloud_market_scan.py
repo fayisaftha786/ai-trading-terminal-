@@ -12,6 +12,8 @@ def test_market_is_fresh_rejects_missing_invalid_and_far_future_timestamp():
     now = 1_800_000_000_000
     assert not market_is_fresh({"status": "live"}, now)
     assert not market_is_fresh({"status": "live", "timestamp": "bad"}, now)
+    assert market_is_fresh({"status": "live", "timestamp": now + 500}, now)
+    assert not market_is_fresh({"status": "live", "timestamp": now + 5_001}, now)
     assert not market_is_fresh({"status": "live", "timestamp": now + 10_000}, now)
 
 
