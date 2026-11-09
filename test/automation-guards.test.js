@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { calculateDynamicTakeProfit } from "../src/paper-automation-profile.js";
 import {
   assessMarketUniverse,
+  classifyMarketFeedFreshness,
   hasRecentHealthyScheduledScan,
   advanceUnhealthyScanStreak,
   buildMarketDataProviderDiagnostics,
@@ -565,4 +566,55 @@ test("market-universe gate rejects unknown provider identifiers even when all fi
   };
   const result = assessMarketUniverse([market], ["BTC/USD"], NOW);
   assert.ok(result.issues[0].reason.includes("market_data_provider_unsupported"));
+});
+
+
+test("market feed freshness explains normal snapshot expiry without changing entry gates", () => {
+  assert.deepEqual(classifyMarketFeedFreshness({
+    currentFeedHealthy: true,
+    lastScheduledScanStatus: "completed",
+    lastScheduledHealthyMarketCount: 3,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: 1000,
+    staleAfterMs: 270000
+  }), {
+    state: "fresh",
+    reason: "current_market_snapshots_pass_all_entry_data_gates"
+  });
+
+  assert.equal(classifyMarketFeedFreshness({
+    currentFeedHealthy: false,
+    lastScheduledScanStatus: "completed",
+    lastScheduledHealthyMarketCount: 3,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: 90000,
+    staleAfterMs: 270000
+  }).state, "snapshot_expired_after_healthy_scan");
+
+  assert.equal(classifyMarketFeedFreshness({
+    currentFeedHealthy: false,
+    lastScheduledScanStatus: "running",
+    lastScheduledHealthyMarketCount: 3,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: 90000,
+    staleAfterMs: 270000
+  }).state, "refresh_in_progress");
+
+  assert.equal(classifyMarketFeedFreshness({
+    currentFeedHealthy: false,
+    lastScheduledScanStatus: "completed",
+    lastScheduledHealthyMarketCount: 3,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: 400000,
+    staleAfterMs: 270000
+  }).state, "scheduled_scan_overdue");
+
+  assert.equal(classifyMarketFeedFreshness({
+    currentFeedHealthy: false,
+    lastScheduledScanStatus: "error",
+    lastScheduledHealthyMarketCount: 0,
+    lastScheduledExpectedMarketCount: 3,
+    lastScheduledScanAgeMs: 1000,
+    staleAfterMs: 270000
+  }).state, "last_scan_degraded");
 });
