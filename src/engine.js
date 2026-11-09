@@ -1012,6 +1012,115 @@ export class TradingEngine extends DurableObject {
     };
   }
 
+  archiveProviderHistoryBackfill(exchange, product, timeframeSeconds, audit, receivedAtMs) {
+    const retentionBars = timeframeSeconds === 3600 ? 4320
+      : timeframeSeconds === 21600 ? 1440 : 0;
+    if (exchange !== "bitstamp_spot" || !retentionBars ||
+        audit?.ok !== true || !Array.isArray(audit.rows) || audit.rows.length < 150) {
+      return { stored: 0, status: "audit_rejected" };
+    }
+
+    const intervalMs = timeframeSeconds * 1000;
+    const rows = audit.rows.slice(-retentionBars);
+    let inserted = 0;
+    // Durable Object SQLite has a conservative bind-variable ceiling. 8 OHLCV
+    // rows x 11 fields stay below 100 variables per statement.
+    const batchSize = 8;
+    for (let offset = 0; offset < rows.length; offset += batchSize) {
+      const batch = rows.slice(offset, offset + batchSize);
+      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
+      const values = batch.flatMap((row) => [
+        exchange, product, timeframeSeconds, row.time,
+        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
+      ]);
+      inserted += this.sql.exec(
+        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
+        "VALUES " + valuesSql + " RETURNING candle_open_ms",
+        ...values
+      ).toArray().length;
+    }
+
+    const latest = rows.at(-1)?.time;
+    const cutoff = latest - ((retentionBars - 1) * intervalMs);
+    this.sql.exec(
+      "DELETE FROM research_candles WHERE exchange=? AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
+      exchange, product, timeframeSeconds, cutoff
+    );
+    const stats = this.sql.exec(
+      "SELECT COUNT(*) AS bars_count,MIN(candle_open_ms) AS first_candle_ms," +
+      "MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
+      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
+      exchange, product, timeframeSeconds
+    ).toArray()[0] || {};
+    const barsCount = Math.max(0, Number(stats.bars_count) || 0);
+    const first = stats.first_candle_ms == null ? null : Number(stats.first_candle_ms);
+    const last = stats.last_candle_ms == null ? null : Number(stats.last_candle_ms);
+    const expected = Number.isFinite(first) && Number.isFinite(last) && last >= first
+      ? Math.floor((last - first) / intervalMs) + 1 : 0;
+    const missing = Math.max(0, expected - barsCount);
+    return {
+      stored: inserted,
+      bars_count: barsCount,
+      first_candle_ms: Number.isFinite(first) ? first : null,
+      last_candle_ms: Number.isFinite(last) ? last : null,
+      missing_intervals: missing,
+      status: missing === 0 && barsCount >= rows.length ? "clean" : "archive_integrity_failed"
+    };
+  }
+
+  async backfillBitstampResearchHistory(selectedProduct) {
+    const history = await fetchBitstampResearchHistory({
+      product: selectedProduct.product,
+      nowMs: Date.now(),
+      oneHourBars: 3500,
+      sixHourBars: 600
+    });
+    const receivedAtMs = Date.now();
+    const oneHour = this.archiveProviderHistoryBackfill(
+      history.provider, history.product, 3600, history.one_hour, receivedAtMs
+    );
+    if (oneHour.status !== "clean") {
+      const error = new Error("Bitstamp 1H research archive failed post-insert integrity checks");
+      error.code = "research_backfill_archive_integrity_failed";
+      error.status = 409;
+      throw error;
+    }
+    const sixHour = this.archiveProviderHistoryBackfill(
+      history.provider, history.product, 21600, history.six_hour, receivedAtMs
+    );
+    if (sixHour.status !== "clean") {
+      const error = new Error("Bitstamp 6H research archive failed post-insert integrity checks");
+      error.code = "research_backfill_archive_integrity_failed";
+      error.status = 409;
+      throw error;
+    }
+
+    this.logEvent("research_backfill_completed", "Bitstamp historical candles added to offline research archive", {
+      symbol: selectedProduct.symbol,
+      provider: history.provider,
+      one_hour_bars: oneHour.bars_count,
+      six_hour_bars: sixHour.bars_count,
+      no_trading_side_effects: true
+    });
+    return {
+      mode: "offline_research_only",
+      no_trading_side_effects: true,
+      symbol: selectedProduct.symbol,
+      provider: history.provider,
+      one_hour: {
+        stored: oneHour.stored,
+        bars_count: oneHour.bars_count,
+        missing_intervals: oneHour.missing_intervals
+      },
+      six_hour: {
+        stored: sixHour.stored,
+        bars_count: sixHour.bars_count,
+        missing_intervals: sixHour.missing_intervals
+      },
+      requests: history.requests
+    };
+  }
+
   researchTournament() {
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
