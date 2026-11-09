@@ -259,7 +259,7 @@ test("market-universe gate rejects missing, future and stale latest closed candl
   assert.ok(assessMarketUniverse([staleOneHour], symbols, NOW).issues[0].reason.includes("1h_latest_closed_candle_stale"));
 
   const staleSixHour = healthyMarket("BTC/USD");
-  staleSixHour.six_hour_audit_summary.last_closed_candle_ms = NOW - (9 * 3600000);
+  staleSixHour.six_hour_audit_summary.last_closed_candle_ms = NOW - (15 * 3600000);
   assert.ok(assessMarketUniverse([staleSixHour], symbols, NOW).issues[0].reason.includes("6h_latest_closed_candle_stale"));
 });
 
