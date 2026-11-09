@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import time
 
-from app.services.market_data import MarketDataService
-
 
 HOUR_MS = 60 * 60 * 1000
 FOUR_HOURS_MS = 4 * HOUR_MS
