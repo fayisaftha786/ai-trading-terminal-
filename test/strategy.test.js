@@ -223,7 +223,7 @@ test("research lab blocks dirty and future confirmation candle histories", () =>
 
 test("Cloudflare dashboard inline JavaScript parses before deployment", () => {
   const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
-  const scripts = [...html.matchAll(/<script([^>]*)>([\\s\\S]*?)<\\/script>/gi)]
+  const scripts = [...html.matchAll(/<script([^>]*)>([\s\S]*?)<\/script>/gi)]
     .map((match) => match[2].trim())
     .filter(Boolean);
   assert.equal(scripts.length, 1, "expected the Cloudflare dashboard inline application script");
