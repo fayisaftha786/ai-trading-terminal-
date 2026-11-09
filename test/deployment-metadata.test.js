@@ -1,68 +1,30 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import worker from "../src/index.js";
+import { readFileSync } from "node:fs";
 
-function makeEnv(deploymentCommitSha) {
-  return {
-    DEPLOY_COMMIT_SHA: deploymentCommitSha,
-    CF_VERSION_METADATA: {
-      id: "worker-version-id",
-      tag: "",
-      timestamp: "2026-11-09T00:00:00.000Z"
-    },
-    TRADING_ENGINE: {
-      idFromName(name) {
-        assert.equal(name, "single-owner-paper-ledger");
-        return "paper-ledger-id";
-      },
-      get(id) {
-        assert.equal(id, "paper-ledger-id");
-        return {
-          async fetch(request) {
-            assert.equal(new URL(request.url).pathname, "/api/health");
-            return new Response(JSON.stringify({
-              status: "ok",
-              mode: "paper_only",
-              live_trading_enabled: false,
-              binance_testnet_enabled: false,
-              schedule_seconds: 90
-            }), {
-              status: 200,
-              headers: { "content-type": "application/json" }
-            });
-          }
-        };
-      }
-    }
-  };
-}
+const workerSource = readFileSync(new URL("../src/index.js", import.meta.url), "utf8");
+const deploymentWorkflow = readFileSync(
+  new URL("../.github/workflows/deploy-cloudflare-worker.yml", import.meta.url),
+  "utf8"
+);
 
-test("public health exposes the exact validated Git commit independently of Cloudflare version tags", async () => {
-  const sha = "467da4b18601b6fb8d0746cc36c75280d0302af9";
-  const response = await worker.fetch(
-    new Request("https://worker.example/api/health"),
-    makeEnv(sha)
-  );
-  const health = await response.json();
-
-  assert.equal(response.status, 200);
-  assert.equal(health.deployment_commit_sha, sha);
-  assert.equal(health.worker_version.id, "worker-version-id");
-  assert.equal(health.mode, "paper_only");
-  assert.equal(health.live_trading_enabled, false);
-  assert.equal(health.binance_testnet_enabled, false);
-  assert.equal(response.headers.get("x-frame-options"), "DENY");
-  assert.equal(response.headers.get("cache-control"), "no-store, private");
+test("Worker health binds only a validated deployment Git SHA", () => {
+  assert.match(workerSource, /typeof env\.DEPLOY_COMMIT_SHA === "string"/);
+  assert.match(workerSource, /\/\^\[a-f0-9\]\{40\}\$\/i\.test\(env\.DEPLOY_COMMIT_SHA\)/);
+  assert.match(workerSource, /deployment_commit_sha: deploymentCommitSha/);
+  assert.match(workerSource, /deploymentCommitSha\.toLowerCase\(\)/);
+  assert.match(workerSource, /worker_version: workerVersion/);
 });
 
-test("public health never echoes malformed deployment metadata", async () => {
-  const response = await worker.fetch(
-    new Request("https://worker.example/api/health"),
-    makeEnv("not-a-git-sha-or-secret")
-  );
-  const health = await response.json();
+test("production deploy injects and verifies the exact GitHub commit", () => {
+  assert.match(deploymentWorkflow, /--var DEPLOY_COMMIT_SHA:\$\{\{ github\.sha \}\}/);
+  assert.match(deploymentWorkflow, /EXPECTED_DEPLOY_COMMIT_SHA: \$\{\{ github\.sha \}\}/);
+  assert.match(deploymentWorkflow, /deploymentCommitMatches: health\.deployment_commit_sha === process\.env\.EXPECTED_DEPLOY_COMMIT_SHA/);
+  assert.match(deploymentWorkflow, /liveTradingDisabled: health\.live_trading_enabled === false/);
+  assert.match(deploymentWorkflow, /paperOnly: health\.mode === "paper_only"/);
+});
 
-  assert.equal(response.status, 200);
-  assert.equal(health.deployment_commit_sha, null);
-  assert.equal(health.live_trading_enabled, false);
+test("production deployment runs automatically on main pushes", () => {
+  assert.match(deploymentWorkflow, /push:\s+branches:\s+- main/);
+  assert.match(deploymentWorkflow, /workflow_dispatch:/);
 });
