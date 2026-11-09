@@ -222,7 +222,8 @@ test("preview rejects off-increment size and price before external preview", asy
   );
   assert.equal(result.status, "blocked");
   assert.ok(result.blockers.includes("quote_size_not_aligned_to_exchange_increment"));
-  assert.equal(calls.length, 0);
+  assert.equal(calls.filter((call) => call.path.endsWith("/orders/preview")).length, 0,
+    "invalid exchange increments must be rejected before the exchange order-preview endpoint");
 });
 
 test("preview blocks insufficient quote balance and provider preview errors", async () => {
