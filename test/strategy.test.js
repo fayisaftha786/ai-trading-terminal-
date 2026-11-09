@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import vm from "node:vm";
-import { ema, rsiWilder, auditCandles, analyzeTimeframe, classifyMarketRegime, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "../src/strategy.js";
+import { ema, rsiWilder, auditCandles, analyzeTimeframe, classifyMarketRegime, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "../src/strategy.js";
 
 function makeCandles(count, intervalMs, startMs = 0, trend = 0.15) {
   return Array.from({ length: count }, (_, index) => {
@@ -428,4 +428,72 @@ test("market regime classifier fails closed for missing, invalid and discontinuo
   const result = classifyMarketRegime(auditCandles(broken, 3600000, now, 80));
   assert.equal(result.status, "unavailable");
   assert.equal(result.regime, "UNCLASSIFIED");
+});
+
+
+test("BTC-led market context requires fresh breadth and blocks risk-off regimes", () => {
+  const now = Date.now();
+  const row = (symbol, oneHour, sixHour, age = 1000) => ({
+    symbol, status: "live", ticker_time: new Date(now - age).toISOString(),
+    primary: { regime: oneHour }, higher: { regime: sixHour }
+  });
+  const riskOn = assessCrossMarketContext([
+    row("BTC/USD", "UPTREND", "UPTREND"),
+    row("ETH/USD", "UPTREND", "RANGE_OR_TRANSITION"),
+    row("SOL/USD", "RANGE_OR_TRANSITION", "UPTREND")
+  ], now);
+  assert.equal(riskOn.status, "verified");
+  assert.equal(riskOn.mode, "RISK_ON");
+  assert.equal(riskOn.allowed_for_long_entries, true);
+  assert.equal(riskOn.breadth_1h.uptrend, 2);
+  assert.equal(riskOn.breadth_6h.uptrend, 2);
+
+  const riskOff = assessCrossMarketContext([
+    row("BTC/USD", "UPTREND", "DOWNTREND"),
+    row("ETH/USD", "UPTREND", "UPTREND"),
+    row("SOL/USD", "UPTREND", "UPTREND")
+  ], now);
+  assert.equal(riskOff.mode, "RISK_OFF");
+  assert.equal(riskOff.allowed_for_long_entries, false);
+
+  const highVol = assessCrossMarketContext([
+    row("BTC/USD", "UPTREND", "UPTREND"),
+    row("ETH/USD", "HIGH_VOLATILITY", "UPTREND"),
+    row("SOL/USD", "UPTREND", "UPTREND")
+  ], now);
+  assert.equal(highVol.mode, "RISK_OFF");
+  assert.equal(highVol.reason, "market_volatility_expansion");
+
+  const stale = assessCrossMarketContext([
+    row("BTC/USD", "UPTREND", "UPTREND"),
+    row("ETH/USD", "UPTREND", "UPTREND", 180000),
+    row("SOL/USD", "UPTREND", "UPTREND")
+  ], now);
+  assert.equal(stale.status, "unavailable");
+  assert.equal(stale.mode, "BLOCKED");
+  assert.equal(stale.allowed_for_long_entries, false);
+});
+
+test("production candidate gate enforces BTC-led market context when supplied", () => {
+  const now = Date.now();
+  const market = {
+    status: "live", ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
+    bid: 100, ask: 100.01, last: 100, quote_volume_usd: 5000000,
+    bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000
+  };
+  const primary = {
+    signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000, atr_pct: 2, rsi14: 55,
+    adx14: 30, plus_di14: 40, minus_di14: 10
+  };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const costs = { feeBpsPerSide: 15, slippageBps: 10 };
+  const cautious = { status: "verified", mode: "CAUTIOUS", allowed_for_long_entries: false };
+  const riskOn = { status: "verified", mode: "RISK_ON", allowed_for_long_entries: true };
+  const blocked = { status: "unavailable", mode: "BLOCKED", allowed_for_long_entries: false };
+  assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs, marketContext: cautious }).reason,
+    "cross_market_regime_cautious");
+  assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs, marketContext: blocked }).reason,
+    "cross_market_context_unavailable");
+  assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs, marketContext: riskOn }).eligible, true);
 });
