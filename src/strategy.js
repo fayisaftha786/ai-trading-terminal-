@@ -21,7 +21,7 @@ export function isFreshQuoteObservation(market, nowMs = Date.now(), maxQuoteAgeM
     const receivedAge = nowMs - receivedAt;
     if (receivedAge < -5000 || receivedAge > maxQuoteAgeMs) return false;
     const eventTime = Date.parse(market.ticker_time || "");
-    return !Number.isFinite(eventTime) || eventTime <= nowMs + 5000;
+    return Number.isFinite(eventTime) && eventTime <= nowMs + 5000;
   }
 
   // Backward compatibility for persisted snapshots created before the local
