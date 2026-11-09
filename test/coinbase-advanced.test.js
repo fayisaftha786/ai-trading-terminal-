@@ -6,7 +6,8 @@ import {
   createCoinbaseAdvancedJwt,
   preflightCoinbaseAdvanced,
   previewCoinbaseAdvancedLimitBuy,
-  submitCoinbaseAdvancedLimitBuy
+  submitCoinbaseAdvancedLimitBuy,
+  listCoinbaseAdvancedFills
 } from "../src/coinbase-advanced.js";
 
 globalThis.crypto ||= webcrypto;
@@ -61,7 +62,7 @@ async function verifyJwt(token, publicKeyPem) {
   return { header, payload, valid };
 }
 
-function mockApi(env, { permissions, accounts, product, preview, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsPages, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -99,6 +100,12 @@ function mockApi(env, { permissions, accounts, product, preview, calls = [] } = 
         slippage: "0.00", errs: [], warning: []
       });
     }
+    if (parsed.pathname.endsWith("/orders/historical/fills")) {
+      const cursor = parsed.searchParams.get("cursor") || "";
+      const pageIndex = cursor ? 1 : 0;
+      if (Array.isArray(fillsPages)) return Response.json(fillsPages[pageIndex] || { fills: [] });
+      return Response.json({ fills: [], cursor: "" });
+    }
     throw new Error("Unexpected endpoint " + parsed.pathname);
   };
   return { fetchImpl, calls };
@@ -124,7 +131,8 @@ test("guarded order switch remains closed by default and requires strict daily/o
     COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
     COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
   }));
-  assert.equal(on.order_submission_available, true, "the guarded manual route is available only when explicitly configured");
+  assert.equal(on.order_submission_available, false, "static configuration alone must never prove live execution readiness");
+  assert.equal(on.order_submission_configured, true, "explicit execution setup is reported separately from dynamic preflight readiness");
   assert.equal(on.max_open_orders, 1);
   assert.equal(on.max_daily_orders, 1);
   const invalid = coinbaseAdvancedStatus(makeEnv({
@@ -154,6 +162,77 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.nbf, 1800000000);
   assert.equal(verified.payload.exp - verified.payload.nbf, 90);
   assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
+});
+
+test("manual submission availability requires fresh successful preflight and Coinbase Trade permission", async () => {
+  const env = makeEnv({
+    COINBASE_ADVANCED_ORDER_ENABLED: "true",
+    COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
+    COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
+  });
+  const viewOnly = mockApi(env, {
+    permissions: { can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "portfolio-test" }
+  });
+  const viewResult = await preflightCoinbaseAdvanced(env, { fetchImpl: viewOnly.fetchImpl });
+  assert.equal(viewResult.status, "preflight_ready_for_manual_order_preview");
+  assert.equal(viewResult.order_submission_available, false);
+  assert.equal(viewResult.live_trading_enabled, false);
+
+  const tradeKey = mockApi(env, {
+    permissions: { can_view: true, can_trade: true, can_transfer: false, portfolio_uuid: "portfolio-test" }
+  });
+  const tradeResult = await preflightCoinbaseAdvanced(env, { fetchImpl: tradeKey.fetchImpl });
+  assert.equal(tradeResult.status, "preflight_ready_for_manual_order_preview");
+  assert.equal(tradeResult.order_submission_available, true);
+  assert.equal(tradeResult.permissions.can_transfer, false);
+});
+
+test("list fills normalizes exchange records, filters by order and paginates", async () => {
+  const env = makeEnv();
+  const fill = (entryId, tradeId) => ({
+    entry_id: entryId, trade_id: tradeId, order_id: "order-test-1", product_id: "BTC-USD",
+    side: "BUY", trade_type: "FILL", trade_time: "2026-11-09T12:00:00.000Z",
+    sequence_timestamp: "2026-11-09T12:00:00.100Z", price: "100000.00",
+    size: "0.00010", commission: "0.01", liquidity_indicator: "MAKER", size_in_quote: false
+  });
+  const fake = mockApi(env, {
+    fillsPages: [
+      { fills: [fill("entry-1", "trade-1")], cursor: "next-page" },
+      { fills: [fill("entry-2", "trade-2")], cursor: "" }
+    ]
+  });
+  const result = await listCoinbaseAdvancedFills(env, { orderId: "order-test-1" }, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.count, 2);
+  assert.equal(result.pages, 2);
+  assert.equal(result.pagination_complete, true);
+  assert.equal(result.fills[0].entry_id, "entry-1");
+  assert.equal(result.fills[0].commission, "0.01");
+  assert.ok(fake.calls.every((call) => call.path.includes("order_ids=order-test-1")));
+});
+
+test("list fills rejects malformed records and mismatched exchange order IDs", async () => {
+  const env = makeEnv();
+  const malformed = mockApi(env, {
+    fillsPages: [{ fills: [{ order_id: "order-test-1" }], cursor: "" }]
+  });
+  await assert.rejects(
+    listCoinbaseAdvancedFills(env, { orderId: "order-test-1" }, { fetchImpl: malformed.fetchImpl }),
+    /coinbase_advanced_fill_record_invalid/
+  );
+  const mismatch = mockApi(env, {
+    fillsPages: [{
+      fills: [{
+        entry_id: "entry-1", order_id: "other-order", product_id: "BTC-USD",
+        side: "BUY", trade_type: "FILL", trade_time: "2026-11-09T12:00:00Z",
+        price: "100000", size: "0.0001", commission: "0"
+      }],
+      cursor: ""
+    }]
+  });
+  await assert.rejects(
+    listCoinbaseAdvancedFills(env, { orderId: "order-test-1" }, { fetchImpl: mismatch.fetchImpl }),
+    /coinbase_advanced_fill_order_id_mismatch/
+  );
 });
 
 test("preflight supports view-only permissions, transfer disabled, SPOT product and quote balance", async () => {
