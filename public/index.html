@@ -330,6 +330,7 @@ $("livePreflight").addEventListener("click",async()=>{
     const submitReady=ready&&result.order_submission_available===true&&result.permissions?.can_trade===true;
     $("liveState").textContent=submitReady?"TRADE PREFLIGHT READY · PREVIEW REQUIRED":ready?"VIEW PREFLIGHT READY · TRADE PERMISSION REQUIRED":"LIVE LOCKED · "+String(result.status||"BLOCKED").toUpperCase();
     $("liveState").className="tag "+(submitReady?"good":"bad");
+    if(currentTradingMode==="real")$("modeBadge").textContent=submitReady?"REAL SELECTED · MANUAL CONFIRMATION":"REAL SELECTED · ORDERS LOCKED";
     $("liveSummary").textContent=(result.eligible_products||[]).join(", ")||((result.blockers||[]).join(" · ")||"No eligible product");
     $("livePreview").disabled=!ready;
     if(ready&&result.eligible_products?.length&&!$("liveProduct").value)$("liveProduct").value=result.eligible_products[0];
@@ -362,6 +363,7 @@ $("livePreview").addEventListener("click",async()=>{
       :(result.blockers||result.preview_errors||[]).join(" · ")||result.status;
     $("liveState").textContent=canSubmit?"PREVIEW READY · MANUAL CONFIRM REQUIRED":"PREVIEW ONLY · SUBMISSION LOCKED";
     $("liveState").className="tag "+(canSubmit?"good":"bad");
+    if(currentTradingMode==="real")$("modeBadge").textContent=canSubmit?"REAL SELECTED · MANUAL CONFIRMATION":"REAL SELECTED · ORDERS LOCKED";
   }catch(error){livePreviewResult=null;$("liveDetails").textContent=error.message;$("liveSummary").textContent=error.message;}
   finally{$("livePreview").disabled=false;$("livePreview").textContent="Preview LIMIT order";}
 });
@@ -396,9 +398,12 @@ $("liveReconcile").addEventListener("click",async()=>{
   try{
     const data=await api("/api/live/orders");
     const rows=Array.isArray(data.orders)?data.orders:[];
-    const candidates=rows.filter(order=>order?.client_order_id&&
-      (["SUBMITTING","UNKNOWN","PENDING","OPEN","QUEUED","PARTIALLY_FILLED","CANCEL_QUEUED"].includes(String(order.status||"").toUpperCase())||
-       !order.fill_sync||order.fill_sync.status!=="complete"));
+    const candidates=rows.filter(order=>{
+      if(!order?.client_order_id)return false;
+      const unresolved=["SUBMITTING","UNKNOWN","PENDING","OPEN","QUEUED","PARTIALLY_FILLED","CANCEL_QUEUED"].includes(String(order.status||"").toUpperCase());
+      const needsFillSync=!!order.exchange_order_id&&(!order.fill_sync||order.fill_sync.status!=="complete");
+      return unresolved||needsFillSync;
+    });
     const selected=candidates.slice(0,20);
     let synced=0;
     for(const order of selected){
