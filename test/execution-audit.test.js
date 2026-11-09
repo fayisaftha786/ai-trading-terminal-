@@ -7,7 +7,7 @@ test("execution audit reports only available spread and modeled cost samples", (
     { status: "CLOSED", metadata: { entry_quote_bid: 99.9, entry_quote_ask: 100.1, entry_slippage_bps: 10, exit_slippage_bps: 10, round_trip_cost_bps: 142 } },
     { status: "OPEN", metadata: { spread_bps: 4, slippage_bps: 12, round_trip_cost_bps: 150 } }
   ]);
-  assert.equal(result.scope_count, 2);
+  assert.equal(result.scope_count, 3);
   assert.equal(result.sample_count, 2);
   assert.equal(result.entry_spread_sample_count, 2);
   assert.equal(result.average_entry_spread_bps, 12);
