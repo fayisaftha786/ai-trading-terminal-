@@ -42,6 +42,8 @@ The read-only scanner now reports the configured exchange separately from the ac
 
 ## Strategy research lab
 
+The research lab is shown in both the Python/FastAPI market-analysis panel and the Cloudflare Worker Market Intelligence table. The Cloudflare Worker currently evaluates its own Coinbase 1H/6H paper-market snapshots; the Python service uses the actual provider interval returned by its market-data adapter. Both implementations are research-only and remain disconnected from automatic entry.
+
 The read-only market scanner now compares three separate spot-long research hypotheses alongside the existing trend signal:
 
 - `trend_pullback`: higher-timeframe uptrend, EMA20 reclaim after a pullback, positive directional strength, controlled RSI and ATR.
