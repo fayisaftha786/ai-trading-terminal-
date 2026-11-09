@@ -258,7 +258,7 @@ test("fresh local ticker retrieval remains usable for paper exits when last trad
 });
 
 
-test("candidate gate accepts a fresh received quote even when the last trade is older", () => {
+test("candidate gate blocks a newly retrieved quote when no recent exchange trade occurred", () => {
   const now = Date.now();
   const market = {
     status: "live",
@@ -279,5 +279,23 @@ test("candidate gate accepts a fresh received quote even when the last trade is 
     market, primary, higher, nowMs: now,
     costs: { feeBpsPerSide: 15, slippageBps: 10 }
   });
-  assert.equal(result.eligible, true);
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, "ticker_stale_or_timestamp_invalid");
+});
+
+
+test("fresh received bid can still mark an open PAPER position when exchange event time is missing", () => {
+  const now = Date.now();
+  const market = {
+    symbol: "ETH/USD",
+    status: "live",
+    quote_received_at_ms: now - 500,
+    bid: 2000,
+    ask: 2000.1
+  };
+  assert.equal(isFreshBidQuote(market, now), true);
+  assert.deepEqual([...buildFreshBidMarks([market], now).entries()], [["ETH/USD", 2000]]);
+  const oldSchema = { ...market };
+  delete oldSchema.quote_received_at_ms;
+  assert.equal(isFreshBidQuote(oldSchema, now), false);
 });
