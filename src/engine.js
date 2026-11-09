@@ -11,7 +11,7 @@ import {
   cancelCoinbaseAdvancedOrder,
   listCoinbaseAdvancedFills
 } from "./coinbase-advanced.js";
-import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
+import { analyzeTimeframe, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
@@ -1328,7 +1328,9 @@ export class TradingEngine extends DurableObject {
     // disable action cannot be hidden by a stale pre-fetch automation setting.
     const state = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
+    const marketContext = assessCrossMarketContext(markets, Date.now());
     for (const market of markets) {
+      market.market_context = marketContext;
       if (market.status !== "live") {
         market.entry_gate = { eligible: false, reason: "market_data_unavailable" };
       } else if (market.one_hour_audit_summary?.ok !== true) {
@@ -1341,7 +1343,8 @@ export class TradingEngine extends DurableObject {
           primary: market.primary || {},
           higher: market.higher || {},
           nowMs: Date.now(),
-          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
+          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps },
+          marketContext
         });
       }
       this.saveMarket(market, market.status === "live" ? "live" : "error");
@@ -1519,7 +1522,7 @@ export class TradingEngine extends DurableObject {
         data_quality: market.data_quality || null, error: market.error || null
       })),
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
-      market_feed: marketFeed,
+      market_feed: marketFeed, market_context: marketContext,
       portfolio: updatedPortfolio, live_trading_enabled: false, binance_testnet_enabled: false
     };
   }
@@ -2510,6 +2513,7 @@ export class TradingEngine extends DurableObject {
       },
       automation: this.automationStatus(),
       current_market_feed: currentMarketFeedDiagnostics,
+      market_context: assessCrossMarketContext(markets, nowMs),
       portfolio, markets, trades, open_positions: openPositions,
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
       runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
