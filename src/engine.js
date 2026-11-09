@@ -106,9 +106,41 @@ export class TradingEngine extends DurableObject {
     const url = new URL(request.url);
     try {
       if (request.method === "GET" && url.pathname === "/api/health") {
+        // Expose only non-sensitive scheduler telemetry publicly so an external
+        // watchdog can distinguish a live Worker from a stalled Durable Object alarm.
+        const runtime = this.getState("runtime") || {};
+        const nowMs = Date.now();
+        const lastAlarmValue = Number(runtime.last_scheduled_alarm_at_ms);
+        const lastAlarmAtMs = Number.isFinite(lastAlarmValue) && lastAlarmValue > 0 && lastAlarmValue <= nowMs + 5000
+          ? lastAlarmValue : null;
+        const scheduler = deriveSchedulerStatus({
+          lastScheduledAlarmAtMs: lastAlarmAtMs,
+          lastScheduledScanStatus: runtime.last_scheduled_scan_status,
+          nowMs,
+          staleAfterMs: SCAN_INTERVAL_MS * 3
+        });
+        const lastHealthyValue = Number(runtime.last_healthy_scheduled_scan_at_ms);
+        const lastHealthyAtMs = Number.isFinite(lastHealthyValue) && lastHealthyValue > 0 && lastHealthyValue <= nowMs + 5000
+          ? lastHealthyValue : null;
+        const nextAlarmValue = Number(runtime.next_alarm_at_ms);
+        const nextAlarmAtMs = Number.isFinite(nextAlarmValue) && nextAlarmValue > 0
+          ? nextAlarmValue : null;
+        const allowedScanStatuses = new Set(["running", "completed", "partial", "unavailable", "error"]);
+        const scanStatus = allowedScanStatuses.has(runtime.last_scheduled_scan_status)
+          ? runtime.last_scheduled_scan_status : "not_run";
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
-          schedule_minutes: 15, live_trading_enabled: false, binance_testnet_enabled: false
+          schedule_minutes: SCAN_INTERVAL_MS / 60000,
+          live_trading_enabled: false, binance_testnet_enabled: false,
+          scheduler: {
+            status: scheduler.status,
+            last_alarm_at_ms: lastAlarmAtMs,
+            last_alarm_age_ms: scheduler.ageMs,
+            last_scheduled_scan_status: scanStatus,
+            last_healthy_scan_at_ms: lastHealthyAtMs,
+            last_healthy_scan_age_ms: lastHealthyAtMs === null ? null : Math.max(0, nowMs - lastHealthyAtMs),
+            next_alarm_at_ms: nextAlarmAtMs
+          }
         });
       }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
