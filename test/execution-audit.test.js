@@ -21,6 +21,7 @@ test("execution audit keeps missing legacy metrics null rather than inventing th
   const result = summarizePaperExecution([
     { status: "CLOSED", metadata: {} },
     { status: "OPEN", metadata_json: "invalid-json" },
+    { status: "CLOSED", metadata: { entry_slippage_bps: null, exit_slippage_bps: null, round_trip_cost_bps: null, spread_bps: null } },
     null
   ]);
   assert.equal(result.scope_count, 2);
@@ -29,6 +30,9 @@ test("execution audit keeps missing legacy metrics null rather than inventing th
   assert.equal(result.average_exit_slippage_bps, null);
   assert.equal(result.average_estimated_round_trip_cost_bps, null);
   assert.equal(result.entry_spread_sample_count, 0);
+  assert.equal(result.entry_slippage_sample_count, 0);
+  assert.equal(result.exit_slippage_sample_count, 0);
+  assert.equal(result.round_trip_cost_sample_count, 0);
 });
 
 test("execution audit safely handles empty and malformed input", () => {
