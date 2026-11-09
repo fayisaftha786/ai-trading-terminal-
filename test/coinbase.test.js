@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
+import { createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
 
 test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
@@ -153,6 +153,59 @@ test("final Coinbase order-book refresh rejects malformed or crossed books", asy
     globalThis.fetch = originalFetch;
   }
 });
+test("Bitstamp order-book refresh returns fresh same-venue L2 evidence", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (url) => {
+    requested = String(url);
+    const timestamp = Math.floor(Date.now() / 1000);
+    return jsonResponse({
+      timestamp,
+      bids: [["100", "100"], ["99.99", "5"]],
+      asks: [["100.1", "100"], ["100.11", "5"]]
+    });
+  };
+  try {
+    const result = await fetchBitstampOrderBook("BTC-USD", createCoinbaseRequestState());
+    assert.match(requested, /\/api\/v2\/order_book\/btcusd\/\?group=1$/);
+    assert.equal(result.bid, 100);
+    assert.equal(result.ask, 100.1);
+    assert.equal(result.bid_depth_quote, 14999.95);
+    assert.equal(result.ask_depth_quote, 15000.65);
+    assert.equal(result.book_sequence, null);
+    assert.ok(Date.now() - result.book_retrieved_at_ms < 1000);
+    assert.ok(Date.now() - result.book_event_time_ms < 2000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Bitstamp order-book refresh rejects stale exchange timestamps and crossed books", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse({
+    timestamp: Math.floor((Date.now() - 16000) / 1000),
+    bids: [["100", "100"]],
+    asks: [["100.1", "100"]]
+  });
+  try {
+    await assert.rejects(
+      fetchBitstampOrderBook("BTC-USD", createCoinbaseRequestState()),
+      (error) => error.code === "provider_timestamp_invalid_or_stale"
+    );
+    globalThis.fetch = async () => jsonResponse({
+      timestamp: Math.floor(Date.now() / 1000),
+      bids: [["100.2", "100"]],
+      asks: [["100.1", "100"]]
+    });
+    await assert.rejects(
+      fetchBitstampOrderBook("BTC-USD", createCoinbaseRequestState()),
+      (error) => error.code === "order_book_failed_validation"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("snapshot uses ticker 24h volume and does not spend an extra request on stats", async () => {
   const originalFetch = globalThis.fetch;
   const now = Date.now();
