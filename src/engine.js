@@ -418,62 +418,7 @@ export class TradingEngine extends DurableObject {
         const record = records.find((item) => item.client_order_id === body?.client_order_id);
         if (!record) return jsonResponse({ status: "blocked", blockers: ["local_order_not_found"] }, 404);
         try {
-          const result = await reconcileCoinbaseAdvancedOrder(this.env, {
-            productId: record.product_id,
-            clientOrderId: record.client_order_id,
-            exchangeOrderId: record.exchange_order_id || undefined,
-            createdAtMs: record.created_at_ms
-          });
-          const reconciledOrder = result.found ? result.order : null;
-          Object.assign(record, reconciledOrder || {}, {
-            exchange_order_id: record.exchange_order_id || reconciledOrder?.order_id || null,
-            status: result.status,
-            last_reconciled_at_ms: Date.now(),
-            updated_at_ms: Date.now()
-          });
-          let fillSync = { status: "not_available", count: 0, pagination_complete: true };
-          if (record.exchange_order_id) {
-            try {
-              const fillResult = await listCoinbaseAdvancedFills(this.env, { orderId: record.exchange_order_id, limit: 100, maxPages: 5 });
-              let imported = 0;
-              for (const fill of fillResult.fills) {
-                this.sql.exec(
-                  "INSERT INTO live_fills(entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms,raw_json) " +
-                  "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(entry_id) DO UPDATE SET " +
-                  "trade_id=excluded.trade_id,order_id=excluded.order_id,client_order_id=excluded.client_order_id," +
-                  "product_id=excluded.product_id,side=excluded.side,trade_type=excluded.trade_type,trade_time=excluded.trade_time," +
-                  "sequence_timestamp=excluded.sequence_timestamp,price=excluded.price,size=excluded.size,commission=excluded.commission," +
-                  "liquidity_indicator=excluded.liquidity_indicator,size_in_quote=excluded.size_in_quote," +
-                  "imported_at_ms=excluded.imported_at_ms,raw_json=excluded.raw_json",
-                  fill.entry_id, fill.trade_id, fill.order_id, record.client_order_id, fill.product_id,
-                  fill.side, fill.trade_type, fill.trade_time, fill.sequence_timestamp,
-                  fill.price, fill.size, fill.commission, fill.liquidity_indicator,
-                  fill.size_in_quote ? 1 : 0, Date.now(), JSON.stringify(fill)
-                );
-                imported += 1;
-              }
-              fillSync = {
-                status: fillResult.pagination_complete ? "complete" : "partial",
-                count: fillResult.count,
-                imported,
-                pages: fillResult.pages,
-                pagination_complete: fillResult.pagination_complete,
-                synced_at_ms: Date.now()
-              };
-            } catch (fillError) {
-              fillSync = {
-                status: "error",
-                count: 0,
-                pagination_complete: false,
-                error_code: typeof fillError?.code === "string" ? fillError.code : "coinbase_fill_sync_failed",
-                synced_at_ms: Date.now()
-              };
-            }
-          }
-          record.fill_sync = fillSync;
-          const latest = this.getState("coinbase_live_orders") || [];
-          this.setState("coinbase_live_orders", latest.map((item) => item.client_order_id === record.client_order_id ? record : item).slice(0, 100));
-          return jsonResponse({ ...result, client_order_id: record.client_order_id, fill_sync: fillSync });
+          return jsonResponse(await this.reconcileAndSyncLiveOrder(record));
         } catch (error) {
           return jsonResponse({ status: "UNKNOWN", found: false, blockers: [typeof error?.code === "string" ? error.code : "order_reconciliation_failed"] }, 502);
         }
@@ -510,11 +455,38 @@ export class TradingEngine extends DurableObject {
         const records = this.getState("coinbase_live_orders") || [];
         const record = records.find((item) => item.client_order_id === body?.client_order_id);
         if (!record || !record.exchange_order_id) return jsonResponse({ status: "blocked", blockers: ["known_exchange_order_id_required"] }, 409);
+        if (!["PENDING", "OPEN", "QUEUED", "PARTIALLY_FILLED", "CANCEL_QUEUED"].includes(String(record.status || "").toUpperCase())) {
+          return jsonResponse({ status: "blocked", blockers: ["only_open_or_pending_exchange_orders_can_be_cancelled"] }, 409);
+        }
         const result = await cancelCoinbaseAdvancedOrder(this.env, { exchangeOrderId: record.exchange_order_id });
-        record.status = result.status;
+        // A successful batch-cancel response means queued, not terminal.
+        // Verify the actual exchange state and pull any fills that raced with cancel.
+        if (result.status === "CANCEL_QUEUED" || result.status === "UNKNOWN") {
+          record.status = "CANCEL_QUEUED";
+          record.cancel_requested_at_ms = Date.now();
+          record.updated_at_ms = Date.now();
+          const latest = this.getState("coinbase_live_orders") || [];
+          this.setState("coinbase_live_orders", latest.map((item) =>
+            item.client_order_id === record.client_order_id ? record : item
+          ).slice(0, 100));
+          try {
+            const reconciled = await this.reconcileAndSyncLiveOrder(record);
+            return jsonResponse({ cancel_request: result, reconciliation: reconciled, status: reconciled.status });
+          } catch (error) {
+            record.status = "UNKNOWN";
+            record.last_reconcile_error = typeof error?.code === "string" ? error.code : "order_reconciliation_failed";
+            record.updated_at_ms = Date.now();
+            const latest = this.getState("coinbase_live_orders") || [];
+            this.setState("coinbase_live_orders", latest.map((item) =>
+              item.client_order_id === record.client_order_id ? record : item
+            ).slice(0, 100));
+            return jsonResponse({ cancel_request: result, status: "UNKNOWN", blockers: [record.last_reconcile_error] }, 502);
+          }
+        }
+        record.status = "UNKNOWN";
         record.updated_at_ms = Date.now();
         this.setState("coinbase_live_orders", records.slice(0, 100));
-        return jsonResponse(result);
+        return jsonResponse({ ...result, status: "UNKNOWN", warning: "Cancellation was not confirmed by the exchange. Reconcile before retrying." }, 502);
       }
       if (request.method === "GET" && url.pathname === "/api/trading/mode") {
         const settings = this.getState("settings") || {};
@@ -856,6 +828,111 @@ export class TradingEngine extends DurableObject {
     }
   }
 
+  async reconcileAndSyncLiveOrder(record) {
+    const result = await reconcileCoinbaseAdvancedOrder(this.env, {
+      productId: record.product_id,
+      clientOrderId: record.client_order_id,
+      exchangeOrderId: record.exchange_order_id || undefined,
+      createdAtMs: record.created_at_ms
+    });
+    const reconciledOrder = result.found ? result.order : null;
+    Object.assign(record, reconciledOrder || {}, {
+      exchange_order_id: record.exchange_order_id || reconciledOrder?.order_id || null,
+      status: result.status,
+      last_reconciled_at_ms: Date.now(),
+      updated_at_ms: Date.now(),
+      last_reconcile_error: null
+    });
+    let fillSync = { status: "not_available", count: 0, pagination_complete: true };
+    if (record.exchange_order_id) {
+      try {
+        const fillResult = await listCoinbaseAdvancedFills(this.env, {
+          orderId: record.exchange_order_id, limit: 100, maxPages: 5
+        });
+        let processed = 0;
+        for (const fill of fillResult.fills) {
+          this.sql.exec(
+            "INSERT INTO live_fills(entry_id,trade_id,order_id,client_order_id,product_id,side,trade_type,trade_time,sequence_timestamp,price,size,commission,liquidity_indicator,size_in_quote,imported_at_ms,raw_json) " +
+            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(entry_id) DO UPDATE SET " +
+            "trade_id=excluded.trade_id,order_id=excluded.order_id,client_order_id=excluded.client_order_id," +
+            "product_id=excluded.product_id,side=excluded.side,trade_type=excluded.trade_type,trade_time=excluded.trade_time," +
+            "sequence_timestamp=excluded.sequence_timestamp,price=excluded.price,size=excluded.size,commission=excluded.commission," +
+            "liquidity_indicator=excluded.liquidity_indicator,size_in_quote=excluded.size_in_quote," +
+            "imported_at_ms=excluded.imported_at_ms,raw_json=excluded.raw_json",
+            fill.entry_id, fill.trade_id, fill.order_id, record.client_order_id, fill.product_id,
+            fill.side, fill.trade_type, fill.trade_time, fill.sequence_timestamp,
+            fill.price, fill.size, fill.commission, fill.liquidity_indicator,
+            fill.size_in_quote ? 1 : 0, Date.now(), JSON.stringify(fill)
+          );
+          processed += 1;
+        }
+        fillSync = {
+          status: fillResult.pagination_complete ? "complete" : "partial",
+          count: fillResult.count,
+          processed,
+          pages: fillResult.pages,
+          pagination_complete: fillResult.pagination_complete,
+          synced_at_ms: Date.now()
+        };
+      } catch (error) {
+        fillSync = {
+          status: "error",
+          count: 0,
+          pagination_complete: false,
+          error_code: typeof error?.code === "string" ? error.code : "coinbase_fill_sync_failed",
+          synced_at_ms: Date.now()
+        };
+      }
+    }
+    record.fill_sync = fillSync;
+    const latest = this.getState("coinbase_live_orders") || [];
+    this.setState("coinbase_live_orders", latest.map((item) =>
+      item.client_order_id === record.client_order_id ? record : item
+    ).slice(0, 100));
+    return { ...result, client_order_id: record.client_order_id, fill_sync: fillSync };
+  }
+
+  async reconcileOpenCoinbaseLiveOrders(source = "scheduled") {
+    if (!coinbaseAdvancedStatus(this.env).credentials_configured) {
+      return { status: "skipped", reason: "coinbase_credentials_not_configured", checked: 0 };
+    }
+    const records = this.getState("coinbase_live_orders") || [];
+    const activeStatuses = new Set([
+      "SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED",
+      "PARTIALLY_FILLED", "CANCEL_QUEUED"
+    ]);
+    const active = records.filter((item) => activeStatuses.has(String(item?.status || "").toUpperCase())).slice(0, 3);
+    let checked = 0;
+    let failed = 0;
+    for (const record of active) {
+      try {
+        await this.reconcileAndSyncLiveOrder(record);
+        checked += 1;
+      } catch (error) {
+        failed += 1;
+        record.status = "UNKNOWN";
+        record.last_reconcile_error = typeof error?.code === "string"
+          ? error.code : "live_order_reconciliation_failed";
+        record.updated_at_ms = Date.now();
+        const latest = this.getState("coinbase_live_orders") || [];
+        this.setState("coinbase_live_orders", latest.map((item) =>
+          item.client_order_id === record.client_order_id ? record : item
+        ).slice(0, 100));
+        this.logEvent("coinbase_live_auto_reconcile_error", "Automatic read-only live order reconciliation failed", {
+          client_order_id: record.client_order_id,
+          error_code: record.last_reconcile_error,
+          source
+        });
+      }
+    }
+    const runtime = this.getState("runtime") || {};
+    runtime.last_live_reconcile_at_ms = Date.now();
+    runtime.last_live_reconcile_checked = checked;
+    runtime.last_live_reconcile_failed = failed;
+    this.setState("runtime", runtime);
+    return { status: failed ? "partial" : "completed", checked, failed };
+  }
+
   async alarm() {
     const invokedAtMs = Date.now();
     const startingRuntime = this.getState("runtime") || {};
@@ -948,6 +1025,16 @@ export class TradingEngine extends DurableObject {
         consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
       });
     } finally {
+      // This performs read-only order/fill reconciliation only. It never
+      // creates, edits or cancels orders. With no credentials or no active
+      // local orders, it exits without contacting Coinbase.
+      try {
+        await this.reconcileOpenCoinbaseLiveOrders("scheduled_alarm");
+      } catch (error) {
+        this.logEvent("coinbase_live_auto_reconcile_error", "Scheduled read-only Coinbase order reconciliation failed", {
+          error_code: typeof error?.code === "string" ? error.code : "live_order_reconciliation_failed"
+        });
+      }
       const nextAt = Date.now() + SCAN_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = nextAt;
@@ -2325,6 +2412,14 @@ export class TradingEngine extends DurableObject {
       last_scan_error: runtime.last_scan_error ? String(runtime.last_scan_error).slice(0, 180) : null,
       next_alarm_at_ms: Number.isFinite(nextAlarmAtMs) ? nextAlarmAtMs : null,
       next_alarm_in_ms: nextAlarmInMs,
+      live_order_reconciliation: {
+        status: runtime.last_live_reconcile_failed > 0 ? "partial"
+          : runtime.last_live_reconcile_at_ms ? "completed" : "not_run",
+        last_at_ms: Number.isFinite(Number(runtime.last_live_reconcile_at_ms)) ? Number(runtime.last_live_reconcile_at_ms) : null,
+        checked: Number(runtime.last_live_reconcile_checked) || 0,
+        failed: Number(runtime.last_live_reconcile_failed) || 0,
+        scope: "read_only_active_coinbase_orders_and_actual_fills"
+      },
       runtime,
       engine: "durable_object_alarm",
       live_trading_enabled: false,

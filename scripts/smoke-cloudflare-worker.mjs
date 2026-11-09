@@ -229,6 +229,10 @@ try {
   assert.equal(scheduler.daily_cycles_used, 0);
   assert.equal(scheduler.daily_cycles_remaining, 5);
   assert.equal(scheduler.live_trading_enabled, false);
+  assert.deepEqual(scheduler.live_order_reconciliation, {
+    status: "not_run", last_at_ms: null, checked: 0, failed: 0,
+    scope: "read_only_active_coinbase_orders_and_actual_fills"
+  }, "scheduled live-order sync must remain read-only and report no work before credentials/orders exist");
   assert.equal(scheduler.last_scan_age_ms, null, "scan age must be null before the first completed scan");
   assert.equal(scheduler.last_scheduled_alarm_age_ms, null, "scheduled heartbeat age must be null before the first alarm");
   assert.equal(scheduler.last_scheduled_scan_status, "not_run", "scheduled scan state must be explicit before first alarm");
@@ -311,6 +315,7 @@ try {
   assert.match(staticHtml, /REAL COINBASE ORDER CONFIRMATION/);
   assert.match(staticHtml, /withdrawals are never enabled/);
   assert.match(staticHtml, /id="liveReconcile"/);
+  assert.match(staticHtml, /REAL order sync/);
   assert.match(staticHtml, /api\/live\/fills\?limit=100/);
   assert.match(staticHtml, /preview_token:preview\.preview_token/);
   assert.match(staticHtml, /bound server-side/);
