@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { calculateDynamicTakeProfit } from "../src/paper-automation-profile.js";
 import {
   assessMarketUniverse,
   advanceUnhealthyScanStreak,
@@ -226,6 +227,7 @@ test("adaptive risk only scales down and pauses at high drawdown", () => {
 
 test("cost-aware trailing stop activates before the dynamic take-profit at realistic fee assumptions", () => {
   const roundTripCostBps = 165;
+  const dynamicTarget = calculateDynamicTakeProfit({ atrPct: 0.8, roundTripCostBps });
   const dormant = updateTrailingStop({
     entryPrice: 100, currentStop: 99, previousHighWater: 100,
     currentBid: 102.1, roundTripCostBps
@@ -239,6 +241,8 @@ test("cost-aware trailing stop activates before the dynamic take-profit at reali
     currentBid: 102.4, roundTripCostBps
   });
   assert.equal(activated.active, true);
+  assert.equal(dynamicTarget.ok, true);
+  assert.ok(activated.activationPct < dynamicTarget.target_pct, "trailing stop must activate before the take-profit target");
   assert.ok(activated.stopLoss > 101.65, "stop must exceed estimated round-trip cost break-even");
   assert.ok(activated.stopLoss < 102.4);
 
