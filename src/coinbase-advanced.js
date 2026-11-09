@@ -155,7 +155,7 @@ export function coinbaseAdvancedStatus(env = {}) {
     max_order_quote: config.maxOrderQuoteValid ? config.maxOrderQuote : null,
     account_preflight_available: config.credentialsConfigured,
     order_preview_available: blockers.length === 0,
-    order_submission_available: blockers.length === 0 && config.orderExecutionEnabled && config.maxOpenOrders > 0,
+    order_submission_available: false, // No live order-submission route is implemented; never advertise it as available.
     order_execution_configured: config.orderExecutionEnabled,
     max_open_orders: config.maxOpenOrders || null,
     max_daily_orders: config.maxDailyOrders || null,
@@ -344,7 +344,6 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
     );
     const blockers = [...staticStatus.blockers];
     if (permissions.can_view !== true) blockers.push("api_key_view_permission_required");
-    if (permissions.can_trade !== true) blockers.push("api_key_trade_permission_required");
     if (permissions.can_transfer !== false) blockers.push("api_key_transfer_permission_must_be_disabled");
     if (!config.allowedProductsValid) {
       return {
@@ -355,7 +354,7 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
         }, balances: {}, products: [], blockers: [...new Set(blockers)]
       };
     }
-    if (permissions.can_view !== true || permissions.can_trade !== true || permissions.can_transfer !== false) {
+    if (permissions.can_view !== true || permissions.can_transfer !== false) {
       return {
         ...staticStatus, status: "blocked", permissions: {
           can_view: permissions.can_view === true,
