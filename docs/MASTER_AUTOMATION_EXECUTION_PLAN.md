@@ -24,7 +24,7 @@ The older Python/FastAPI backend, Render Blueprint and Binance Testnet documenta
 
 ## Cloudflare deployment — owner-controlled steps
 
-The public Worker URL currently responds and its health response reports scheduler `healthy` with the last scheduled scan `completed`. The `worker_version.tag` remains blank, so the exact current GitHub `main` revision is not yet proven deployed. The owner must:
+A live health check at 2026-11-09 04:46:35 UTC reported scheduler `healthy`, the last scheduled scan `completed`, last-alarm age 67.9 seconds and next alarm at 05:00:31 UTC. The Worker version timestamp was 04:29:42 UTC, but `worker_version.tag` remains blank, so the exact deployed GitHub revision is not yet proven. The owner must:
 
 1. Sign in to or create a Cloudflare account and choose the Free plan only.
 2. Read and accept Cloudflare's current Terms of Service and Privacy Policy directly with Cloudflare.
