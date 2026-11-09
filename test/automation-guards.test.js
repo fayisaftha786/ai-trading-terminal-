@@ -355,3 +355,26 @@ test("diagnostic parser handles multiple markets, deduplicates and respects real
     last_scan_error: "BTC/USD: stale"
   }), [{ symbol: "SOL/USD", reason: "provider_unavailable" }]);
 });
+
+
+test("market-universe gate validates exchange-side Bitstamp book timestamp as well as retrieval time", () => {
+  const market = healthyMarket("SOL/USD");
+  market.market_data_provider = "bitstamp_spot";
+  market.data_quality = {
+    ticker_provider: "bitstamp_spot",
+    book_provider: "bitstamp_spot",
+    one_hour_provider: "bitstamp_spot",
+    six_hour_provider: "bitstamp_spot"
+  };
+  market.book_event_time_ms = NOW - 16000;
+  const stale = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.ok(stale.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
+
+  market.book_event_time_ms = NOW - 1000;
+  const fresh = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.equal(fresh.healthy, true);
+
+  delete market.book_event_time_ms;
+  const missing = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.ok(missing.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
+});
