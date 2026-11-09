@@ -419,7 +419,8 @@ test("Bitstamp OHLC pair mismatch is rejected instead of mixing another market's
     assert.equal(snapshot.market_data_provider, "bitstamp_spot");
     assert.equal(snapshot.one_hour_audit.ok, false);
     assert.ok(snapshot.one_hour_audit.issues.includes("insufficient_closed_history"));
-    assert.equal(snapshot.data_quality.one_hour_refresh_status, "refresh_rejected");
+    assert.equal(snapshot.data_quality.one_hour_refresh_status, "provider_error_no_fresh_cache");
+    assert.equal(snapshot.data_quality.one_hour_refresh_error, "provider_server_error");
     assert.equal(snapshot.data_quality.failover_used, true);
   } finally {
     globalThis.fetch = originalFetch;
