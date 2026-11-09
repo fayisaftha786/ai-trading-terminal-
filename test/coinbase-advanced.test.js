@@ -7,7 +7,8 @@ import {
   preflightCoinbaseAdvanced,
   previewCoinbaseAdvancedLimitBuy,
   submitCoinbaseAdvancedLimitBuy,
-  listCoinbaseAdvancedFills
+  listCoinbaseAdvancedFills,
+  reconcileCoinbaseAdvancedOrder
 } from "../src/coinbase-advanced.js";
 
 globalThis.crypto ||= webcrypto;
@@ -62,7 +63,7 @@ async function verifyJwt(token, publicKeyPem) {
   return { header, payload, valid };
 }
 
-function mockApi(env, { permissions, accounts, product, preview, fillsPages, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -105,6 +106,18 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, cal
       const pageIndex = cursor ? 1 : 0;
       if (Array.isArray(fillsPages)) return Response.json(fillsPages[pageIndex] || { fills: [] });
       return Response.json({ fills: [], cursor: "" });
+    }
+    if (/\/orders\/historical\/[^/]+$/.test(parsed.pathname)) {
+      return Response.json(historicalOrder || { order: {
+        order_id: "order-test-1", client_order_id: "12345678-1234-1234-1234-123456789012",
+        product_id: "BTC-USD", side: "BUY", status: "FILLED",
+        filled_size: "0.0001", average_filled_price: "100000",
+        filled_value: "10", total_fees: "0.01",
+        total_fees_native: { value: "0.01", currency: "USD" },
+        total_value_after_fees_native: { value: "10.01", currency: "USD" },
+        commission_detail_total: { total_commission: "0.01", gst_commission: "0.001" },
+        completion_percentage: "100"
+      }});
     }
     throw new Error("Unexpected endpoint " + parsed.pathname);
   };
@@ -185,6 +198,26 @@ test("manual submission availability requires fresh successful preflight and Coi
   assert.equal(tradeResult.status, "preflight_ready_for_manual_order_preview");
   assert.equal(tradeResult.order_submission_available, true);
   assert.equal(tradeResult.permissions.can_transfer, false);
+});
+
+test("order reconciliation preserves explicitly denominated native fees without guessing from totals", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env);
+  const result = await reconcileCoinbaseAdvancedOrder(env, {
+    productId: "BTC-USD",
+    clientOrderId: "12345678-1234-1234-1234-123456789012",
+    exchangeOrderId: "order-test-1",
+    createdAtMs: 1794240000000
+  }, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "FILLED");
+  assert.equal(result.order.total_fees, "0.01");
+  assert.deepEqual(result.order.total_fees_native, { value: "0.01", currency: "USD" });
+  assert.deepEqual(result.order.total_value_after_fees_native, { value: "10.01", currency: "USD" });
+  assert.deepEqual(result.order.commission_detail_total, {
+    total_commission: "0.01", gst_commission: "0.001",
+    withholding_commission: null, client_commission: null,
+    venue_commission: null, regulatory_commission: null, clearing_commission: null
+  });
 });
 
 test("list fills normalizes exchange records, filters by order and paginates", async () => {
