@@ -33,7 +33,7 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 ## Authentication abuse protection
 
 - Failed-login attempts are recorded in the single TradingEngine Durable Object SQLite database, so the limiter is shared across Worker isolates and survives Worker restarts.
-- The limiter stores a one-way SHA-256 hash of the Cloudflare-provided source IP, not the raw address. It allows at most eight attempts per source in a rolling ten-minute window; a successful login clears that source's attempt history.
+- The limiter stores an HMAC-SHA-256 fingerprint of the Cloudflare-provided source IP, keyed with the Worker session secret; it does not store the raw address. It allows at most eight attempts per source in a rolling ten-minute window; a successful login clears that source's attempt history.
 - If the Durable Object rate-limit check or reset cannot be completed, login fails closed with a service-unavailable response. This keeps the authentication path dependent on the durable limiter rather than silently falling back to per-isolate memory.
 - This is a per-source throttling layer, not a replacement for strong unique passwords, Cloudflare platform protections or session revocation.
 
