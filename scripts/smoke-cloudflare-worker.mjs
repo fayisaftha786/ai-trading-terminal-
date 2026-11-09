@@ -218,7 +218,9 @@ try {
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
   assert.match(staticHtml, /Coinbase Advanced preflight/);
-  assert.match(staticHtml, /Order submission remains disabled/);
+  assert.match(staticHtml, /Automatic live entries remain OFF/);
+  assert.match(staticHtml, /Confirm guarded real order/);
+  assert.match(staticHtml, /client_order_id/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
 
