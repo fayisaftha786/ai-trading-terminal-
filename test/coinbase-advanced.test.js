@@ -344,6 +344,15 @@ test("Coinbase fills adapter paginates and restricts results to requested bot or
   assert.ok(fake.calls[1].path.includes("cursor=cursor-next"));
 });
 
+test("Coinbase fills adapter blocks when the provider requires an EU SCA proof token", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, { fillsResponses: [{ fills: [], cursor: "", proof_token_required: true }] });
+  await assert.rejects(
+    listCoinbaseAdvancedFills(env, { orderIds: ["order-1"] }, { fetchImpl: fake.fetchImpl }),
+    /fills_proof_token_required/
+  );
+});
+
 test("Coinbase fills adapter fails closed when fill pagination does not finish", async () => {
   const env = makeEnv();
   const fake = mockApi(env, {
