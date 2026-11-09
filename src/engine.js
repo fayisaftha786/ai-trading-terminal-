@@ -1,7 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, fetchProductSnapshot } from "./coinbase.js";
 import { analyzeTimeframe, assessCandidate, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, runAfterActiveScan, shouldHaltPaperAutomation, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
 import { runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 
@@ -367,7 +367,10 @@ export class TradingEngine extends DurableObject {
     const priorRuntime = this.getState("runtime") || {};
     const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
-      const result = await this.runCycle("scheduled", cycleKey);
+      const result = await runAfterActiveScan(
+        () => this.scanPromise,
+        () => this.runCycle("scheduled", cycleKey)
+      );
       const runtime = this.getState("runtime") || {};
       runtime.last_scheduled_alarm_at_ms = invokedAtMs;
       if (!result?.skipped) {
@@ -378,7 +381,10 @@ export class TradingEngine extends DurableObject {
         runtime.last_scheduled_scan_error = feed?.healthy === true ? null
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
-      } else {
+      } else if (runtime.last_scheduled_scan_status === "running") {
+        // A duplicate alarm can arrive while another scheduled run is active.
+        // Preserve the completed run's status if it finished while this alarm
+        // waited; otherwise restore the status from before this duplicate alarm.
         runtime.last_scheduled_scan_status = previousScheduledScanStatus;
         runtime.last_scheduled_scan_error = previousScheduledScanError;
       }
