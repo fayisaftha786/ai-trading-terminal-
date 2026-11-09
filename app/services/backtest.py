@@ -446,12 +446,12 @@ def _strict_signal_history(
     higher_quality = candle_integrity_report(higher_timeframe_candles, higher_timeframe_ms)
     if not primary_quality["is_clean"]:
         raise ValueError(
-            "Signal backtest rejected raw primary OHLCV history before normalization "
+            "Signal backtest blocked by missing/off-grid candle intervals, duplicate or invalid raw primary OHLCV history before normalization "
             f"({primary_quality})"
         )
     if not higher_quality["is_clean"]:
         raise ValueError(
-            "Signal backtest rejected raw higher-timeframe OHLCV history before normalization "
+            "Signal backtest blocked by missing/off-grid candle intervals, duplicate or invalid raw higher-timeframe OHLCV history before normalization "
             f"({higher_quality})"
         )
     return _validate(candles), _validate(higher_timeframe_candles)
