@@ -23,8 +23,32 @@ test("tournament rejects insufficient or discontinuous candle history", () => {
     "insufficient_clean_history");
   const broken = makeSeries(160, 3600000, 0);
   broken.splice(80, 1);
-  assert.equal(runStrategyTournament({ candles1h: broken, candles6h: sixHour }).reason,
-    "insufficient_clean_history");
+  const discontinuous = runStrategyTournament({ candles1h: broken, candles6h: sixHour });
+  assert.equal(discontinuous.reason, "invalid_candle_history");
+  assert.ok(discontinuous.issues_1h.includes("missing_intervals"));
+});
+
+test("tournament rejects malformed, duplicated and off-grid raw candles", () => {
+  const oneHour = makeSeries(160, 3600000, 0);
+  const sixHour = makeSeries(60, 21600000, 0);
+
+  const malformed = oneHour.slice();
+  malformed[30] = { ...malformed[30], volume: null };
+  const malformedResult = runStrategyTournament({ candles1h: malformed, candles6h: sixHour });
+  assert.equal(malformedResult.reason, "invalid_candle_history");
+  assert.ok(malformedResult.issues_1h.includes("invalid_ohlcv"));
+
+  const duplicated = oneHour.slice();
+  duplicated[30] = { ...duplicated[30], time: duplicated[29].time };
+  const duplicateResult = runStrategyTournament({ candles1h: duplicated, candles6h: sixHour });
+  assert.equal(duplicateResult.reason, "invalid_candle_history");
+  assert.ok(duplicateResult.issues_1h.includes("duplicate_timestamp"));
+
+  const offGrid = oneHour.slice();
+  offGrid[30] = { ...offGrid[30], time: offGrid[30].time + 1 };
+  const offGridResult = runStrategyTournament({ candles1h: offGrid, candles6h: sixHour });
+  assert.equal(offGridResult.reason, "invalid_candle_history");
+  assert.ok(offGridResult.issues_1h.includes("off_grid_timestamp"));
 });
 
 test("tournament uses next-bar fills and reports cost assumptions", () => {
@@ -86,6 +110,24 @@ test("backtest refuses leverage-like allocation and invalid costs", () => {
   assert.equal(result.reason, "invalid_backtest_options");
 });
 
+
+test("final forced liquidation costs are reflected in max drawdown", () => {
+  const oneHour = makeSeries(420, 3600000, 0, 1, 0.2).map((bar, index) => ({
+    ...bar, volume: index > 300 ? 2200 : 1000
+  }));
+  const sixHour = makeSeries(100, 21600000, 0, 5, 0.5);
+  const result = runStrategyTournament({
+    candles1h: oneHour,
+    candles6h: sixHour,
+    startIndex: 100,
+    options: { feeBpsPerSide: 1000, slippageBps: 500 }
+  });
+  assert.equal(result.ok, true);
+  const stressed = result.strategies.breakout_continuation;
+  assert.ok(stressed.trade_count > 0);
+  assert.ok(stressed.net_return_pct < 0);
+  assert.ok(stressed.max_drawdown_pct + 0.0001 >= Math.abs(stressed.net_return_pct));
+});
 
 test("same-bar stop and target collision resolves to stop first", () => {
   const result = resolveLongBarExit({
