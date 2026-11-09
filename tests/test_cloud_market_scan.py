@@ -34,7 +34,6 @@ def test_market_sources_must_match_provider_and_quote_currency():
     mismatched_provider = compare_market_sources(
         {"market_data_provider": "binance", "quote_currency": "USDT"},
         {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
-        "binance",
     )
     assert mismatched_provider["matched"] is False
     assert "provider_mismatch:ticker=binance,strategy=coinbase_public_fallback" in mismatched_provider["issues"]
