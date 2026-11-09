@@ -989,33 +989,39 @@ export class TradingEngine extends DurableObject {
     // Frequent alarms maintain L2 freshness independently from the heavier
     // strategy/candle scan. They do not alter scheduled-scan health counters.
     if (!fullScanDue) {
-      const runtime = this.getState("runtime") || {};
-      runtime.last_scheduled_alarm_at_ms = invokedAtMs;
-      this.setState("runtime", runtime);
+      let refreshResult = null;
+      let refreshErrorCode = null;
       try {
-        await runAfterActiveScan(
+        refreshResult = await runAfterActiveScan(
           () => this.scanPromise || this.researchBackfillPromise,
           () => this.refreshOrderBooksOnly()
         );
       } catch (error) {
-        const current = this.getState("runtime") || {};
-        current.last_book_refresh_at_ms = Date.now();
-        current.last_book_refresh_status = "error";
-        current.last_book_refresh_failed_count = PRODUCTS.length;
-        current.last_book_refresh_issues = [{
-          symbol: null,
-          reason: typeof error?.code === "string" ? error.code.slice(0, 100) : "book_refresh_cycle_failed"
-        }];
-        this.setState("runtime", current);
-        this.logEvent("order_book_refresh_error", "Scheduled L2-only market refresh failed", {
-          reason: current.last_book_refresh_issues[0].reason
-        });
+        refreshErrorCode = typeof error?.code === "string" && /^[a-z0-9_]{1,80}$/.test(error.code)
+          ? error.code
+          : "book_refresh_cycle_failed";
       } finally {
-        const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
+        // One scheduler-state write per short alarm; snapshot rows and setAlarm
+        // are the other bounded writes on this path.
         const current = this.getState("runtime") || {};
+        current.last_scheduled_alarm_at_ms = invokedAtMs;
+        if (refreshResult?.telemetry) {
+          Object.assign(current, refreshResult.telemetry);
+        } else if (refreshErrorCode) {
+          current.last_book_refresh_at_ms = Date.now();
+          current.last_book_refresh_status = "error";
+          current.last_book_refresh_failed_count = PRODUCTS.length;
+          current.last_book_refresh_issues = [{ symbol: null, reason: refreshErrorCode }];
+        }
+        const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
         current.next_alarm_at_ms = nextAt;
         this.setState("runtime", current);
         await this.ctx.storage.setAlarm(nextAt);
+      }
+      if (refreshErrorCode) {
+        this.logEvent("order_book_refresh_error", "Scheduled L2-only market refresh failed", {
+          reason: refreshErrorCode
+        });
       }
       return;
     }
@@ -2070,22 +2076,22 @@ export class TradingEngine extends DurableObject {
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
     this.portfolio(markBySymbol, risk, Date.now());
 
-    const runtime = this.getState("runtime") || {};
-    runtime.last_book_refresh_at_ms = Date.now();
-    runtime.last_book_refresh_status = status;
-    runtime.last_book_refresh_success_count = refreshed;
-    runtime.last_book_refresh_failed_count = failed;
-    runtime.last_book_refresh_skipped_count = skipped;
-    runtime.last_book_refresh_healthy_market_count = feed.healthy_market_count;
-    runtime.last_book_refresh_expected_market_count = feed.expected_market_count;
-    runtime.last_book_refresh_issues = issues.slice(0, PRODUCTS.length).map((issue) => ({
-      symbol: issue.symbol,
-      reason: String(issue.reason || "unknown").slice(0, 100)
-    }));
-    runtime.last_book_refresh_exits = exits;
-    this.setState("runtime", runtime);
+    const telemetry = {
+      last_book_refresh_at_ms: Date.now(),
+      last_book_refresh_status: status,
+      last_book_refresh_success_count: refreshed,
+      last_book_refresh_failed_count: failed,
+      last_book_refresh_skipped_count: skipped,
+      last_book_refresh_healthy_market_count: feed.healthy_market_count,
+      last_book_refresh_expected_market_count: feed.expected_market_count,
+      last_book_refresh_issues: issues.slice(0, PRODUCTS.length).map((issue) => ({
+        symbol: issue.symbol,
+        reason: String(issue.reason || "unknown").slice(0, 100)
+      })),
+      last_book_refresh_exits: exits
+    };
 
-    return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits };
+    return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits, telemetry };
   }
 
   getOpenTrades() {
