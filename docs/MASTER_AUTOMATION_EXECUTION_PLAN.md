@@ -56,7 +56,7 @@ Failed-login throttling now uses the TradingEngine Durable Object SQLite ledger 
 
 ## Phase 2 market-data source integrity
 
-The GitHub read-only scanner must not combine a ticker from one exchange/quote currency with OHLCV candles from another. Every result reports the ticker provider, strategy-candle provider, and both quote currencies. A signal is forced to HOLD unless provider and quote currency match exactly and the market is fresh with contiguous closed candles. Coinbase fallback is allowed for read-only diagnostics, but it cannot supply a signal for a Binance market unless the ticker side also comes from the same Coinbase USD source.
+The GitHub read-only scanner must not combine a ticker from one exchange/quote currency with OHLCV candles from another. Every result reports the configured exchange separately from the actual market-data adapter, plus the ticker provider, strategy-candle provider, and both quote currencies. A signal is forced to HOLD unless provider and quote currency match exactly and the market is fresh with contiguous closed candles. Coinbase fallback is allowed for read-only diagnostics, but it cannot supply a signal for a Binance market unless the ticker side also comes from the same Coinbase USD source.
 
 ## Phase 3 regime-aware strategy research
 
