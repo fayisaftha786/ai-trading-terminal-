@@ -137,6 +137,30 @@ try {
   assert.equal(dashboard.live_trading_enabled, false);
   assert.deepEqual(dashboard.research_history, [], "research archive starts empty before a successful live-data scan");
 
+
+  const liveStatusResponse = await request("/api/live/status", { headers: auth });
+  assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
+  const liveStatus = await liveStatusResponse.json();
+  assert.equal(liveStatus.mode, "live_setup_locked");
+  assert.equal(liveStatus.order_submission_available, false);
+  assert.equal(liveStatus.live_trading_enabled, false);
+  assert.equal(liveStatus.automatic_live_entries_enabled, false);
+  assert.equal(liveStatus.credentials_configured, false, "local smoke must not rely on exchange credentials");
+
+  const livePreflightResponse = await request("/api/live/preflight", {
+    method: "POST", headers: auth, body: "{}"
+  });
+  assert.equal(livePreflightResponse.status, 200);
+  const livePreflight = await livePreflightResponse.json();
+  assert.equal(livePreflight.status, "not_configured");
+  assert.equal(livePreflight.order_submission_available, false);
+
+  const blockedLiveExecute = await request("/api/live/execute", {
+    method: "POST", headers: auth, body: JSON.stringify({ product_id: "BTC-USD", quote_size: "10" })
+  });
+  assert.equal(blockedLiveExecute.status, 423, "production order submission must stay hard-locked");
+  assert.equal((await blockedLiveExecute.json()).live_trading_enabled, false);
+
   const initialScheduler = await request("/api/automation/status", { headers: auth });
   assert.equal(initialScheduler.status, 200, "owner scheduler watchdog API must load");
   const scheduler = await initialScheduler.json();
@@ -193,6 +217,8 @@ try {
   assert.match(staticHtml, /last_scan_error/);
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
+  assert.match(staticHtml, /Coinbase Advanced preflight/);
+  assert.match(staticHtml, /Order submission remains disabled/);
   assert.match(staticHtml, /Strategy tournament/);
   assert.match(staticHtml, /id="runTournament"/);
 
