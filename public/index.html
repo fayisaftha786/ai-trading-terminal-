@@ -396,8 +396,12 @@ $("liveReconcile").addEventListener("click",async()=>{
   try{
     const data=await api("/api/live/orders");
     const rows=Array.isArray(data.orders)?data.orders:[];
+    const candidates=rows.filter(order=>order?.client_order_id&&
+      (["SUBMITTING","UNKNOWN","PENDING","OPEN","QUEUED","PARTIALLY_FILLED","CANCEL_QUEUED"].includes(String(order.status||"").toUpperCase())||
+       !order.fill_sync||order.fill_sync.status!=="complete"));
+    const selected=candidates.slice(0,20);
     let synced=0;
-    for(const order of rows){
+    for(const order of selected){
       if(!order?.client_order_id)continue;
       try{
         await api("/api/live/reconcile",{method:"POST",body:JSON.stringify({client_order_id:order.client_order_id})});
@@ -406,8 +410,8 @@ $("liveReconcile").addEventListener("click",async()=>{
     }
     await refreshLiveOrders();
     $("liveSummary").textContent=synced
-      ?"Reconciled "+synced+" local orders · exchange fill ledger refreshed where available"
-      :"No local REAL orders to reconcile yet";
+      ?"Reconciled "+synced+" local orders · exchange fill ledger refreshed where available"+(candidates.length>selected.length?" · "+(candidates.length-selected.length)+" more queued for next sync":"")
+      :"No unresolved local REAL orders to reconcile";
   }catch(error){$("liveSummary").textContent=error.message;}
   finally{$("liveReconcile").disabled=false;$("liveReconcile").textContent="Reconcile orders & sync fills";}
 });
