@@ -397,7 +397,7 @@ export function classifyMarketRegime(audit, intervalMs = 3600000) {
   };
 }
 
-export function analyzeTimeframe(audit) {
+export function analyzeTimeframe(audit, intervalMs = 3600000) {
   if (!audit?.ok) {
     return {
       signal: "HOLD",
@@ -425,7 +425,7 @@ export function analyzeTimeframe(audit) {
   const trendDown = fast.at(-1) < slow.at(-1) && closes.at(-1) < slow.at(-1) && emaSlopePct < 0;
   // Use rolling ATR distribution as well as an absolute emergency cap.
   // A volatility expansion can become dangerous well before ATR reaches 8%.
-  const regimeDiagnostics = classifyMarketRegime(audit);
+  const regimeDiagnostics = classifyMarketRegime(audit, intervalMs);
   const volatilityExpanded = regimeDiagnostics.status === "classified" &&
     regimeDiagnostics.regime === "HIGH_VOLATILITY";
   const regime = atrPct >= 8 || volatilityExpanded ? "HIGH_VOLATILITY"
@@ -506,8 +506,8 @@ export function evaluateResearchCandidates(
     return blocked("higher_timeframe_data_is_from_the_future");
   }
 
-  const primary = analyzeTimeframe(primaryAudit);
-  const higher = analyzeTimeframe(higherAudit);
+  const primary = analyzeTimeframe(primaryAudit, 3600000);
+  const higher = analyzeTimeframe(higherAudit, higherIntervalMs);
   const metricNames = ["rsi14", "atr_pct", "adx14", "plus_di14", "minus_di14", "ema50"];
   if (!metricNames.every((name) => Number.isFinite(primary[name]) && Number.isFinite(higher[name]))) {
     return blocked("indicator_metrics_invalid");
