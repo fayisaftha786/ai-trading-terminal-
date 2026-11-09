@@ -25,7 +25,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet ex
 - Initial virtual equity is USD 10; reserve USD 2; maximum position notional USD 8; one open position; up to five completed BUY→SELL cycles per UTC day. Entry risk is 1% of equity, daily loss guard 1%, weekly loss guard 4%, total drawdown stop 5%, and each symbol has a 4-hour cooldown.
 - Simulated stop-loss is 1%; take-profit is dynamic and cost/ATR-aware. Estimated fees are 60 bps per side plus 10 bps slippage per side. Daily, weekly and overall drawdown limits are separate guards.
 - Adaptive risk reduces position size as drawdown/loss streaks rise. Consecutive losses, data-quality streaks, stale scheduler heartbeat and total drawdown can latch-stop new entries.
-- The kill switch disables new entries while scheduled monitoring continues. Reset requires no open PAPER positions and never silently turns auto-entry back on.
+- The kill switch disables new entries while scheduled monitoring continues. Reset requires no open PAPER positions and never silently turns auto-entry back on. A legacy starting-balance mismatch requires an explicit capital review after all positions are closed; this preserves the old virtual balance and historical trades, updates risk limits, and keeps auto-entry OFF.
 - The 15-minute production / proposed 90-second exit monitor is simulated, not an exchange-native protective order. Gaps and outages can make simulated fills materially worse than the trigger.
 
 ## Current source and validation state
