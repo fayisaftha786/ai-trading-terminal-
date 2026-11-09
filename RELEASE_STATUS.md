@@ -36,23 +36,23 @@ A further PAPER entry hardening fix was merged in PR #28 (main commit `99532b93b
 
 **Not verified:** physical installation on the owner's Vivo device, Cloudflare account deployment, regional Coinbase access from that account, actual 15-minute alarm cadence or a forward paper-trading sample.
 
-## Latest market scan — 2026-11-09 04:17:59 UTC
+## Latest market scan — 2026-11-09 04:24:09 UTC
 
-The GitHub scheduled read-only scanner used public Binance data on current main commit `14674f79938d21410a0ac265e197a43fa97db7f1`:
+The GitHub scheduled read-only scanner used public Binance data on current main commit `0d54d15209828393cd9ee457e98abae9b2c40111`:
 
 | Symbol | Data | Last | Signal | Score | 1H regime | 6H regime | Spread |
 |---|---|---:|---|---:|---|---|---:|
-| BTC/USDT | Live | $74,884.30 | HOLD | 40 | DOWNTREND | DOWNTREND | 0.0013 bps |
-| ETH/USDT | Live | $2,140.60 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.0467 bps |
-| SOL/USDT | Live | $87.36 | HOLD | 40 | DOWNTREND | DOWNTREND | 1.1446 bps |
+| BTC/USDT | Live | $74,860.92 | HOLD | 40 | DOWNTREND | DOWNTREND | 0.0013 bps |
+| ETH/USDT | Live | $2,139.50 | HOLD | 30 | DOWNTREND | DOWNTREND | 0.0467 bps |
+| SOL/USDT | Live | $87.29 | HOLD | 40 | DOWNTREND | DOWNTREND | 2.2910 bps |
 
-All three markets had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All three signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. SOL's reported ticker age was approximately -679 ms (exchange timestamp slightly ahead of the runner clock), within the scanner's documented 5-second clock-skew tolerance; the raw negative age remains visible for audit. Timestamps more than 5 seconds in the future are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
+All three markets were fresh and had 349 clean closed candles on both 1H and 6H, with no gaps, duplicates, malformed rows or off-grid timestamps. All signals were HOLD because both timeframes were in a downtrend; no trade candidate qualified. SOL's ticker age was approximately -742 ms (exchange timestamp slightly ahead of runner clock), within the scanner's documented 5-second clock-skew tolerance; the raw age remains visible. Future timestamps beyond that tolerance are rejected. The scan was read-only: no orders were sent and no paper positions were created. GitHub schedules are best-effort, not a continuous 24/7 trading server.
 
 ## Cloud backend status
 
 **Audit updated 2026-11-09.** The public Cloudflare Worker URL currently responds with HTTP 200 and declares `mode=paper_only`, `live_trading_enabled=false` and `binance_testnet_enabled=false`. However, `worker_version.tag` is blank and the public health response does not include the scheduler telemetry now present in source. The endpoint is therefore reachable, but current-main production deployment and real alarm cadence remain **unverified**.
 
-Current GitHub `main`: `14674f79938d21410a0ac265e197a43fa97db7f1`. Main has passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
+Current GitHub `main`: `0d54d15209828393cd9ee457e98abae9b2c40111`. Main has passed backend/release verification, read-only scanner, Worker validation/local Durable Object smoke tests, and ARM64 Docker build/runtime smoke tests. Recent main changes add a public-safe scheduled-alarm heartbeat, 15-minute production watchdog, exact comparison to current main SHA, and explicit market-data provider/quote-currency fields.
 
 The previous GitHub Actions deployment attempt passed source checks, all 25 Worker unit tests and Wrangler dry-run build, then stopped at the credential check because `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` were empty. The recommended phone-only route is Cloudflare Dashboard → Workers & Pages → GitHub integration; this can create its own deployment authorization and avoids requiring those two GitHub Actions secrets. The owner must still sign in, connect the repository, and configure Cloudflare runtime secrets `ADMIN_PASSWORD` (16+ characters) and `SESSION_SECRET` (32+ characters). Never share them in chat or commit them.
 
