@@ -479,3 +479,17 @@ test("scheduled scan still runs after an in-flight manual scan rejects", async (
   );
   assert.deepEqual(result, { source: "scheduled" });
 });
+
+
+test("market-universe gate rejects unknown provider identifiers even when all fields agree", () => {
+  const market = healthyMarket("BTC/USD");
+  market.market_data_provider = "unknown_exchange";
+  market.data_quality = {
+    ticker_provider: "unknown_exchange",
+    book_provider: "unknown_exchange",
+    one_hour_provider: "unknown_exchange",
+    six_hour_provider: "unknown_exchange"
+  };
+  const result = assessMarketUniverse([market], ["BTC/USD"], NOW);
+  assert.ok(result.issues[0].reason.includes("market_data_provider_unsupported"));
+});
