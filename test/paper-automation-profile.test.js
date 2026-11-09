@@ -8,7 +8,8 @@ import {
   countCompletedPaperCyclesInWindow,
   migratePaperAutomationSettings,
   shouldAutoResumeWatchdog,
-  shouldResumePaperAutomationAfterWatchdog
+  shouldResumePaperAutomationAfterWatchdog,
+  reviewLegacyPaperCapital
 } from "../src/paper-automation-profile.js";
 
 test("fresh paper automation profile starts safely disabled with ten dollars and sequential limits", () => {
@@ -100,6 +101,52 @@ test("watchdog recovery only reenables paper entries after a fresh owner opt-in"
   assert.equal(shouldResumePaperAutomationAfterWatchdog({
     resumeAllowed: true, capitalSetupRequired: true
   }), false);
+});
+
+
+test("legacy capital review preserves historical ledger and keeps auto-entry off", () => {
+  const result = reviewLegacyPaperCapital({
+    initial_capital_usd: 100,
+    peak_equity_usd: 106,
+    capital_setup_required: true,
+    capital_setup_required_reason: "existing_paper_ledger_not_rebased_automatically",
+    auto_paper_enabled: false,
+    auto_paper_resume_after_watchdog: true,
+    halted: false,
+    risk: { max_open_positions: 3 }
+  }, {
+    action: "keep_existing_capital",
+    confirmed: true,
+    tradeCount: 8,
+    openPositions: 0
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.settings.initial_capital_usd, 100);
+  assert.equal(result.settings.peak_equity_usd, 106);
+  assert.equal(result.settings.paper_automation_profile_version, 2);
+  assert.equal(result.settings.capital_setup_required, false);
+  assert.equal(result.settings.auto_paper_enabled, false);
+  assert.equal(result.settings.auto_paper_resume_after_watchdog, false);
+  assert.equal(result.settings.risk.max_open_positions, 1);
+  assert.equal(result.settings.risk.fee_bps_per_side, 60);
+  assert.equal("capital_setup_required_reason" in result.settings, false);
+});
+
+test("legacy capital review blocks missing confirmation, missing history and open positions", () => {
+  const existing = {
+    initial_capital_usd: 100,
+    peak_equity_usd: 106,
+    capital_setup_required: true
+  };
+  assert.equal(reviewLegacyPaperCapital(existing, {
+    action: "keep_existing_capital", confirmed: false, tradeCount: 8, openPositions: 0
+  }).reason, "capital_review_confirmation_required");
+  assert.equal(reviewLegacyPaperCapital(existing, {
+    action: "keep_existing_capital", confirmed: true, tradeCount: 0, openPositions: 0
+  }).reason, "capital_review_history_required");
+  assert.equal(reviewLegacyPaperCapital(existing, {
+    action: "keep_existing_capital", confirmed: true, tradeCount: 8, openPositions: 1
+  }).reason, "capital_review_open_positions_must_be_closed");
 });
 
 test("dynamic take-profit clears estimated round-trip costs with a minimum net buffer", () => {
