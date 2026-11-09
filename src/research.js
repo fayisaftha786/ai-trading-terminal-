@@ -43,7 +43,9 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
       product: String(record.product || ""),
       symbol: String(record.product || "").replace("-", "/"),
       timeframe_seconds: intervalSeconds,
-      timeframe: intervalSeconds === 3600 ? "1H" : intervalSeconds === 21600 ? "6H" : intervalSeconds + "s",
+      timeframe: intervalSeconds === 60 ? "1M"
+        : intervalSeconds === 300 ? "5M"
+          : intervalSeconds === 3600 ? "1H" : intervalSeconds === 21600 ? "6H" : intervalSeconds + "s",
       bars_count: bars,
       first_candle_ms: first,
       last_candle_ms: last,
