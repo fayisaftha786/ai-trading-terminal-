@@ -53,7 +53,7 @@ const watchdogWorkflow = readFileSync(
 );
 
 test("deployment verification bypasses cached health responses and reports provenance", () => {
-  assert.match(deploymentWorkflow, /deploy_verify=\\$\\{GITHUB_SHA\\}-\\$\\{attempt\\}/);
+  assert.match(deploymentWorkflow, /deploy_verify=\$\{GITHUB_SHA\}-\$\{attempt\}/);
   assert.match(deploymentWorkflow, /deployment_commit_sha: health\.deployment_commit_sha/);
   assert.match(deploymentWorkflow, /deploymentCommitMatches: health\.deployment_commit_sha === process\.env\.EXPECTED_DEPLOY_COMMIT_SHA/);
 });
