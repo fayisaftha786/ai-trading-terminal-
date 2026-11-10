@@ -5,7 +5,7 @@
 ```text
 Jupiter Tokens API v2 (read-only) ─┐
                                   ├─ MarketDataService ─ token discovery / public CEX data
-CCXT public endpoints (read-only) ┘                         │
+Coinbase public REST endpoints (read-only) ┘                         │
                                                             ▼
                                  Raw OHLCV integrity gate (malformed / duplicate / off-grid / missing)
                                                             │
@@ -36,7 +36,7 @@ CCXT public endpoints (read-only) ┘                         │
 - Strategy replay/walk-forward reads the saved server-side risk and cost profile; the caller cannot submit alternative fee or risk assumptions to make a configuration appear better.
 - The risk manager decides whether a requested paper position fits configured exposure and loss budgets.
 - The paper broker is the only execution implementation in this version. Backtest signals use prior-close decisions and next-candle-open fills with explicit fee/slippage assumptions.
-- The production live route is a hard denial. The separately gated Binance Spot Testnet connector is manual LIMIT-only and not called by the automatic strategy. No Solana wallet signing or swap executor is included.
+- The production live route is a hard denial. No exchange sandbox or automatic live-order connector is used by the automatic strategy. No Solana wallet signing or swap executor is included.
 
 ## Solana future-live design gate
 
