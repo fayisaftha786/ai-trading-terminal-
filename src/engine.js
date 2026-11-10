@@ -1343,9 +1343,11 @@ export class TradingEngine extends DurableObject {
       } catch (error) {
         candleArchives.push({ product: product.product, provider_error: true, error: String(error?.message || error).slice(0, 120), received_at_ms: Date.now() });
         const status = Number(error?.status);
-        const errorCode = error?.code === "all_market_data_providers_unavailable"
-          ? "all_market_data_providers_unavailable"
-          : status === 429 ? "provider_rate_limited"
+        const errorCode = error?.code === "legacy_exit_market_data_unavailable"
+          ? "legacy_exit_market_data_unavailable"
+          : error?.code === "all_market_data_providers_unavailable"
+            ? "all_market_data_providers_unavailable"
+            : status === 429 ? "provider_rate_limited"
             : Number.isFinite(status) && status >= 500 ? "provider_server_error"
               : Number.isFinite(status) && status >= 400 ? "provider_http_error"
                 : error?.name === "TimeoutError" || error?.name === "AbortError"
@@ -2381,6 +2383,14 @@ export class TradingEngine extends DurableObject {
   openPaperTrade(candidate, portfolio, risk, nowMs) {
     const market = candidate.market;
     const assessment = candidate.assessment;
+    // Defense in depth: no caller or future route may open a fresh PAPER
+    // position from a legacy Bitstamp exit snapshot.
+    if (market?.market_data_provider !== "coinbase_exchange") {
+      return { ok: false, reason: "coinbase_market_data_required_for_new_entry" };
+    }
+    if (assessment?.eligible !== true) {
+      return { ok: false, reason: assessment?.reason || "paper_entry_assessment_not_eligible" };
+    }
     const previous = this.sql.exec(
       "SELECT status,opened_at_ms,closed_at_ms FROM trades WHERE symbol=? ORDER BY opened_at_ms DESC LIMIT 1",
       market.symbol
