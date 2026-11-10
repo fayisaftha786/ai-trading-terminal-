@@ -12,18 +12,6 @@
 
 .performance-actions{display:flex;gap:8px;align-items:center}.performance-actions select{width:auto;min-width:100px}.performance-actions a{text-decoration:none}.performance-grid{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:10px}.performance-grid>div{background:#0b1424;border:1px solid #263650;border-radius:9px;padding:11px;min-width:0}.performance-grid span{display:block;color:#8291ad;font-size:9px;text-transform:uppercase;letter-spacing:.5px}.performance-grid b{display:block;color:#e7efff;font:600 15px 'DM Mono',monospace;margin-top:7px;overflow:hidden;text-overflow:ellipsis}.performance-actions .btn{font-size:10px;padding:8px 10px}@media(max-width:1100px){.performance-grid{grid-template-columns:repeat(3,1fr)}}@media(max-width:760px){.performance-grid{grid-template-columns:repeat(2,1fr)}.performance-actions{flex-wrap:wrap}.performance-actions select{min-width:85px}}
 
-.testnet-panel{margin:16px 0;padding:18px;border-color:rgba(255,190,90,.25)}
-.testnet-banner{background:#2b2417;border:1px solid #5a4727;color:#e8c98a;border-radius:9px;padding:11px 12px;font-size:10px;line-height:1.65}
-.testnet-status-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px;margin:12px 0}
-.testnet-status-grid>div{background:#0a1424;border:1px solid #263650;border-radius:9px;padding:10px;min-width:0}
-.testnet-status-grid span{display:block;color:#8291ad;font-size:9px;text-transform:uppercase;letter-spacing:.5px}
-.testnet-status-grid b{display:block;color:#e7efff;font:600 12px 'DM Mono',monospace;margin-top:7px;overflow-wrap:anywhere}
-.testnet-actions{display:flex;gap:8px;margin:10px 0 14px}
-.testnet-order-form{display:grid;gap:11px;padding:13px;background:#0d1829;border:1px solid #273953;border-radius:10px}
-.testnet-orders-wrap{margin-top:13px}
-.testnet-orders-wrap td{font-size:9px}
-.testnet-panel button:disabled{opacity:.45;cursor:not-allowed}
-@media(max-width:760px){.testnet-status-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.testnet-actions{flex-wrap:wrap}.testnet-actions .btn{flex:1}}
 
 .cloud-auth-overlay{position:fixed;inset:0;z-index:1000;display:grid;place-items:center;padding:20px;background:rgba(3,7,15,.94);backdrop-filter:blur(10px)}
 .cloud-auth-card{width:min(100%,420px);display:grid;gap:13px;padding:26px;border:1px solid #344968;border-radius:18px;background:linear-gradient(155deg,#14223a,#0d1728);box-shadow:0 24px 80px #0009}
