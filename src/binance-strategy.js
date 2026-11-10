@@ -111,8 +111,13 @@ export function analyzeBinanceMultiTimeframeMarket({
   );
 
   const costConfig = costs && typeof costs === "object" && !Array.isArray(costs) ? costs : {};
-  const feeBpsPerSide = nonNegativeCostBps(costConfig.feeBpsPerSide, 10);
-  const slippageBpsPerSide = nonNegativeCostBps(costConfig.slippageBps, 5);
+  const feeBpsPerSide = nonNegativeCostBps(costConfig.feeBpsPerSide, 60);
+  const slippageBpsPerSide = nonNegativeCostBps(costConfig.slippageBps, 10);
+  const feeInputPresent = costConfig.feeBpsPerSide !== null &&
+    costConfig.feeBpsPerSide !== undefined &&
+    !(typeof costConfig.feeBpsPerSide === "string" && costConfig.feeBpsPerSide.trim() === "") &&
+    Number.isFinite(Number(costConfig.feeBpsPerSide));
+  const feeRateVerified = feeInputPresent && costConfig.feeRateStatus === "verified";
   const roundTripCostBps = spreadBps === null
     ? null : (2 * (feeBpsPerSide + slippageBpsPerSide)) + spreadBps;
   const atrPct = analyses["1h"]?.atr_pct;
@@ -290,9 +295,9 @@ export function analyzeBinanceMultiTimeframeMarket({
     },
     cost_model: {
       fee_bps_per_side: feeBpsPerSide,
-      fee_source: costConfig.feeSource === "binance_account_commission"
+      fee_source: feeRateVerified && costConfig.feeSource === "binance_account_commission"
         ? "binance_account_commission" : "configured_paper_assumption",
-      fee_rate_status: costConfig.feeRateStatus === "verified" ? "verified" : "fallback",
+      fee_rate_status: feeRateVerified ? "verified" : "fallback",
       slippage_bps_per_side: slippageBpsPerSide,
       spread_bps: spreadBps,
       round_trip_cost_bps: roundTripCostBps,
