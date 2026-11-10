@@ -60,9 +60,9 @@ jobs:
         shell: bash
         run: |
           set +e
-          timeout --signal=INT 18s npx --yes wrangler@4 tail ai-trading-terminal --format=json --sampling-rate=1 > /tmp/worker-tail.jsonl 2>&1 &
+          timeout --signal=INT 24s npx --yes wrangler@4 tail ai-trading-terminal --format=json > /tmp/worker-tail.jsonl 2>&1 &
           tail_pid=$!
-          sleep 4
+          sleep 6
           login_status="$(curl --silent --show-error --max-time 15 -o /tmp/login-probe.json -w '%{http_code}' -X POST "${WORKER_URL}/api/auth/login" -H 'content-type: application/json' --data '{"username":"__diagnostic_invalid_user__","password":"FakeOnly-NotARealPassword-2026!"}' 2>/dev/null)"
           health_status="$(curl --silent --show-error --max-time 15 -o /tmp/health-probe.json -w '%{http_code}' "${WORKER_URL}/api/health?runtime_probe=${GITHUB_SHA}" 2>/dev/null)"
           echo "DIAGNOSTIC_LOGIN_HTTP_STATUS=${login_status:-request_failed}"
@@ -71,7 +71,7 @@ jobs:
           echo "DIAGNOSTIC_HEALTH_HTTP_STATUS=${health_status:-request_failed}"
           cat /tmp/health-probe.json 2>/dev/null || true
           echo
-          sleep 3
+          sleep 4
           kill -INT "$tail_pid" 2>/dev/null || true
           wait "$tail_pid" 2>/dev/null || true
           echo "CLOUDFLARE_RUNTIME_TAIL_BEGIN"
