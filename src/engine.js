@@ -1663,7 +1663,7 @@ export class TradingEngine extends DurableObject {
       })),
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
       market_feed: marketFeed, market_context: marketContext,
-      portfolio: updatedPortfolio, live_trading_enabled: false, binance_testnet_enabled: false
+      portfolio: updatedPortfolio, live_trading_enabled: false
     };
   }
 
@@ -2776,7 +2776,7 @@ export class TradingEngine extends DurableObject {
     const marks = this.buildPositionLockedBidMarks(markets, nowMs);
     const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs);
     return {
-      mode: "paper_only", live_trading_enabled: false, binance_testnet_enabled: false,
+      mode: "paper_only", live_trading_enabled: false,
       settings: {
         auto_paper_enabled: !!settings.auto_paper_enabled, halted: !!settings.halted,
         risk: { ...DEFAULT_RISK, ...(settings.risk || {}) }, paper_initial_capital_usd: settings.initial_capital_usd
