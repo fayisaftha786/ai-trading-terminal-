@@ -55,7 +55,6 @@ export class TradingEngine extends DurableObject {
     this.env = env;
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
-    this.researchBackfillPromise = null;
     const schemaStatements = [
       "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL)",
@@ -743,30 +742,6 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/research/tournament") {
         return jsonResponse(this.researchTournament());
       }
-      if (request.method === "POST" && url.pathname === "/api/research/backfill") {
-        let body;
-        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request_body" }, 400); }
-        const selected = PRODUCTS.find((item) => item.symbol === body?.symbol);
-        if (!selected) return jsonResponse({ error: "configured_market_symbol_required" }, 400);
-        if (this.scanPromise || this.researchBackfillPromise) {
-          return jsonResponse({ error: "scan_or_research_backfill_in_progress" }, 409);
-        }
-        const task = this.backfillBitstampResearchHistory(selected);
-        this.researchBackfillPromise = task.finally(() => { this.researchBackfillPromise = null; });
-        try {
-          return jsonResponse(await this.researchBackfillPromise);
-        } catch (error) {
-          this.logEvent("research_backfill_error", "Historical research backfill failed", {
-            symbol: selected.symbol,
-            error_code: typeof error?.code === "string" ? error.code.slice(0, 80) : "research_backfill_failed"
-          });
-          return jsonResponse({
-            error: "research_backfill_failed",
-            detail: String(error?.message || error).slice(0, 180),
-            code: typeof error?.code === "string" ? error.code.slice(0, 80) : null
-          }, Number(error?.status) >= 400 && Number(error?.status) < 500 ? Number(error.status) : 502);
-        }
-      }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
       }
@@ -1073,7 +1048,7 @@ export class TradingEngine extends DurableObject {
       let refreshErrorCode = null;
       try {
         refreshResult = await runAfterActiveScan(
-          () => this.scanPromise || this.researchBackfillPromise,
+          () => this.scanPromise,
           () => this.refreshOrderBooksOnly()
         );
       } catch (error) {
@@ -1210,9 +1185,6 @@ export class TradingEngine extends DurableObject {
   }
 
   async runCycle(source, cycleKey = null) {
-    if (this.researchBackfillPromise) {
-      await this.researchBackfillPromise.catch(() => null);
-    }
     if (this.scanPromise) return this.scanPromise;
     this.scanPromise = this.performCycle(source, cycleKey).finally(() => { this.scanPromise = null; });
     return this.scanPromise;
@@ -1828,115 +1800,6 @@ export class TradingEngine extends DurableObject {
       bars_count: Math.min(retentionBars, rows.length),
       missing_intervals_since_previous_archive: gapCount,
       status: "clean"
-    };
-  }
-
-  archiveProviderHistoryBackfill(exchange, product, timeframeSeconds, audit, receivedAtMs) {
-    const retentionBars = timeframeSeconds === 3600 ? 4320
-      : timeframeSeconds === 21600 ? 1440 : 0;
-    if (exchange !== "bitstamp_spot" || !retentionBars ||
-        audit?.ok !== true || !Array.isArray(audit.rows) || audit.rows.length < 150) {
-      return { stored: 0, status: "audit_rejected" };
-    }
-
-    const intervalMs = timeframeSeconds * 1000;
-    const rows = audit.rows.slice(-retentionBars);
-    let inserted = 0;
-    // Durable Object SQLite has a conservative bind-variable ceiling. 8 OHLCV
-    // rows x 11 fields stay below 100 variables per statement.
-    const batchSize = 8;
-    for (let offset = 0; offset < rows.length; offset += batchSize) {
-      const batch = rows.slice(offset, offset + batchSize);
-      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
-      const values = batch.flatMap((row) => [
-        exchange, product, timeframeSeconds, row.time,
-        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
-      ]);
-      inserted += this.sql.exec(
-        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
-        "VALUES " + valuesSql + " RETURNING candle_open_ms",
-        ...values
-      ).toArray().length;
-    }
-
-    const latest = rows.at(-1)?.time;
-    const cutoff = latest - ((retentionBars - 1) * intervalMs);
-    this.sql.exec(
-      "DELETE FROM research_candles WHERE exchange=? AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
-      exchange, product, timeframeSeconds, cutoff
-    );
-    const stats = this.sql.exec(
-      "SELECT COUNT(*) AS bars_count,MIN(candle_open_ms) AS first_candle_ms," +
-      "MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
-      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
-      exchange, product, timeframeSeconds
-    ).toArray()[0] || {};
-    const barsCount = Math.max(0, Number(stats.bars_count) || 0);
-    const first = stats.first_candle_ms == null ? null : Number(stats.first_candle_ms);
-    const last = stats.last_candle_ms == null ? null : Number(stats.last_candle_ms);
-    const expected = Number.isFinite(first) && Number.isFinite(last) && last >= first
-      ? Math.floor((last - first) / intervalMs) + 1 : 0;
-    const missing = Math.max(0, expected - barsCount);
-    return {
-      stored: inserted,
-      bars_count: barsCount,
-      first_candle_ms: Number.isFinite(first) ? first : null,
-      last_candle_ms: Number.isFinite(last) ? last : null,
-      missing_intervals: missing,
-      status: missing === 0 && barsCount >= rows.length ? "clean" : "archive_integrity_failed"
-    };
-  }
-
-  async backfillBitstampResearchHistory(selectedProduct) {
-    const history = await fetchBitstampResearchHistory({
-      product: selectedProduct.product,
-      nowMs: Date.now(),
-      oneHourBars: 3500,
-      sixHourBars: 600
-    });
-    const receivedAtMs = Date.now();
-    const oneHour = this.archiveProviderHistoryBackfill(
-      history.provider, history.product, 3600, history.one_hour, receivedAtMs
-    );
-    if (oneHour.status !== "clean") {
-      const error = new Error("Bitstamp 1H research archive failed post-insert integrity checks");
-      error.code = "research_backfill_archive_integrity_failed";
-      error.status = 409;
-      throw error;
-    }
-    const sixHour = this.archiveProviderHistoryBackfill(
-      history.provider, history.product, 21600, history.six_hour, receivedAtMs
-    );
-    if (sixHour.status !== "clean") {
-      const error = new Error("Bitstamp 6H research archive failed post-insert integrity checks");
-      error.code = "research_backfill_archive_integrity_failed";
-      error.status = 409;
-      throw error;
-    }
-
-    this.logEvent("research_backfill_completed", "Bitstamp historical candles added to offline research archive", {
-      symbol: selectedProduct.symbol,
-      provider: history.provider,
-      one_hour_bars: oneHour.bars_count,
-      six_hour_bars: sixHour.bars_count,
-      no_trading_side_effects: true
-    });
-    return {
-      mode: "offline_research_only",
-      no_trading_side_effects: true,
-      symbol: selectedProduct.symbol,
-      provider: history.provider,
-      one_hour: {
-        stored: oneHour.stored,
-        bars_count: oneHour.bars_count,
-        missing_intervals: oneHour.missing_intervals
-      },
-      six_hour: {
-        stored: sixHour.stored,
-        bars_count: sixHour.bars_count,
-        missing_intervals: sixHour.missing_intervals
-      },
-      requests: history.requests
     };
   }
 
