@@ -557,10 +557,9 @@ function convertBitstampCandles(payload) {
 }
 
 /**
- * Fetch a bounded historical research window from the explicitly verified
- * Bitstamp USD SPOT market. Uses the documented 1,000-candle maximum and pages
- * backwards with the `end` timestamp. This function is research-only: it does
- * not supply the live ticker, order book, or PAPER entry/exit path.
+ * Read-only same-venue market snapshot used only to maintain an already-open
+ * legacy PAPER position whose stored entry provider is Bitstamp. This path is
+ * never used for ordinary scans or new PAPER entries.
  */
 async function fetchBitstampProductSnapshot(
   { symbol, product },
