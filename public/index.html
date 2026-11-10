@@ -94,7 +94,6 @@ td,th{border-bottom:1px solid #24334b}
 .radar-live-dot.off{background:var(--red)}
 .radar-monitor{font-size:9px;letter-spacing:.1em;font-weight:900;color:#a9a0ff}
 .radar-caption{font-size:11px;color:var(--muted);line-height:1.55;margin-top:10px}
-#binanceRadarRows td{white-space:nowrap}
 section[id]{scroll-margin-top:82px}
 @media(max-width:760px){
  main{padding:12px 10px 42px}
@@ -156,7 +155,6 @@ section[id]{scroll-margin-top:82px}
 <nav class="app-nav" aria-label="Trading terminal sections">
   <a href="#modePanel">OVERVIEW</a>
   <a href="#liveMarketPanel">MARKETS</a>
-  <a href="  <a href="#binanceStrategyPanel">AI BRAIN</a>
   <a href="#marketIntelligencePanel">INTELLIGENCE</a>
   <a href="#exchangeConnections">EXCHANGES</a>
   <a href="#automationPanel">AUTOMATION</a>
@@ -402,11 +400,6 @@ let coinbasePreflightResult=null;
 let coinbasePreflightAtMs=0;
 let coinbasePreflightInFlight=null;
 const COINBASE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
-let binanceStaticStatus=null;
-let binancePreflightResult=null;
-let binancePreflightAtMs=0;
-let binancePreflightInFlight=null;
-const BINANCE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
 
 function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePreflightResult,checkedAtMs=coinbasePreflightAtMs){
   const permissions=result?.permissions||null;
