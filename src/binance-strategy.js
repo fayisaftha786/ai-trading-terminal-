@@ -117,7 +117,9 @@ export function analyzeBinanceMultiTimeframeMarket({
     costConfig.feeBpsPerSide !== undefined &&
     !(typeof costConfig.feeBpsPerSide === "string" && costConfig.feeBpsPerSide.trim() === "") &&
     Number.isFinite(Number(costConfig.feeBpsPerSide));
-  const feeRateVerified = feeInputPresent && costConfig.feeRateStatus === "verified";
+  const feeRateVerified = feeInputPresent &&
+    costConfig.feeRateStatus === "verified" &&
+    costConfig.feeSource === "binance_account_commission";
   const roundTripCostBps = spreadBps === null
     ? null : (2 * (feeBpsPerSide + slippageBpsPerSide)) + spreadBps;
   const atrPct = analyses["1h"]?.atr_pct;
