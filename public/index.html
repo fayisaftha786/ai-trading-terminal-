@@ -111,6 +111,44 @@ section[id]{scroll-margin-top:82px}
 @media(prefers-reduced-motion:reduce){
  *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
 }
+
+.ai-brain-panel{position:relative;overflow:hidden;background:linear-gradient(145deg,rgba(14,24,47,.98),rgba(8,15,31,.98) 58%,rgba(15,22,43,.98));border:1px solid rgba(135,153,210,.23);box-shadow:0 24px 64px rgba(0,0,0,.24),inset 0 1px rgba(255,255,255,.045)}
+.ai-brain-panel:before{content:"";position:absolute;inset:0 0 auto;height:1px;background:linear-gradient(90deg,transparent,rgba(91,224,207,.72),rgba(154,132,255,.6),transparent)}
+.ai-brain-header{align-items:flex-start;gap:14px}
+.ai-brain-header h2{margin:5px 0 7px;letter-spacing:-.035em}
+.ai-brain-actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap;justify-content:flex-end}
+.ai-brain-actions .primary{background:linear-gradient(135deg,#7768ed,#4c8ddc);border:1px solid rgba(205,211,255,.25);box-shadow:0 8px 22px rgba(91,94,219,.24)}
+.ai-brain-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0 13px}
+.ai-brain-kpi{min-width:0;padding:15px;border-radius:15px;border:1px solid rgba(151,169,221,.15);background:linear-gradient(145deg,rgba(34,48,78,.66),rgba(18,27,48,.7));}
+.ai-brain-kpi .label{font-size:10px;letter-spacing:.12em;color:#a5b2d0;font-weight:800}
+.ai-brain-kpi strong{display:block;font-size:26px;line-height:1.3;letter-spacing:-.04em;color:#f4f7ff;margin:5px 0 2px;font-variant-numeric:tabular-nums}
+.ai-brain-kpi small{display:block;color:#8e9cb9;font-size:11px;line-height:1.4}
+.ai-brain-progress{height:5px;border-radius:9px;background:rgba(135,153,210,.13);overflow:hidden;margin:14px 0 9px}
+.ai-brain-progress>div{height:100%;width:0;background:linear-gradient(90deg,#63ddcb,#8d80ff);transition:width .2s ease}
+.ai-brain-meta{font-size:11px;margin-bottom:12px}
+.ai-brain-pipeline{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:11px 13px;margin:13px 0;border:1px solid rgba(140,158,205,.13);border-radius:12px;background:rgba(7,13,27,.4);font-size:9px;font-weight:800;letter-spacing:.075em;color:#c6d2eb}
+.ai-brain-pipeline span{white-space:nowrap}
+.ai-brain-pipeline i{font-style:normal;color:#6e7e9e}
+.ai-brain-table table{min-width:1080px}
+.ai-brain-table th{font-size:9px;letter-spacing:.09em;color:#8fa1c6}
+.ai-brain-table td{font-size:11px;font-variant-numeric:tabular-nums}
+.ai-brain-table .tf-cell{white-space:nowrap}
+.ai-brain-table .tf-cell small{display:block;color:#8f9dbb;font-size:9px;margin-top:3px}
+.ai-brain-table .ai-score{font-weight:850;color:#e2e8ff}
+.ai-brain-table .ai-status{font-size:9px;font-weight:850;letter-spacing:.04em;white-space:nowrap}
+.ai-brain-table .ai-status.good{color:#71e4c7}
+.ai-brain-table .ai-status.bad{color:#f3a4ad}
+.ai-brain-table .ai-status.pending{color:#d3c5ff}
+.ai-brain-table .ai-reasons{display:block;max-width:230px;white-space:normal;color:#91a0bd;font-size:9px;line-height:1.5;margin-top:3px}
+@media(max-width:760px){
+ .ai-brain-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .ai-brain-header{display:block}
+ .ai-brain-actions{justify-content:flex-start;margin-top:12px}
+ .ai-brain-kpi{padding:12px}
+ .ai-brain-kpi strong{font-size:23px}
+ .ai-brain-pipeline{gap:6px;font-size:8px}
+}
+
 </style></head>
 <body><main>
 <section id="login" class="panel login hidden"><div class="eyebrow">PRIVATE INSTANCE</div><h1>AI Trading Terminal</h1><p class="muted">Sign in to your private paper-trading dashboard. API keys are not used here.</p>
@@ -121,6 +159,7 @@ section[id]{scroll-margin-top:82px}
   <a href="#modePanel">OVERVIEW</a>
   <a href="#liveMarketPanel">MARKETS</a>
   <a href="#binanceRadarPanel">50-MARKET RADAR</a>
+  <a href="#binanceStrategyPanel">AI BRAIN</a>
   <a href="#marketIntelligencePanel">INTELLIGENCE</a>
   <a href="#exchangeConnections">EXCHANGES</a>
   <a href="#automationPanel">AUTOMATION</a>
@@ -187,6 +226,33 @@ section[id]{scroll-margin-top:82px}
   </div>
   <p class="radar-caption" id="radarUniverseNote">Market universe loads from Binance public 24-hour ticker statistics. The dashboard subscribes to up to 50 individual Spot ticker streams over one market-data-only WebSocket connection.</p>
   <p class="note">RESEARCH / MONITOR ONLY · This radar does not generate BUY/SELL signals or submit orders. *The Coinbase reference gap is shown only for BTC, ETH and SOL and assumes USD/USDT parity; it is not an executable arbitrage price. Fees, order-book depth, quote-asset basis, latency, market impact and account restrictions must be checked before any cross-venue strategy could be considered.</p>
+</section>
+<section class="panel ai-brain-panel" id="binanceStrategyPanel">
+  <div class="row ai-brain-header">
+    <div>
+      <div class="eyebrow">STRATEGY INTELLIGENCE / BINANCE SPOT</div>
+      <h2>AI Brain · 50-market multi-timeframe engine</h2>
+      <div class="muted">15m trigger · 1h setup · 4h regime · live spread, depth and net-cost gates</div>
+    </div>
+    <div class="ai-brain-actions"><span id="aiBrainFeed" class="tag">NOT RUN</span><button id="runAiBrain" class="primary" type="button">Run 50-market analysis</button></div>
+  </div>
+  <div class="grid ai-brain-kpis">
+    <article class="ai-brain-kpi"><div class="label">RADAR UNIVERSE</div><strong id="aiBrainUniverse">50</strong><small>Binance USDT Spot markets</small></article>
+    <article class="ai-brain-kpi"><div class="label">ANALYZED</div><strong id="aiBrainAnalyzed">—</strong><small>Three verified candle frames</small></article>
+    <article class="ai-brain-kpi"><div class="label">LONG CANDIDATES</div><strong id="aiBrainCandidates">—</strong><small>All three timeframes aligned</small></article>
+    <article class="ai-brain-kpi"><div class="label">PAPER REVIEW READY</div><strong id="aiBrainPaperReady">—</strong><small>Passed data, liquidity and cost gates</small></article>
+  </div>
+  <div class="ai-brain-progress"><div id="aiBrainProgressBar"></div></div>
+  <div class="row ai-brain-meta"><small id="aiBrainProgressText" class="muted">Run analysis to evaluate all markets. This scan is on-demand.</small><small id="aiBrainUpdated" class="muted">No analysis timestamp</small></div>
+  <div class="ai-brain-pipeline">
+    <span>01 RADAR</span><i>→</i><span>02 ANALYSIS</span><i>→</i><span>03 SIGNAL</span><i>→</i><span>04 RISK CHECK</span><i>→</i><span>05 PAPER REVIEW</span><i>→</i><span>06 PERFORMANCE</span>
+  </div>
+  <div class="table-wrap ai-brain-table"><table>
+    <thead><tr><th>MARKET</th><th>SCORE</th><th>15M</th><th>1H</th><th>4H</th><th>SPREAD</th><th>ROUND-TRIP</th><th>NET EDGE*</th><th>RISK CHECK</th><th>PAPER STAGE</th></tr></thead>
+    <tbody id="aiBrainRows"><tr><td colspan="10">Waiting for a live multi-timeframe analysis.</td></tr></tbody>
+  </table></div>
+  <p class="note" id="aiBrainStatus">No analysis has been run. A candidate requires aligned 15m, 1h and 4h bullish structure plus fresh closed candles, current two-sided quotes, minimum 24h volume, bid/ask depth, acceptable spread and positive estimated edge after configured fees and slippage.</p>
+  <p class="radar-caption">*Estimated net edge is a rule-based scenario using 1h ATR, a fixed target multiple, configured paper fee/slippage and current top-of-book spread. It is not a forecast, probability or guaranteed fill. "PAPER REVIEW READY" is not an order: this module is read-only and creates zero paper or live trades. Existing Coinbase paper automation remains separate.</p>
 </section>
 <div class="grid" id="portfolioOverview">
 <article class="card"><div class="label">PAPER EQUITY</div><div class="value" id="equity">$10.00</div><div class="muted">Simulated USD</div></article>
@@ -976,6 +1042,107 @@ $("capitalReview").addEventListener("click",async()=>{
 $("stop").addEventListener("click",async()=>{if(!confirm("Emergency stop will disable all new automatic PAPER entries. Scheduled exit monitoring remains active. Continue?"))return;try{await api("/api/automation/kill-switch",{method:"POST"});await refresh();}catch(error){alert(error.message);}});
 $("reset").addEventListener("click",async()=>{if(!confirm("Reset the paper-entry halt? All open paper positions must already be closed. Auto-entry will remain OFF."))return;try{await api("/api/automation/reset",{method:"POST"});await refresh();}catch(error){alert(error.message);}});
 $("scan").addEventListener("click",async()=>{$("scan").disabled=true;$("scan").textContent="Scanning…";try{await api("/api/scan",{method:"POST"});await refresh();}catch(error){alert(error.message);}finally{$("scan").disabled=false;$("scan").textContent="Scan now";}});
+
+let binanceStrategyResults=[];
+let binanceStrategyLastRunAt=0;
+function renderBinanceStrategyRows(){
+  const rows=binanceStrategyResults.slice().sort((a,b)=>{
+    const aReady=a.paper_trade?.status==="PAPER_REVIEW_READY"?1:0;
+    const bReady=b.paper_trade?.status==="PAPER_REVIEW_READY"?1:0;
+    return bReady-aReady || Number(b.composite_score||0)-Number(a.composite_score||0);
+  });
+  $("aiBrainRows").innerHTML=rows.map((item)=>{
+    const tf=(label)=>{
+      const value=item.multi_timeframe?.[label];
+      if(!value)return '<span class="ai-status bad">NO DATA</span>';
+      const healthy=value.audit_ok===true;
+      const tone=value.signal==="BUY_CANDIDATE"?"good":healthy?"pending":"bad";
+      return '<span class="ai-status '+tone+'">'+esc(value.regime||"UNKNOWN")+'</span><small>'+esc(value.signal||"HOLD")+' · '+String(value.score??0)+'/100 · RSI '+(Number.isFinite(value.rsi14)?Number(value.rsi14).toFixed(1):"—")+'</small>';
+    };
+    const quality=item.market_quality||{};
+    const cost=item.cost_model||{};
+    const reasons=(item.risk_check?.block_reasons||[]).slice(0,3).join(", ");
+    const riskPassed=item.risk_check?.passed===true;
+    const ready=item.paper_trade?.status==="PAPER_REVIEW_READY";
+    const signalTone=item.signal==="LONG_CANDIDATE"?"good":"pending";
+    return '<tr><td><strong>'+esc(item.symbol||item.binance_symbol||"—")+'</strong><small class="muted">'+esc(item.status||"unknown")+'</small></td>'+
+      '<td class="ai-score">'+String(item.composite_score??0)+'/100</td>'+
+      '<td class="tf-cell">'+tf("15m")+'</td><td class="tf-cell">'+tf("1h")+'</td><td class="tf-cell">'+tf("4h")+'</td>'+
+      '<td>'+ (Number.isFinite(quality.spread_bps)?Number(quality.spread_bps).toFixed(2)+" bps":"—")+'</td>'+
+      '<td>'+ (Number.isFinite(cost.round_trip_cost_bps)?Number(cost.round_trip_cost_bps).toFixed(1)+" bps":"—")+'</td>'+
+      '<td>'+ (Number.isFinite(cost.estimated_net_edge_bps)?(cost.estimated_net_edge_bps>=0?"+":"")+Number(cost.estimated_net_edge_bps).toFixed(1)+" bps":"—")+'</td>'+
+      '<td><span class="ai-status '+(riskPassed?"good":"bad")+'">'+(riskPassed?"PASS":"BLOCKED")+'</span><small class="ai-reasons">'+esc(reasons||"All strategy and risk checks passed")+'</small></td>'+
+      '<td><span class="ai-status '+(ready?"good":signalTone)+'">'+(ready?"PAPER REVIEW READY":"HOLD / NO TRADE")+'</span></td></tr>';
+  }).join("")||'<tr><td colspan="10">No market analysis results yet.</td></tr>';
+}
+function setAiBrainProgress(done,total,label){
+  const percent=total?Math.min(100,Math.round(done/total*100)):0;
+  $("aiBrainProgressBar").style.width=percent+"%";
+  $("aiBrainProgressText").textContent=label;
+}
+async function runBinanceStrategy(){
+  const button=$("runAiBrain");
+  const symbols=Array.isArray(window.binanceRadarSymbols)?window.binanceRadarSymbols.slice(0,50):[];
+  if(!symbols.length){
+    $("aiBrainStatus").textContent="Binance Radar universe is not ready yet. Refresh the 50-market radar first; analysis will not invent or substitute symbols.";
+    $("aiBrainFeed").textContent="RADAR WAITING";
+    $("aiBrainFeed").className="tag bad";
+    return;
+  }
+  button.disabled=true;
+  button.textContent="Analyzing 0/50…";
+  $("aiBrainFeed").textContent="ANALYZING";
+  $("aiBrainFeed").className="tag";
+  $("aiBrainStatus").textContent="Fetching public Binance 15m, 1h and 4h closed candles plus current ticker and top-20 order-book depth. No trades are being placed.";
+  binanceStrategyResults=[];
+  renderBinanceStrategyRows();
+  const chunks=[];
+  for(let index=0;index<symbols.length;index+=10)chunks.push(symbols.slice(index,index+10));
+  let completed=0;
+  let failures=0;
+  try{
+    for(const chunk of chunks){
+      try{
+        const data=await api("/api/strategy/binance-intelligence?symbols="+encodeURIComponent(chunk.join(",")));
+        const marketRows=Array.isArray(data.markets)?data.markets:[];
+        binanceStrategyResults.push(...marketRows);
+        if(marketRows.length!==chunk.length)failures+=chunk.length-marketRows.length;
+      }catch(error){
+        failures+=chunk.length;
+        for(const symbol of chunk)binanceStrategyResults.push({
+          symbol:symbol.slice(0,-4)+"/USDT",binance_symbol:symbol,status:"request_error",signal:"HOLD",
+          composite_score:0,risk_check:{passed:false,block_reasons:[error.message]},
+          paper_trade:{status:"BLOCKED",order_created:false}
+        });
+      }
+      completed+=chunk.length;
+      button.textContent="Analyzing "+completed+"/"+symbols.length+"…";
+      $("aiBrainAnalyzed").textContent=String(binanceStrategyResults.filter((item)=>item.status==="analyzed").length);
+      $("aiBrainCandidates").textContent=String(binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length);
+      $("aiBrainPaperReady").textContent=String(binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length);
+      setAiBrainProgress(completed,symbols.length,"Analyzed "+completed+" of "+symbols.length+" markets · "+failures+" provider/request failures");
+      renderBinanceStrategyRows();
+    }
+    binanceStrategyLastRunAt=Date.now();
+    const analyzed=binanceStrategyResults.filter((item)=>item.status==="analyzed").length;
+    const candidates=binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length;
+    const ready=binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length;
+    $("aiBrainFeed").textContent=failures?"PARTIAL · "+analyzed+"/"+symbols.length:"LIVE DATA · "+analyzed+"/"+symbols.length;
+    $("aiBrainFeed").className="tag "+(failures?"bad":"good");
+    $("aiBrainUpdated").textContent="Updated "+new Date(binanceStrategyLastRunAt).toLocaleTimeString();
+    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. A paper-review status does not create a ledger position; no paper or live order was submitted.";
+    setAiBrainProgress(symbols.length,symbols.length,"Completed "+symbols.length+" markets · "+analyzed+" valid analyses · "+failures+" failures");
+  }catch(error){
+    $("aiBrainFeed").textContent="SCAN ERROR";
+    $("aiBrainFeed").className="tag bad";
+    $("aiBrainStatus").textContent="Strategy scan failed: "+error.message;
+  }finally{
+    button.disabled=false;
+    button.textContent="Run 50-market analysis";
+  }
+}
+$("runAiBrain").addEventListener("click",runBinanceStrategy);
+
 const tournamentNames=["trend_continuation","range_mean_reversion","breakout_continuation"];
 const pct=(value)=>Number.isFinite(value)?Number(value).toFixed(2)+"%":"—";
 const num=(value)=>Number.isFinite(value)?Number(value).toFixed(2):"—";
