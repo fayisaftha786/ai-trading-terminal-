@@ -130,8 +130,13 @@ try {
 
   const auth = { authorization: "Bearer " + login.access_token };
   const dashboardResponse = await request("/api/dashboard", { headers: auth });
-  assert.equal(dashboardResponse.status, 200, "owner dashboard must load");
-  const dashboard = await dashboardResponse.json();
+  const dashboardBody = await dashboardResponse.text();
+  assert.equal(
+    dashboardResponse.status,
+    200,
+    "owner dashboard must load; HTTP " + dashboardResponse.status + ": " + dashboardBody.slice(0, 1000)
+  );
+  const dashboard = JSON.parse(dashboardBody);
   assert.equal(dashboard.mode, "paper_only");
   assert.equal(dashboard.settings.auto_paper_enabled, false, "automatic PAPER entries must start OFF until the owner explicitly opts in");
   assert.equal(dashboard.settings.paper_initial_capital_usd, 10, "fresh paper profile must use ten dollars");
