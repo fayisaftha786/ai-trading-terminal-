@@ -41,7 +41,7 @@ def test_auto_demo_checks_live_ticker_spread_depth_and_daily_quote_volume():
     assert "https://api.exchange.coinbase.com/products/BTC-USD/book?level=2" in source
     assert "bidDepth,askDepth,ticker.getDouble(\"quoteVolume\")" in source
     assert "db.openAuto(snapshot.quote.ask,latest.openTime)" in source
-    assert "Math.min(bookRetrievedAt,depthRetrievedAt)" in source
+    assert "Math.min(tickerRetrievedAt,bookRetrievedAt)" in source
     assert "MAX_SPREAD_BPS = 25.0" in signal
     assert "MIN_QUOTE_VOLUME_USD = 1_000_000.0" in signal
     assert "MIN_TOP10_DEPTH_USD = 5_000.0" in signal
