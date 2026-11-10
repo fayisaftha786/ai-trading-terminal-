@@ -50,15 +50,26 @@ test("candle cache checks one persistent state row before querying 150 archive r
   assert.ok(method.includes("this.setState(cacheKey"));
 });
 
-test("successful Coinbase and legacy provider archives refresh their own candle windows", () => {
-  const coinbaseStart = engine.indexOf("  archiveClosedCandles(");
-  const coinbaseEnd = engine.indexOf("  archiveProviderCandles(", coinbaseStart);
-  const coinbase = engine.slice(coinbaseStart, coinbaseEnd);
-  const providerStart = coinbaseEnd;
+test("successful provider snapshots refresh isolated 150-candle windows before archive maintenance", () => {
+  const snapshotStart = engine.indexOf("const snapshot = await fetchProductSnapshot(");
+  const snapshotEnd = engine.indexOf("const primary = analyzeTimeframe", snapshotStart);
+  const snapshotFlow = engine.slice(snapshotStart, snapshotEnd);
+  const archiveStart = engine.indexOf("  archiveClosedCandles(");
+  const archiveEnd = engine.indexOf("  archiveProviderCandles(", archiveStart);
+  const providerStart = archiveEnd;
   const providerEnd = engine.indexOf("  researchTournament()", providerStart);
-  const provider = engine.slice(providerStart, providerEnd);
-  assert.ok(coinbase.includes('this.cacheResearchCandleWindow("coinbase_exchange"'));
-  assert.ok(provider.includes("this.cacheResearchCandleWindow(exchange"));
+  const archiveMethods = engine.slice(archiveStart, providerEnd);
+  assert.ok(snapshotStart >= 0 && snapshotEnd > snapshotStart);
+  assert.ok(snapshotFlow.includes("this.cacheResearchCandleWindow("));
+  assert.ok(snapshotFlow.includes('const snapshotExchange = snapshot.market_data_provider || "coinbase_exchange"'));
+  assert.ok(snapshotFlow.includes('snapshotExchange === "bitstamp_spot"'));
+  assert.ok(snapshotFlow.includes("cachedCandles.bitstamp?.[key]"));
+  assert.ok(snapshotFlow.includes("[60, \"one_minute\", snapshot.one_minute_audit]"));
+  assert.ok(snapshotFlow.includes("[300, \"five_minute\", snapshot.five_minute_audit]"));
+  assert.ok(snapshotFlow.includes("[3600, \"one_hour\", snapshot.one_hour_audit]"));
+  assert.ok(snapshotFlow.includes("[21600, \"six_hour\", snapshot.six_hour_audit]"));
+  assert.ok(archiveMethods.includes("this.archiveClosedCandles(") === false);
+  assert.ok(!archiveMethods.includes("cacheResearchCandleWindow("));
   assert.ok(engine.includes('const key = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds'));
   assert.ok(engine.includes("audit.rows.slice(-150)"));
 });
