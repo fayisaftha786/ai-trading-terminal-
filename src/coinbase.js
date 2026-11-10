@@ -958,7 +958,7 @@ export async function fetchProductSnapshot(
 
   try {
     primary = await fetchCoinbaseProductSnapshot(productRef, nowMs, cachedCandles, requestState);
-    if (snapshotIsEntryReady(primary, Date.now())) return primary;
+    if (snapshotIsEntryReady(primary, Date.now()) && allowBitstampLegacyExit !== true) return primary;
   } catch (error) {
     primaryError = error;
   }
