@@ -242,6 +242,57 @@ export function coinbaseAdvancedStatus(env = {}) {
   };
 }
 
+function normalizeSpotFeeSummary(payload, checkedAtMs = Date.now()) {
+  const tier = payload?.fee_tier;
+  if (!tier || typeof tier !== "object" || Array.isArray(tier)) {
+    return { status: "unavailable", reason: "coinbase_spot_fee_tier_missing" };
+  }
+  const parseRate = (value, allowRebate = false) => {
+    if (typeof value !== "string" && typeof value !== "number") return null;
+    const raw = String(value);
+    if (raw.length > 40 || !(allowRebate
+      ? /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$/
+      : /^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/).test(raw)) return null;
+    const rate = Number(raw);
+    if (!Number.isFinite(rate) || rate > 0.05 || rate < (allowRebate ? -0.01 : 0)) return null;
+    return { rate: raw, bps: Number((rate * 10000).toFixed(4)) };
+  };
+  const maker = parseRate(tier.maker_fee_rate, true);
+  const taker = parseRate(tier.taker_fee_rate, false);
+  if (!maker || !taker) {
+    return { status: "unavailable", reason: "coinbase_spot_fee_rates_missing_or_invalid" };
+  }
+  const pricingTier = typeof tier.pricing_tier === "string" &&
+    /^[A-Za-z0-9 _-]{1,40}$/.test(tier.pricing_tier)
+    ? tier.pricing_tier.trim().replace(/\\s+/g, "_").toLowerCase()
+    : null;
+  return {
+    status: "verified",
+    source: "coinbase_advanced_transaction_summary",
+    product_type: "SPOT",
+    pricing_tier: pricingTier,
+    maker_fee_rate: maker.rate,
+    maker_fee_bps: maker.bps,
+    taker_fee_rate: taker.rate,
+    taker_fee_bps: taker.bps,
+    checked_at_ms: Number.isFinite(checkedAtMs) && checkedAtMs > 0 ? checkedAtMs : Date.now(),
+    note: "Account spot tier snapshot only; per-order preview remains authoritative. Not automatically applied to PAPER risk settings."
+  };
+}
+
+async function fetchCoinbaseSpotFeeSummary(env, fetchImpl) {
+  try {
+    const payload = await advancedRequest(
+      env, "GET", API_PREFIX + "/transaction_summary?product_type=SPOT", undefined, fetchImpl
+    );
+    return normalizeSpotFeeSummary(payload, Date.now());
+  } catch (error) {
+    const code = typeof error?.code === "string" && /^[a-z0-9_]{1,100}$/.test(error.code)
+      ? error.code : "coinbase_spot_fee_summary_unavailable";
+    return { status: "unavailable", reason: code };
+  }
+}
+
 async function advancedRequest(env, method, path, body, fetchImpl) {
   const config = configuration(env);
   if (!config.credentialsConfigured) {
@@ -486,16 +537,23 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       ...staticStatus,
       status: "not_configured",
       permissions: null,
+      fee_summary: { status: "not_configured", reason: "coinbase_advanced_credentials_not_configured" },
       balances: {},
       products: [],
       blockers: staticStatus.blockers
     };
   }
+  let feeSummary = { status: "not_checked", reason: "view_permission_not_verified" };
   try {
     const permissions = await advancedRequest(
       env, "GET", API_PREFIX + "/key_permissions", undefined, fetchImpl
     );
     const blockers = [...staticStatus.blockers];
+    if (permissions.can_view === true) {
+      // This is a read-only Advanced Trade endpoint requiring View permission.
+      // Fee lookup failure never blocks the existing account preflight.
+      feeSummary = await fetchCoinbaseSpotFeeSummary(env, fetchImpl);
+    }
     if (permissions.can_view !== true) blockers.push("api_key_view_permission_required");
     if (permissions.can_transfer !== false) blockers.push("api_key_transfer_permission_must_be_disabled");
     if (!config.allowedProductsValid) {
@@ -504,7 +562,7 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
           can_view: permissions.can_view === true,
           can_trade: permissions.can_trade === true,
           can_transfer: permissions.can_transfer === true
-        }, balances: {}, products: [], blockers: [...new Set(blockers)]
+        }, fee_summary: feeSummary, balances: {}, products: [], blockers: [...new Set(blockers)]
       };
     }
     if (permissions.can_view !== true || permissions.can_transfer !== false) {
@@ -513,7 +571,7 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
           can_view: permissions.can_view === true,
           can_trade: permissions.can_trade === true,
           can_transfer: permissions.can_transfer === true
-        }, balances: {}, products: [], blockers: [...new Set(blockers)]
+        }, fee_summary: feeSummary, balances: {}, products: [], blockers: [...new Set(blockers)]
       };
     }
     const accounts = await loadAccounts(env, fetchImpl);
@@ -569,6 +627,7 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
         can_trade: permissions.can_trade === true,
         can_transfer: permissions.can_transfer === true
       },
+      fee_summary: feeSummary,
       portfolio_uuid: typeof permissions.portfolio_uuid === "string" ? permissions.portfolio_uuid : null,
       balances,
       products,
@@ -605,6 +664,7 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       ...staticStatus,
       status: "provider_check_failed",
       permissions: null,
+      fee_summary: feeSummary,
       balances: {},
       products: [],
       order_submission_available: false,
