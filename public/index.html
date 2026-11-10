@@ -1093,15 +1093,15 @@ async function runBinanceStrategy(){
   button.textContent="Analyzing 0/50…";
   $("aiBrainFeed").textContent="ANALYZING";
   $("aiBrainFeed").className="tag";
-  $("aiBrainStatus").textContent="Fetching public Binance 15m, 1h and 4h closed candles plus current ticker and top-20 order-book depth. No trades are being placed.";
+  $("aiBrainStatus").textContent="Running two parallel batches of up to 25 Binance Spot markets. Closed 15m/1h/4h candles are cached until the next bar closes; current ticker and order-book depth remain fresh on every scan. No trades are being placed.";
   binanceStrategyResults=[];
   renderBinanceStrategyRows();
   const chunks=[];
-  for(let index=0;index<symbols.length;index+=10)chunks.push(symbols.slice(index,index+10));
+  for(let index=0;index<symbols.length;index+=25)chunks.push(symbols.slice(index,index+25));
   let completed=0;
   let failures=0;
   try{
-    for(const chunk of chunks){
+    await Promise.all(chunks.map(async(chunk)=>{
       try{
         const data=await api("/api/strategy/binance-intelligence?symbols="+encodeURIComponent(chunk.join(",")));
         const marketRows=Array.isArray(data.markets)?data.markets:[];
@@ -1122,15 +1122,22 @@ async function runBinanceStrategy(){
       $("aiBrainPaperReady").textContent=String(binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length);
       setAiBrainProgress(completed,symbols.length,"Analyzed "+completed+" of "+symbols.length+" markets · "+failures+" provider/request failures");
       renderBinanceStrategyRows();
-    }
+    }));
     binanceStrategyLastRunAt=Date.now();
     const analyzed=binanceStrategyResults.filter((item)=>item.status==="analyzed").length;
     const candidates=binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length;
     const ready=binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length;
+    const cache=binanceStrategyResults.reduce((total,item)=>{
+      const stats=item.candle_cache||{};
+      total.reused+=Array.isArray(stats.reused_timeframes)?stats.reused_timeframes.length:0;
+      total.refreshed+=Array.isArray(stats.refreshed_timeframes)?stats.refreshed_timeframes.length:0;
+      total.fallback+=Array.isArray(stats.stale_fallback_timeframes)?stats.stale_fallback_timeframes.length:0;
+      return total;
+    },{reused:0,refreshed:0,fallback:0});
     $("aiBrainFeed").textContent=failures?"PARTIAL · "+analyzed+"/"+symbols.length:"LIVE DATA · "+analyzed+"/"+symbols.length;
     $("aiBrainFeed").className="tag "+(failures?"bad":"good");
     $("aiBrainUpdated").textContent="Updated "+new Date(binanceStrategyLastRunAt).toLocaleTimeString();
-    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. A paper-review status does not create a ledger position; no paper or live order was submitted.";
+    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
     setAiBrainProgress(symbols.length,symbols.length,"Completed "+symbols.length+" markets · "+analyzed+" valid analyses · "+failures+" failures");
   }catch(error){
     $("aiBrainFeed").textContent="SCAN ERROR";
