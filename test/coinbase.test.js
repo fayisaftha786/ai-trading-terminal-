@@ -657,7 +657,7 @@ test("Bitstamp fallback rejects non-SPOT ticker responses", async () => {
         Date.now(), {}, createCoinbaseRequestState(),
         { allowBitstampLegacyExit: true }
       ),
-      (error) => error.code === "legacy_exit_market_data_unavailable"
+      (error) => { assert.equal(error.code, "legacy_exit_market_data_unavailable"); return true; }
     );
   } finally {
     globalThis.fetch = originalFetch;
