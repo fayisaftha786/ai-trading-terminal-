@@ -9,10 +9,11 @@ test("Binance strategy uses persistent closed-candle cache and current REST dept
   assert.match(engine, /CREATE TABLE IF NOT EXISTS binance_strategy_candle_cache/);
   assert.match(engine, /loadBinanceStrategyCandleCache/);
   assert.match(engine, /saveBinanceStrategyCandleCache/);
-  assert.match(engine, /depth\?symbol=/);
-  assert.match(engine, /ticker\/24hr\?symbols=/);
-  assert.match(engine, /https:\\/\\/api\\.binance\\.com\\/api\\/v3\\//);
-  assert.doesNotMatch(engine, /data-api\\.binance\\.vision/);
+  assert.match(engine, /depth\\?symbol=/);
+  assert.ok(engine.includes('const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr";'));
+  assert.ok(engine.includes('const base = "https://data-api.binance.vision/api/v3/";'));
+  assert.doesNotMatch(engine, /ticker\\/24hr\\?symbols=/);
+  assert.match(engine, /requestedSymbols = new Set/);
   assert.match(engine, /stale_fallback_timeframes/);
 });
 
@@ -32,6 +33,6 @@ test("Binance strategy is public-read-only and never enables an exchange order",
 
 test("Binance strategy filters thin ticker snapshots using 24h trade count", () => {
   assert.match(strategy, /active_24h_trade_count/);
-  assert.match(strategy, /ticker\?\.count/);
+  assert.match(strategy, /ticker\\?\\.count/);
   assert.doesNotMatch(strategy, /recent_last_trade|tickerTime/);
 });
