@@ -92,8 +92,10 @@ export function buildBinanceRadarStreamUrl(symbols) {
 
 export function medianRadarSpread(rows) {
   const values = (Array.isArray(rows) ? rows : [])
-    .map((row) => Number(row?.spreadBps))
-    .filter((value) => Number.isFinite(value) && value >= 0)
+    .map((row) => row?.spreadBps)
+    .filter((value) => value !== null && value !== undefined && value !== "" &&
+      Number.isFinite(Number(value)) && Number(value) >= 0)
+    .map(Number)
     .sort((a, b) => a - b);
   if (!values.length) return null;
   const middle = Math.floor(values.length / 2);
