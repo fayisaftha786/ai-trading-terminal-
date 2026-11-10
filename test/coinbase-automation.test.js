@@ -23,3 +23,8 @@ test("scheduled reconciliation runs from the Durable Object alarm and cannot sub
   assert.match(engine, /await this\.reconcileOpenCoinbaseLiveOrders\("scheduled_alarm"\)/);
   assert.doesNotMatch(engine, /reconcileOpenCoinbaseLiveOrders[\s\S]{0,500}submitCoinbaseAdvancedLimitBuy/);
 });
+
+test("scheduled reconciliation prioritizes the oldest order check to avoid starvation", () => {
+  assert.match(engine, /const lastAttemptAt = \(item\) =>/);
+  assert.match(engine, /\.sort\(\(left, right\) => lastAttemptAt\(left\) - lastAttemptAt\(right\)\)\.slice\(0, 3\)/);
+});
