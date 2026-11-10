@@ -388,7 +388,7 @@ function makeBitstampBook() {
   };
 }
 
-test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6H candle set", async () => {
+test("Legacy Bitstamp exit fallback provides a coherent SOL/USD ticker, book and closed 1H/6H candle set", async () => {
   const originalFetch = globalThis.fetch;
   const now = Date.now();
   const interval1h = 3600000;
@@ -439,7 +439,8 @@ test("Bitstamp failover provides a coherent SOL/USD ticker, book and closed 1H/6
       { symbol: "SOL/USD", product: "SOL-USD" },
       now,
       { bitstamp: { one_hour: [], six_hour: [] } },
-      createCoinbaseRequestState()
+      createCoinbaseRequestState(),
+    { allowBitstampLegacyExit: true }
     );
 
     assert.equal(snapshot.status, "live");
@@ -513,7 +514,8 @@ test("Bitstamp OHLC pair mismatch is rejected instead of mixing another market's
       { symbol: "SOL/USD", product: "SOL-USD" },
       now,
       {},
-      createCoinbaseRequestState()
+      createCoinbaseRequestState(),
+    { allowBitstampLegacyExit: true }
     );
     assert.equal(snapshot.market_data_provider, "bitstamp_spot");
     assert.equal(snapshot.one_hour_audit.ok, false);
@@ -547,7 +549,7 @@ test("both market-data providers unavailable returns explicit combined provider 
 });
 
 
-test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather than mixing venues", async () => {
+test("a partial Coinbase snapshot uses all-Bitstamp data only for a legacy position rather than mixing venues", async () => {
   const originalFetch = globalThis.fetch;
   const now = Date.now();
   const interval1h = 3600000;
@@ -607,7 +609,8 @@ test("a partial Coinbase snapshot triggers an all-Bitstamp replacement rather th
       { symbol: "SOL/USD", product: "SOL-USD" },
       now,
       {},
-      createCoinbaseRequestState()
+      createCoinbaseRequestState(),
+    { allowBitstampLegacyExit: true }
     );
 
     assert.equal(snapshot.status, "live");
@@ -702,7 +705,8 @@ test("Bitstamp fallback rejects a stale exchange-side order-book timestamp", asy
   try {
     const snapshot = await fetchProductSnapshot(
       { symbol: "SOL/USD", product: "SOL-USD" },
-      now, {}, createCoinbaseRequestState()
+      now, {}, createCoinbaseRequestState(),
+    { allowBitstampLegacyExit: true }
     );
     assert.equal(snapshot.market_data_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.book_status, "provider_error");
@@ -853,4 +857,27 @@ test("Bitstamp research backfill rejects gaps rather than persisting incomplete 
   } finally {
     globalThis.fetch = originalFetch;
   }
+});test("ordinary market snapshots never fail over to Bitstamp", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url) => {
+    const parsed = new URL(String(url));
+    calls.push(parsed.hostname);
+    return jsonResponse({ message: "Coinbase temporarily unavailable" }, 503);
+  };
+  try {
+    await assert.rejects(
+      fetchProductSnapshot(
+        { symbol: "BTC/USD", product: "BTC-USD" },
+        Date.now(), {}, createCoinbaseRequestState()
+      ),
+      (error) => Number(error.status) === 503
+    );
+    assert.ok(calls.length > 0);
+    assert.ok(calls.every((hostname) => hostname === "api.exchange.coinbase.com"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
+
+
