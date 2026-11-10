@@ -297,7 +297,7 @@ section[id]{scroll-margin-top:82px}
       <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Other trading scopes disabled</strong><small>Margin, Futures, Options and FIX not verified</small></div></div>
       <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Order execution</strong><small>Not available in this Binance connector</small></div></div>
     </div>
-    <div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE SPOT BALANCES</div><div id="binanceBalances" class="balance-grid"><span class="muted">Run the read-only account check to retrieve balances.</span></div></div><div class="connection-data-card"><div class="label">READ-ONLY ACCOUNT STATUS</div><div id="binanceSummary" class="status">Binance credentials are not configured · account sync OFF</div><div class="connection-footnote">No Binance order, cancel, transfer or withdrawal route is exposed by this connector.</div></div></div>
+    <div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE SPOT BALANCES</div><div id="binanceBalances" class="balance-grid"><span class="muted">Run the read-only account check to retrieve balances.</span></div></div><div class="connection-data-card"><div class="label">PAIR-SPECIFIC SPOT COMMISSION</div><div id="binanceFees" class="balance-grid"><span class="muted">Maker/taker rates will appear after the signed account check.</span></div></div><div class="connection-data-card"><div class="label">READ-ONLY ACCOUNT STATUS</div><div id="binanceSummary" class="status">Binance credentials are not configured · account sync OFF</div><div class="connection-footnote">No Binance order, cancel, transfer or withdrawal route is exposed by this connector.</div></div></div>
   </div>
   <div class="controls"><button id="binancePreflight" type="button">Verify / refresh Binance account</button><span id="binanceStatusText" class="status">Credentials are configured only through Cloudflare Worker Secrets.</span></div>
   <pre id="binanceDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No Binance account preflight has been run. Binance is not connected until signed permissions and read-only balances are verified.</pre>
@@ -778,6 +778,28 @@ function renderBinanceConnection(status=binanceStaticStatus,result=binancePrefli
       pill.append(amount,label);balancesBox.append(pill);
     }
   }
+  const feeBox=$("binanceFees");
+  if(feeBox){
+    feeBox.replaceChildren();
+    const feeRows=Array.isArray(result?.fees?.symbols)?result.fees.symbols:[];
+    if(!connected||!feeRows.length){
+      const empty=document.createElement("span");empty.className="muted";
+      empty.textContent=connected?"Pair commission data unavailable; do not substitute a guessed fee.":"Run the signed read-only account check to verify actual Binance pair fees.";
+      feeBox.append(empty);
+    }else{
+      for(const row of feeRows){
+        const pill=document.createElement("div"),amount=document.createElement("strong"),label=document.createElement("small");
+        pill.className="balance-pill";
+        amount.textContent=row.status==="verified"
+          ?String(row.symbol)+" · Maker "+Number(row.conservative_maker_bps).toFixed(2)+" / Taker "+Number(row.conservative_taker_bps).toFixed(2)+" bps"
+          :String(row.symbol)+" · Fee unavailable";
+        const discount=row.bnb_discount||{};
+        label.textContent=row.status!=="verified"?(row.error_code||"Not verified"):
+          "Conservative incl. tax/special · BNB potential "+(discount.potential_taker_bps_with_bnb==null?"not counted":Number(discount.potential_taker_bps_with_bnb).toFixed(2)+" taker bps");
+        pill.append(amount,label);feeBox.append(pill);
+      }
+    }
+  }
   const blockers=Array.isArray(result?.blockers)?result.blockers:[];
   $("binanceSummary").textContent=connected
     ? "Authenticated · "+String(result.balance_count||0)+" non-zero Spot asset(s) · read-only permissions verified · orders disabled"
@@ -797,7 +819,7 @@ async function runBinancePreflight({silent=false,force=false}={}){
       renderBinanceConnection(binanceStaticStatus,result,binancePreflightAtMs);
       $("binanceDetails").textContent=JSON.stringify({
         status:result.status,authenticated:result.authenticated===true,connected:result.connected===true,
-        permissions:result.permissions||null,balances:result.balances||[],blockers:result.blockers||[],
+        permissions:result.permissions||null,balances:result.balances||[],fees:result.fees||null,blockers:result.blockers||[],
         order_execution_available:false,live_trading_enabled:false,environment:"production_read_only"
       },null,2);
       return result;
