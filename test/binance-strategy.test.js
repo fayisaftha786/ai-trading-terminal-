@@ -64,6 +64,40 @@ test("rejects malformed symbols before any market analysis", () => {
   assert.deepEqual(result.block_reasons, ["invalid_spot_symbol"]);
 });
 
+test("missing Binance fee or slippage values use conservative fallbacks instead of zero", () => {
+  const input = validInput();
+  input.costs = { feeBpsPerSide: null, slippageBps: "" };
+  const result = analyzeBinanceMultiTimeframeMarket(input);
+  assert.equal(result.cost_model.fee_bps_per_side, 60);
+  assert.equal(result.cost_model.slippage_bps_per_side, 10);
+  assert.equal(result.cost_model.fee_rate_status, "fallback");
+  assert.equal(result.cost_model.fee_source, "configured_paper_assumption");
+
+  const incorrectlyVerified = validInput();
+  incorrectlyVerified.costs = {
+    feeBpsPerSide: null,
+    slippageBps: null,
+    feeSource: "binance_account_commission",
+    feeRateStatus: "verified"
+  };
+  const guarded = analyzeBinanceMultiTimeframeMarket(incorrectlyVerified);
+  assert.equal(guarded.cost_model.fee_bps_per_side, 60);
+  assert.equal(guarded.cost_model.slippage_bps_per_side, 10);
+  assert.equal(guarded.cost_model.fee_rate_status, "fallback");
+  assert.equal(guarded.cost_model.fee_source, "configured_paper_assumption");
+
+  const explicitZero = validInput();
+  explicitZero.costs = {
+    feeBpsPerSide: 0, slippageBps: 0,
+    feeSource: "binance_account_commission", feeRateStatus: "verified"
+  };
+  const zeroResult = analyzeBinanceMultiTimeframeMarket(explicitZero);
+  assert.equal(zeroResult.cost_model.fee_bps_per_side, 0);
+  assert.equal(zeroResult.cost_model.slippage_bps_per_side, 0);
+  assert.equal(zeroResult.cost_model.fee_rate_status, "verified");
+  assert.equal(zeroResult.cost_model.fee_source, "binance_account_commission");
+});
+
 test("requires valid closed history, quotes and liquidity for a candidate", () => {
   const result = analyzeBinanceMultiTimeframeMarket(validInput());
   assert.equal(result.binance_symbol, "BTCUSDT");
@@ -103,7 +137,7 @@ test("gapped candle history fails audit and cannot produce a ready review", () =
   assert.equal(result.paper_trade.status, "BLOCKED");
 });
 
-test("25-symbol analysis batches reduce sequential request waves", () => {
+test("50-symbol analysis batches reduce sequential request waves", () => {
   assert.equal(BINANCE_STRATEGY_BATCH_LIMIT, 50);
 });
 
