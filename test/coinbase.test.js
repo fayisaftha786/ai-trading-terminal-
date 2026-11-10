@@ -456,7 +456,7 @@ test("Legacy Bitstamp exit fallback provides a coherent SOL/USD ticker, book and
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.data_quality.failover_used, true);
     assert.equal(snapshot.data_quality.primary_provider_error, "provider_server_error");
-    assert.equal(snapshot.data_quality.failover_reason, "primary_provider_request_failed");
+    assert.equal(snapshot.data_quality.failover_reason, "coinbase_unavailable_for_existing_bitstamp_position");
     assert.ok(snapshot.data_quality.book_provider === snapshot.market_data_provider);
     assert.ok(snapshot.data_quality.ticker_provider === snapshot.market_data_provider);
     assert.ok(snapshot.data_quality.one_hour_provider === snapshot.market_data_provider);
@@ -540,7 +540,7 @@ test("both market-data providers unavailable returns explicit combined provider 
         createCoinbaseRequestState(),
         { allowBitstampLegacyExit: true }
       ),
-      (error) => error.code === "all_market_data_providers_unavailable" &&
+      (error) => error.code === "legacy_exit_market_data_unavailable" &&
         error.primary_error_code === "provider_http_error" &&
         error.backup_error_code === "provider_http_error"
     );
@@ -620,7 +620,7 @@ test("a partial Coinbase snapshot uses all-Bitstamp data only for a legacy posit
     assert.equal(snapshot.data_quality.book_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.one_hour_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.six_hour_provider, "bitstamp_spot");
-    assert.equal(snapshot.data_quality.failover_reason, "primary_snapshot_incomplete");
+    assert.equal(snapshot.data_quality.failover_reason, "coinbase_snapshot_incomplete_for_existing_bitstamp_position");
     assert.equal(snapshot.data_quality.primary_provider_error, "provider_http_error");
     assert.equal(snapshot.data_quality.book_status, "available");
     assert.equal(snapshot.one_hour_audit.ok, true);
