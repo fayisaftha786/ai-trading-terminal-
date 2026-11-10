@@ -39,7 +39,7 @@ def test_auto_demo_checks_live_ticker_spread_depth_and_daily_quote_volume():
     signal = (JAVA / "PaperSignal.java").read_text()
     assert "ticker.getString(\"time\")" in source
     assert "https://api.exchange.coinbase.com/products/BTC-USD/book?level=2" in source
-    assert "bidDepth,askDepth,ticker.getDouble(\"quoteVolume\")" in source
+    assert "bidDepth,askDepth,quoteVolume" in source
     assert "db.openAuto(snapshot.quote.ask,latest.openTime)" in source
     assert "Math.min(tickerRetrievedAt,bookRetrievedAt)" in source
     assert "MAX_SPREAD_BPS = 25.0" in signal
