@@ -1154,14 +1154,15 @@ async function runBinanceStrategy(){
   for(let index=0;index<symbols.length;index+=50)chunks.push(symbols.slice(index,index+50));
   let completed=0;
   let failures=0;
-  setAiBrainProgress(0,symbols.length,"Running a single request · up to 10 markets analyzed in parallel · candle cache active");
+  setAiBrainProgress(0,symbols.length,"Running a single request · up to 5 markets analyzed in parallel · candle cache active");
   try{
     await Promise.all(chunks.map(async(chunk)=>{
       try{
         const data=await api("/api/strategy/binance-intelligence?symbols="+encodeURIComponent(chunk.join(",")));
         const marketRows=Array.isArray(data.markets)?data.markets:[];
         binanceStrategyResults.push(...marketRows);
-        if(marketRows.length!==chunk.length)failures+=chunk.length-marketRows.length;
+        const analyzedSymbols=new Set(marketRows.filter((item)=>item.status==="analyzed").map((item)=>String(item.binance_symbol||"").toUpperCase()));
+        failures+=chunk.filter((symbol)=>!analyzedSymbols.has(String(symbol).toUpperCase())).length;
       }catch(error){
         failures+=chunk.length;
         for(const symbol of chunk)binanceStrategyResults.push({
@@ -1175,7 +1176,7 @@ async function runBinanceStrategy(){
       $("aiBrainAnalyzed").textContent=String(binanceStrategyResults.filter((item)=>item.status==="analyzed").length);
       $("aiBrainCandidates").textContent=String(binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length);
       $("aiBrainPaperReady").textContent=String(binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length);
-      setAiBrainProgress(completed,symbols.length,"Analyzed "+completed+" of "+symbols.length+" markets · "+failures+" provider/request failures");
+      setAiBrainProgress(completed,symbols.length,"Analyzed "+completed+" of "+symbols.length+" markets · "+failures+" markets not fully analyzed");
       renderBinanceStrategyRows();
     }));
     binanceStrategyLastRunAt=Date.now();
@@ -1191,9 +1192,9 @@ async function runBinanceStrategy(){
       return total;
     },{reused:0,refreshed:0,fallback:0});
     $("aiBrainFeed").textContent=failures?"PARTIAL · "+analyzed+"/"+symbols.length:"LIVE DATA · "+analyzed+"/"+symbols.length;
-    $("aiBrainFeed").className="tag "+(failures?"bad":"good");
+    $("aiBrainFeed").className="tag "+(failures||analyzed!==symbols.length?"bad":"good");
     $("aiBrainUpdated").textContent="Updated "+new Date(binanceStrategyLastRunAt).toLocaleTimeString();
-    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Account taker fee verified for "+feeVerified+"/"+symbols.length+" markets; other markets use the configured paper-fee fallback. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
+    $("aiBrainStatus").textContent=(failures?"Analysis finished with "+failures+" market(s) that did not produce a validated analysis.":"Completed with validated Binance public Spot market data for all requested markets.")+" "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Account taker fee verified for "+feeVerified+"/"+symbols.length+" markets; other markets use the configured paper-fee fallback. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
     setAiBrainProgress(symbols.length,symbols.length,"Completed "+symbols.length+" markets · "+analyzed+" valid analyses · "+failures+" failures");
   }catch(error){
     $("aiBrainFeed").textContent="SCAN ERROR";
