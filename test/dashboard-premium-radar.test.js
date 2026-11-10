@@ -26,7 +26,7 @@ test("Coinbase public market monitor and historical chart remain available", () 
 test("Coinbase is the sole exchange connector visible in the cloud dashboard", () => {
   assert.match(html, /REAL MODE · Coinbase Advanced account connection/);
   assert.match(html, /id="realModePanel"/);
-  assert.match(html, /COINBASE Advanced/);
+  assert.match(html, /Coinbase Advanced/);
   assert.doesNotMatch(html, /binance|testnet|ccxt/i);
   assert.doesNotMatch(html, /\/binance-radar\.js/);
 });
