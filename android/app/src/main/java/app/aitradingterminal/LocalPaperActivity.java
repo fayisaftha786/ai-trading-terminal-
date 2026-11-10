@@ -28,6 +28,9 @@ import java.util.Calendar;
 import java.util.TimeZone;
 import java.util.List;
 import java.util.Locale;
+import java.util.Collections;
+import java.util.Comparator;
+import java.text.SimpleDateFormat;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
@@ -73,7 +76,7 @@ public final class LocalPaperActivity extends Activity {
         TextView title=label("AI TRADING TERMINAL",24,true,TEXT); body.addView(title);
         body.addView(label("ON-DEVICE MODE · PAPER ONLY · NO HOSTING",11,true,ACCENT));
         status=label("Local engine ready. Fetch market data to begin.",13,false,MUTED); body.addView(status);
-        price=label("BTC/USDT  —",22,true,TEXT); body.addView(card(price));
+        price=label("BTC/USD  —",22,true,TEXT); body.addView(card(price));
         wallet=label("",14,true,TEXT); body.addView(card(wallet));
         Button refresh=button("REFRESH MARKET + RUN 12 DIAGNOSTICS"); body.addView(refresh);
         refresh.setOnClickListener(v->refreshMarket());
@@ -181,7 +184,7 @@ public final class LocalPaperActivity extends Activity {
                 final String exitResult=automaticExit;
                 final String entryResult=automaticEntry;
                 runOnUiThread(()->{
-                    price.setText(String.format(Locale.US,"BTC/USDT  $%,.2f",lastPrice));
+                    price.setText(String.format(Locale.US,"BTC/USD  $%,.2f",lastPrice));
                     String autoStatus=db.isAutoEnabled()?" · AUTO DEMO ON (foreground)":" · AUTO DEMO OFF";
                     status.setText("LIVE CLOSED DATA · 1h "+loaded.size()+" / 4h "+snapshot.higher.size()+
                             " bars · last close "+ageText(System.currentTimeMillis()-latest.closeTime)+autoStatus);
@@ -199,7 +202,7 @@ public final class LocalPaperActivity extends Activity {
                     candles=cached; lastPrice=cached.get(cached.size()-1).close;
                     long age=System.currentTimeMillis()-cached.get(cached.size()-1).closeTime;
                     runOnUiThread(()->{
-                        price.setText(String.format(Locale.US,"BTC/USDT  $%,.2f (CACHED)",lastPrice));
+                        price.setText(String.format(Locale.US,"BTC/USD  $%,.2f (CACHED)",lastPrice));
                         status.setText("NETWORK / MARKET CHECK FAILED — cached mark age "+ageText(age)+". AUTO DEMO entries and automatic exits are paused. "+ex.getMessage());
                         analysis.setText(String.join("\n\n",analyze(cached)));
                         updateWallet();
@@ -222,26 +225,27 @@ public final class LocalPaperActivity extends Activity {
     }
 
     private List<Candle> fetchCandles(String interval,int limit,long intervalMs,long maxAgeMs) throws Exception {
-        String endpoint="https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval="+interval+"&limit="+limit;
+        int granularity="1h".equals(interval)?3600:14400;
+        String endpoint="https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity="+granularity;
         JSONArray arr=new JSONArray(httpGet(endpoint));
         List<Candle> out=new ArrayList<>();
         long now=System.currentTimeMillis(), previousOpen=Long.MIN_VALUE;
         for(int i=0;i<arr.length();i++) {
             JSONArray x=arr.getJSONArray(i);
-            long openTime=x.getLong(0), closeTime=x.getLong(6);
+            long openTime=x.getLong(0)*1000L, closeTime=openTime+intervalMs-1L;
             if(closeTime>=now) continue; // ignore the currently forming candle
-            double o=x.getDouble(1),h=x.getDouble(2),lo=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5);
+            double lo=x.getDouble(1),h=x.getDouble(2),o=x.getDouble(3),cl=x.getDouble(4),vol=x.getDouble(5);
             if(!finitePositive(o)||!finitePositive(h)||!finitePositive(lo)||!finitePositive(cl)||
                     !Double.isFinite(vol)||vol<0||h<Math.max(o,Math.max(lo,cl))||lo>Math.min(o,Math.min(h,cl))||
                     closeTime<openTime||Math.abs((closeTime-openTime+1L)-intervalMs)>1L) {
                 throw new IllegalStateException("Malformed "+interval+" OHLCV candle rejected");
             }
-            if(previousOpen!=Long.MIN_VALUE && openTime-previousOpen!=intervalMs) {
-                throw new IllegalStateException(interval+" candle history has a gap or duplicate");
-            }
             out.add(new Candle(openTime,closeTime,o,h,lo,cl,vol));
-            previousOpen=openTime;
         }
+        Collections.sort(out, Comparator.comparingLong(c -> c.openTime));
+        if(out.size()>limit) out=new ArrayList<>(out.subList(out.size()-limit,out.size()));
+        for(int i=1;i<out.size();i++) if(out.get(i).openTime-out.get(i-1).openTime!=intervalMs)
+            throw new IllegalStateException(interval+" Coinbase candle history has a gap or duplicate");
         if(out.size()<PaperSignal.MIN_HISTORY) throw new IllegalStateException("At least "+PaperSignal.MIN_HISTORY+" closed "+interval+" candles are required");
         long age=now-out.get(out.size()-1).closeTime;
         if(age<0||age>maxAgeMs) throw new IllegalStateException("Latest "+interval+" closed candle is stale ("+ageText(age)+")");
@@ -264,17 +268,22 @@ public final class LocalPaperActivity extends Activity {
     }
 
     private PaperSignal.Quote fetchQuote() throws Exception {
-        JSONObject book=new JSONObject(httpGet("https://api.binance.com/api/v3/ticker/bookTicker?symbol=BTCUSDT"));
+        JSONObject ticker=new JSONObject(httpGet("https://api.exchange.coinbase.com/products/BTC-USD/ticker"));
+        long tickerRetrievedAt=System.currentTimeMillis();
+        JSONObject book=new JSONObject(httpGet("https://api.exchange.coinbase.com/products/BTC-USD/book?level=2"));
         long bookRetrievedAt=System.currentTimeMillis();
-        JSONObject depth=new JSONObject(httpGet("https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=10"));
-        double bidDepth=depthUsd(depth.getJSONArray("bids"));
-        double askDepth=depthUsd(depth.getJSONArray("asks"));
-        long depthRetrievedAt=System.currentTimeMillis();
-        JSONObject ticker=new JSONObject(httpGet("https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT"));
-        long tickerStamp=ticker.getLong("closeTime");
-        return new PaperSignal.Quote(ticker.getDouble("lastPrice"),
-                book.getDouble("bidPrice"),book.getDouble("askPrice"),
-                bidDepth,askDepth,ticker.getDouble("quoteVolume"),tickerStamp,Math.min(bookRetrievedAt,depthRetrievedAt));
+        double bidDepth=depthUsd(book.getJSONArray("bids"));
+        double askDepth=depthUsd(book.getJSONArray("asks"));
+        JSONObject stats=new JSONObject(httpGet("https://api.exchange.coinbase.com/products/BTC-USD/stats"));
+        double last=ticker.getDouble("price");
+        double quoteVolume=last*stats.getDouble("volume");
+        String time=ticker.getString("time");
+        SimpleDateFormat parser=new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX",Locale.US);
+        parser.setTimeZone(TimeZone.getTimeZone("UTC"));
+        java.util.Date parsed=parser.parse(time);
+        if(parsed==null) throw new IllegalStateException("Coinbase ticker timestamp is invalid");
+        return new PaperSignal.Quote(last,ticker.getDouble("bid"),ticker.getDouble("ask"),
+                bidDepth,askDepth,quoteVolume,parsed.getTime(),Math.min(tickerRetrievedAt,bookRetrievedAt));
     }
 
     private double depthUsd(JSONArray rows) throws Exception {
