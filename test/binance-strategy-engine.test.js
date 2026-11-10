@@ -14,6 +14,11 @@ test("Binance strategy uses persistent closed-candle cache and current REST dept
   assert.match(engine, /stale_fallback_timeframes/);
 });
 
+test("Binance strategy invalid-batch response matches the 50-symbol API limit", () => {
+  assert.match(engine, /maximum_symbols_per_batch: BINANCE_STRATEGY_BATCH_LIMIT/);
+  assert.match(engine, /expected: "one to fifty comma-separated Binance USDT Spot symbols"/);
+});
+
 test("Binance strategy is public-read-only and never enables an exchange order", () => {
   assert.match(engine, /paper_orders_created: 0/);
   assert.match(engine, /live_trading_enabled: false/);
