@@ -232,12 +232,26 @@ async function routeApi(request, env) {
     return await stub.fetch(request);
   } catch (error) {
     // Surface a controlled service-unavailable response instead of an unhandled
-    // Error 1101 page when the Durable Object storage quota or runtime is degraded.
+    // Error 1101 page when Durable Object storage is degraded.
+    const message = String(error?.message || error).slice(0, 180);
+    const sqlReadQuotaExhausted = message.includes(
+      "Exceeded allowed rows read in Durable Objects free tier."
+    );
     console.error("Trading engine Durable Object request failed", {
       path: url.pathname,
       name: typeof error?.name === "string" ? error.name : "Error",
-      message: String(error?.message || error).slice(0, 180)
+      message
     });
+    if (sqlReadQuotaExhausted) {
+      const now = new Date();
+      const retryAt = new Date(Date.UTC(
+        now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1
+      )).toISOString();
+      return json({
+        error: "durable_object_sql_read_quota_exhausted",
+        retry_at_utc: retryAt
+      }, 503);
+    }
     return json({ error: "trading_engine_temporarily_unavailable" }, 503);
   }
 }

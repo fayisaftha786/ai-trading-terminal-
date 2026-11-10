@@ -179,3 +179,19 @@ test("Wrangler configures separate per-IP and per-location fallback login rate l
   assert.match(workerConfigSource, /"namespace_id": "28261101"/);
   assert.match(workerConfigSource, /"namespace_id": "28261102"/);
 });
+
+test("public Worker boot health does not depend on exhausted Durable Object SQL quota", () => {
+  const bootStart = dashboardSource.indexOf("async function boot()");
+  const bootEnd = dashboardSource.indexOf("boot();", bootStart);
+  const boot = dashboardSource.slice(bootStart, bootEnd);
+  assert.ok(boot.includes('fetch("/api/worker/health"'));
+  assert.ok(!boot.includes('fetch("/api/health"'));
+  assert.ok(dashboardSource.includes("durable_object_sql_read_quota_exhausted"));
+  assert.ok(dashboardSource.includes("Cloudflare Free daily Durable Objects SQL read quota is exhausted"));
+});
+
+test("Durable Object SQL quota exhaustion reports the next UTC daily reset without leaking internal errors", () => {
+  assert.ok(workerSource.includes('error: "durable_object_sql_read_quota_exhausted"'));
+  assert.ok(workerSource.includes("retry_at_utc: retryAt"));
+  assert.ok(workerSource.includes("Exceeded allowed rows read in Durable Objects free tier."));
+});

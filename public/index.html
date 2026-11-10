@@ -245,7 +245,7 @@ section[id]{scroll-margin-top:82px}
 const $=(id)=>document.getElementById(id);let token=sessionStorage.getItem("att_cf_token")||"";
 const money=(value)=>"$"+Number(value||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
 const esc=(value)=>String(value??"").replace(/[&<>"']/g,(char)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-async function api(path,options={}){const headers={"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(options.headers||{})};const response=await fetch(path,{...options,headers,cache:"no-store"});let data={};try{data=await response.json()}catch{}if(response.status===401){token="";sessionStorage.removeItem("att_cf_token");showLogin();throw new Error("Session expired. Sign in again.");}if(!response.ok)throw new Error(data.detail||data.error||"Request failed ("+response.status+")");return data;}
+async function api(path,options={}){const headers={"content-type":"application/json",...(token?{authorization:"Bearer "+token}:{}),...(options.headers||{})};const response=await fetch(path,{...options,headers,cache:"no-store"});let data={};try{data=await response.json()}catch{}if(response.status===401){token="";sessionStorage.removeItem("att_cf_token");showLogin();throw new Error("Session expired. Sign in again.");}if(!response.ok){if(data.error==="durable_object_sql_read_quota_exhausted"){const retry=data.retry_at_utc?new Date(data.retry_at_utc).toLocaleString(): "the next UTC daily reset";throw new Error("Cloudflare Free daily Durable Objects SQL read quota is exhausted. Trading data will retry after "+retry+". Your login is still available.");}throw new Error(data.detail||data.error||"Request failed ("+response.status+")");}return data;}
 let marketSocket=null;
 let marketReconnectTimer=null;
 let marketReconnectDelay=1000;
@@ -914,7 +914,7 @@ async function runTournament(){
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
 $("runTournament").addEventListener("click",runTournament);
-async function boot(){try{const healthResponse=await fetch("/api/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Backend health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
+async function boot(){try{const healthResponse=await fetch("/api/worker/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Worker health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
 setInterval(()=>{
   if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true){
     runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
