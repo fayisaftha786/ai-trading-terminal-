@@ -86,6 +86,19 @@ test("missing Binance fee or slippage values use conservative fallbacks instead 
   assert.equal(guarded.cost_model.fee_rate_status, "fallback");
   assert.equal(guarded.cost_model.fee_source, "configured_paper_assumption");
 
+  const mismatchedSource = validInput();
+  mismatchedSource.costs = {
+    feeBpsPerSide: 10,
+    slippageBps: 5,
+    feeSource: "manual_or_unknown_source",
+    feeRateStatus: "verified"
+  };
+  const sourceGuarded = analyzeBinanceMultiTimeframeMarket(mismatchedSource);
+  assert.equal(sourceGuarded.cost_model.fee_bps_per_side, 10);
+  assert.equal(sourceGuarded.cost_model.slippage_bps_per_side, 5);
+  assert.equal(sourceGuarded.cost_model.fee_rate_status, "fallback");
+  assert.equal(sourceGuarded.cost_model.fee_source, "configured_paper_assumption");
+
   const explicitZero = validInput();
   explicitZero.costs = {
     feeBpsPerSide: 0, slippageBps: 0,
