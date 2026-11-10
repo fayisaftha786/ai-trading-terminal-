@@ -367,6 +367,7 @@ function bootBinanceRadar() {
       const selected = selectBinanceRadarMarkets(payload);
       if (!selected.length) throw new Error("binance_market_universe_empty");
       markets = selected;
+      window.binanceRadarSymbols = markets.map((row) => row.symbol);
       rowsBySymbol.clear();
       const seedTime = Date.now();
       for (const row of selected) rowsBySymbol.set(row.symbol, { ...row, receivedAt: seedTime });
