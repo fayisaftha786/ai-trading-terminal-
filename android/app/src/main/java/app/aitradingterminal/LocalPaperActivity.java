@@ -43,7 +43,7 @@ public final class LocalPaperActivity extends Activity {
     private static final int BG=0xFF080D1A, CARD=0xFF111A2E, TEXT=0xFFF7FAFF, MUTED=0xFFA2B0CA, ACCENT=0xFF8B7CFF;
     private static final long HOUR_MS=60L*60L*1000L;
     private static final long MAX_CANDLE_AGE_MS=2L*HOUR_MS;
-    private static final long FOUR_HOURS_MS=4L*HOUR_MS;
+    private static final long SIX_HOURS_MS=6L*HOUR_MS;
     private static final long AUTO_REFRESH_MS=5L*60L*1000L;
     private final ExecutorService io=Executors.newSingleThreadExecutor();
     private final Handler mainHandler=new Handler(Looper.getMainLooper());
@@ -113,7 +113,7 @@ public final class LocalPaperActivity extends Activity {
         db.setAutoEnabled(enabled);
         updateAutoButton();
         if(enabled) {
-            status.setText("AUTO DEMO enabled — strict 1h/4h and execution-quality gates apply. Foreground only.");
+            status.setText("AUTO DEMO enabled — strict 1h/6h and execution-quality gates apply. Foreground only.");
             refreshMarket();
         } else {
             status.setText("AUTO DEMO disabled — any open paper position continues to be checked while this screen stays in the foreground.");
@@ -153,7 +153,7 @@ public final class LocalPaperActivity extends Activity {
         lastAsk=0;
         lastTickerTimestamp=0;
         lastBookRetrievedAt=0;
-        status.setText("Fetching fresh closed 1h/4h candles, ticker, spread and top-10 order-book depth…");
+        status.setText("Fetching fresh closed 1h/6h candles, ticker, spread and top-10 order-book depth…");
         updateControls();
         io.execute(()->{
             try {
@@ -169,7 +169,7 @@ public final class LocalPaperActivity extends Activity {
                 db.cache(loaded);
                 String automaticExit=db.evaluateExits(loaded);
                 PaperSignal.Analysis primary=PaperSignal.analyze(toBars(loaded,HOUR_MS),24);
-                PaperSignal.Analysis higher=PaperSignal.analyze(toBars(snapshot.higher,FOUR_HOURS_MS),6);
+                PaperSignal.Analysis higher=PaperSignal.analyze(toBars(snapshot.higher,SIX_HOURS_MS),6);
                 PaperSignal.Decision decision=PaperSignal.assess(primary,higher,snapshot.quote,System.currentTimeMillis());
                 String automaticEntry=null;
                 if(db.isAutoEnabled()) {
@@ -186,7 +186,7 @@ public final class LocalPaperActivity extends Activity {
                 runOnUiThread(()->{
                     price.setText(String.format(Locale.US,"BTC/USD  $%,.2f",lastPrice));
                     String autoStatus=db.isAutoEnabled()?" · AUTO DEMO ON (foreground)":" · AUTO DEMO OFF";
-                    status.setText("LIVE CLOSED DATA · 1h "+loaded.size()+" / 4h "+snapshot.higher.size()+
+                    status.setText("LIVE CLOSED DATA · 1h "+loaded.size()+" / 6h "+snapshot.higher.size()+
                             " bars · last close "+ageText(System.currentTimeMillis()-latest.closeTime)+autoStatus);
                     analysis.setText(String.join("\n\n",results));
                     if(exitResult!=null) toast("Paper "+exitResult+" executed from a closed candle");
@@ -219,17 +219,17 @@ public final class LocalPaperActivity extends Activity {
 
     private MarketSnapshot fetchSnapshot() throws Exception {
         List<Candle> primary=fetchCandles("1h",200,HOUR_MS,MAX_CANDLE_AGE_MS);
-        List<Candle> higher=fetchCandles("4h",180,FOUR_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS);
+        List<Candle> higher=fetchCandles("6h",180,SIX_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS);
         PaperSignal.Quote quote=fetchQuote();
         return new MarketSnapshot(primary,higher,quote);
     }
 
     private List<Candle> fetchCandles(String interval,int limit,long intervalMs,long maxAgeMs) throws Exception {
-        int granularity="1h".equals(interval)?3600:14400;
+        int granularity="1h".equals(interval)?3600:21600;
         String endpoint="https://api.exchange.coinbase.com/products/BTC-USD/candles?granularity="+granularity;
         JSONArray arr=new JSONArray(httpGet(endpoint));
         List<Candle> out=new ArrayList<>();
-        long now=System.currentTimeMillis(), previousOpen=Long.MIN_VALUE;
+        long now=System.currentTimeMillis();
         for(int i=0;i<arr.length();i++) {
             JSONArray x=arr.getJSONArray(i);
             long openTime=x.getLong(0)*1000L, closeTime=openTime+intervalMs-1L;
@@ -278,6 +278,8 @@ public final class LocalPaperActivity extends Activity {
         double last=ticker.getDouble("price");
         double quoteVolume=last*stats.getDouble("volume");
         String time=ticker.getString("time");
+        if(time.endsWith("Z")&&!time.contains(".")) time=time.substring(0,time.length()-1)+".000Z";
+        time=time.replaceFirst("(\\.\\d{3})\\d+Z$","$1Z");
         SimpleDateFormat parser=new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSX",Locale.US);
         parser.setTimeZone(TimeZone.getTimeZone("UTC"));
         java.util.Date parsed=parser.parse(time);
@@ -330,7 +332,7 @@ public final class LocalPaperActivity extends Activity {
         out.add(worker("2. Trend analyst",trend+" · EMA12 "+fmt(emaFast)+" / EMA26 "+fmt(emaSlow)));
         out.add(worker("3. Momentum analyst",momentum+" · RSI14 "+fmt(rsi)));
         out.add(worker("4. Volume analyst","20-bar relative volume "+fmt(volRatio)+"x"));
-        out.add(worker("5. Multi-timeframe analyst",higher==null?"UNAVAILABLE — higher timeframe not loaded":"1h "+(primary==null?"?":primary.regime)+" · 4h "+higher.regime));
+        out.add(worker("5. Multi-timeframe analyst",higher==null?"UNAVAILABLE — higher timeframe not loaded":"1h "+(primary==null?"?":primary.regime)+" · 6h "+higher.regime));
         out.add(worker("6. Breakout & range analyst",z.close>high?"Above prior 20-bar high":z.close<low?"Below prior 20-bar low":"Inside prior 20-bar range"));
         out.add(worker("7. Volatility analyst","ATR14 "+fmt(atr)+" · "+fmt(atr/z.close*100)+"% of price"));
         out.add(worker("8. News & sentiment","UNAVAILABLE — no licensed news provider configured"));
