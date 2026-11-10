@@ -70,9 +70,13 @@ export function selectBinanceRadarMarkets(rows, {
     item.quoteVolume >= minimumQuoteVolume &&
     (item.tradeCount === null || item.tradeCount >= minimumTrades)
   );
+  const fallback = candidates.filter((item) =>
+    item.quoteVolume >= minimumQuoteVolume * 0.2 &&
+    (item.tradeCount === null || item.tradeCount >= Math.max(50, Math.floor(minimumTrades * 0.2)))
+  );
   const selected = preferred.length >= Math.min(20, safeLimit)
     ? preferred
-    : candidates;
+    : fallback;
   return selected.slice(0, safeLimit);
 }
 
@@ -191,7 +195,7 @@ function createRadarRow(row, now) {
     gap === null ? "—" : (gap > 0 ? "+" : "") + gap.toFixed(3) + "%",
     gap === null ? "muted" : gap > 0 ? "positive" : gap < 0 ? "negative" : ""
   ));
-  tr.append(createCell("$" + compact(row.quoteVolume), "radar-volume"));
+  tr.append(createCell(compact(row.quoteVolume) + " USDT", "radar-volume"));
   const ageCell = document.createElement("td");
   ageCell.className = "radar-age";
   const indicator = document.createElement("span");
@@ -220,6 +224,8 @@ function bootBinanceRadar() {
   let selectedSort = "volume";
   let searchTerm = "";
   let lastRestRefreshAt = 0;
+  let restRetryTimer = null;
+  let restRetryAttempts = 0;
 
   const rowsBySymbol = new Map();
 
@@ -283,7 +289,9 @@ function bootBinanceRadar() {
 
   function stopSocket() {
     if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (restRetryTimer) clearTimeout(restRetryTimer);
     reconnectTimer = null;
+    restRetryTimer = null;
     if (socket) {
       const current = socket;
       socket = null;
@@ -361,12 +369,23 @@ function bootBinanceRadar() {
       const seedTime = Date.now();
       for (const row of selected) rowsBySymbol.set(row.symbol, { ...row, receivedAt: seedTime });
       lastRestRefreshAt = seedTime;
+      restRetryAttempts = 0;
+      if (restRetryTimer) clearTimeout(restRetryTimer);
+      restRetryTimer = null;
       text("radarUniverseNote", "Top " + markets.length + " liquid Binance USDT Spot pairs · 24h quote-volume ranking · public market-data-only endpoint.");
       connectSocket();
       render();
     } catch (error) {
       setFeedState("DATA UNAVAILABLE", "bad");
       text("radarUniverseNote", "Binance public market data could not be loaded: " + String(error?.message || "network_error") + ". No cached or synthetic prices are shown.");
+      if (active && !restRetryTimer) {
+        restRetryAttempts += 1;
+        const delay = Math.min(BINANCE_RADAR_RECONNECT_MAX_MS, 2000 * (2 ** Math.min(restRetryAttempts - 1, 4)));
+        restRetryTimer = setTimeout(() => {
+          restRetryTimer = null;
+          if (active && !markets.length) loadUniverse();
+        }, delay);
+      }
     }
   }
 
