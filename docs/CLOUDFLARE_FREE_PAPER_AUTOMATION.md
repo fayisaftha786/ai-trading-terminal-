@@ -130,7 +130,7 @@ GitHub Actions runs JavaScript syntax checks, strategy-unit tests, a Wrangler dr
 
 The local smoke test runs Wrangler in local workerd mode and checks SQLite Durable Object initialization, unauthenticated API rejection, owner login, dashboard reads, explicit PAPER enable, emergency stop, reset and static asset serving. It uses disposable local test credentials and makes no cloud deployment.
 
-Official secondary-provider reference: [Bitstamp Public API v2](https://www.bitstamp.net/api/) — public spot ticker, grouped order-book, OHLC fields and published request limits.
+Historical research/legacy-exit reference: [Bitstamp Public API v2](https://www.bitstamp.net/api/) — public spot OHLC, ticker timestamp and grouped order-book fields. It is not a new-entry market provider.
 
 
 ## Research-quality upgrades (PAPER and offline only)
