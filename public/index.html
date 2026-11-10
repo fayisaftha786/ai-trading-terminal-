@@ -666,6 +666,7 @@ async function runCoinbasePreflight({silent=false,force=false}={}){
         account_count:result.account_count??null,
         account_pagination_complete:result.account_pagination_complete??null,
         order_submission_available:result.order_submission_available===true,
+        background_reconciliation:result.background_reconciliation||coinbaseStaticStatus?.background_reconciliation||null,
         live_trading_enabled:false,
         automatic_live_entries_enabled:false,
         sync_mode:"read_only_account_preflight"
