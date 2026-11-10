@@ -48,7 +48,7 @@ test("read-only Coinbase account refresh starts at login and runs in DEMO and RE
   assert.match(dashboard, /!document\.hidden&&token&&coinbaseStaticStatus\?\.credentials_configured===true/);
   assert.match(dashboard, /runCoinbasePreflight\(\{silent:true,force:true\}\)/);
   assert.match(dashboard, /sync_mode:"read_only_account_preflight"/);
-  assert.match(dashboard, /it never places, changes or cancels an order/i);
+  assert.match(dashboard, /never places or cancels orders/i);
 });
 
 test("Coinbase product selection is populated from server-verified eligible products only", () => {
