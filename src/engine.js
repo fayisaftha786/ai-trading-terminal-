@@ -20,7 +20,7 @@ import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { binanceReadOnlyStatus, preflightBinanceReadOnly } from "./binance-readonly.js";
-import { analyzeBinanceMultiTimeframeMarket, BINANCE_STRATEGY_BATCH_LIMIT } from "./binance-strategy.js";
+import { analyzeBinanceMultiTimeframeMarket, BINANCE_STRATEGY_BATCH_LIMIT, BINANCE_STRATEGY_INTERVALS, shouldRefreshBinanceCandleCache } from "./binance-strategy.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -70,6 +70,7 @@ export class TradingEngine extends DurableObject {
       "CREATE TABLE IF NOT EXISTS research_candles(exchange TEXT NOT NULL,product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,candle_open_ms INTEGER NOT NULL,open REAL NOT NULL,high REAL NOT NULL,low REAL NOT NULL,close REAL NOT NULL,volume REAL NOT NULL,received_at_ms INTEGER NOT NULL,schema_version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(exchange,product,timeframe_seconds,candle_open_ms))",
       "CREATE INDEX IF NOT EXISTS idx_research_candles_product_time ON research_candles(product,timeframe_seconds,candle_open_ms)",
       "CREATE TABLE IF NOT EXISTS research_history_state(product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,bars_count INTEGER NOT NULL DEFAULT 0,first_candle_ms INTEGER,last_candle_ms INTEGER,cumulative_missing_intervals INTEGER NOT NULL DEFAULT 0,last_quality_check_at_ms INTEGER,last_ingested_at_ms INTEGER,last_quality_status TEXT NOT NULL DEFAULT 'not_started',PRIMARY KEY(product,timeframe_seconds))",
+      "CREATE TABLE IF NOT EXISTS binance_strategy_candle_cache(symbol TEXT NOT NULL,interval_label TEXT NOT NULL,candles_json TEXT NOT NULL,cached_at_ms INTEGER NOT NULL,PRIMARY KEY(symbol,interval_label))",
       "CREATE TABLE IF NOT EXISTS live_fills(entry_id TEXT PRIMARY KEY,trade_id TEXT,order_id TEXT NOT NULL,client_order_id TEXT NOT NULL,product_id TEXT NOT NULL,side TEXT NOT NULL,trade_type TEXT NOT NULL,trade_time TEXT NOT NULL,sequence_timestamp TEXT,price TEXT NOT NULL,size TEXT NOT NULL,commission TEXT NOT NULL,liquidity_indicator TEXT,size_in_quote INTEGER NOT NULL DEFAULT 0,imported_at_ms INTEGER NOT NULL,raw_json TEXT NOT NULL DEFAULT '{}')",
       "CREATE INDEX IF NOT EXISTS idx_live_fills_order_time ON live_fills(order_id,trade_time)",
       "CREATE INDEX IF NOT EXISTS idx_live_fills_client_time ON live_fills(client_order_id,trade_time)"
@@ -131,6 +132,33 @@ export class TradingEngine extends DurableObject {
     }));
   }
 
+  loadBinanceStrategyCandleCache(symbol, intervalLabel) {
+    const row = this.sql.exec(
+      "SELECT candles_json,cached_at_ms FROM binance_strategy_candle_cache WHERE symbol=? AND interval_label=?",
+      symbol, intervalLabel
+    ).toArray()[0];
+    if (!row) return null;
+    try {
+      const candles = JSON.parse(row.candles_json);
+      if (!Array.isArray(candles)) return null;
+      return { candles, cached_at_ms: Number(row.cached_at_ms) };
+    } catch {
+      return null;
+    }
+  }
+
+  saveBinanceStrategyCandleCache(symbol, intervalLabel, candles, cachedAtMs) {
+    if (!Array.isArray(candles) || candles.length < 150) {
+      throw new Error("binance_candle_cache_insufficient_history");
+    }
+    const bounded = candles.slice(-180);
+    this.sql.exec(
+      "INSERT INTO binance_strategy_candle_cache(symbol,interval_label,candles_json,cached_at_ms) VALUES(?,?,?,?) " +
+      "ON CONFLICT(symbol,interval_label) DO UPDATE SET candles_json=excluded.candles_json,cached_at_ms=excluded.cached_at_ms",
+      symbol, intervalLabel, JSON.stringify(bounded), cachedAtMs
+    );
+  }
+
   async ensureAlarm() {
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm === null) {
@@ -144,28 +172,33 @@ export class TradingEngine extends DurableObject {
 
 
   async scanBinanceStrategyBatch(symbols) {
-    const nowMs = Date.now();
-    const response = await fetch("https://data-api.binance.vision/api/v3/ticker/24hr", {
+    const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr?symbols=" +
+      encodeURIComponent(JSON.stringify(symbols));
+    const tickerResponse = await fetch(tickerUrl, {
       headers: { "accept": "application/json" },
       signal: AbortSignal.timeout(12000)
     });
-    if (!response.ok) {
-      const error = new Error("binance_ticker_http_" + response.status);
-      error.status = response.status;
+    if (!tickerResponse.ok) {
+      const error = new Error("binance_ticker_http_" + tickerResponse.status);
+      error.status = tickerResponse.status;
       throw error;
     }
-    const tickerRows = await response.json();
-    if (!Array.isArray(tickerRows)) throw new Error("binance_ticker_payload_invalid");
+    const tickerPayload = await tickerResponse.json();
+    const tickerRows = Array.isArray(tickerPayload)
+      ? tickerPayload
+      : (tickerPayload && typeof tickerPayload.symbol === "string" ? [tickerPayload] : null);
+    if (!tickerRows) throw new Error("binance_ticker_payload_invalid");
     const tickerBySymbol = new Map(tickerRows.map((row) => [String(row?.symbol || "").toUpperCase(), row]));
+    const snapshotAtMs = Date.now();
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
     const currentMarkets = this.getMarkets();
-    const positionMarks = this.buildPositionLockedBidMarks(currentMarkets, nowMs);
-    const portfolio = this.portfolio(positionMarks, risk, nowMs);
+    const positionMarks = this.buildPositionLockedBidMarks(currentMarkets, snapshotAtMs);
+    const portfolio = this.portfolio(positionMarks, risk, snapshotAtMs);
     const portfolioBlockReasons = [];
     if (portfolio.unmarked_positions > 0) portfolioBlockReasons.push("open_position_without_fresh_mark");
     if (portfolio.open_positions >= risk.max_open_positions) portfolioBlockReasons.push("max_open_positions");
-    const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
+    const protection = this.riskProtectionStatus(portfolio, risk, snapshotAtMs);
     portfolioBlockReasons.push(...(protection.block_reasons || []));
     if (settings.capital_setup_required) portfolioBlockReasons.push("paper_capital_setup_review_required");
     if (portfolio.equity_usd > 0 &&
@@ -190,18 +223,47 @@ export class TradingEngine extends DurableObject {
 
       try {
         const base = "https://data-api.binance.vision/api/v3/";
-        const query = "symbol=" + encodeURIComponent(symbol) + "&limit=180";
-        const requests = await Promise.all([
-          fetch(base + "klines?interval=15m&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
-          fetch(base + "klines?interval=1h&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
-          fetch(base + "klines?interval=4h&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
-          fetch(base + "depth?symbol=" + encodeURIComponent(symbol) + "&limit=20", { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) })
+        const cacheInfo = { reused_timeframes: [], refreshed_timeframes: [], stale_fallback_timeframes: [] };
+        const fetchJson = async (url, label) => {
+          const response = await fetch(url, {
+            headers: { "accept": "application/json" },
+            signal: AbortSignal.timeout(12000)
+          });
+          if (!response.ok) throw new Error("binance_" + label + "_http_" + response.status);
+          return response.json();
+        };
+        const getCandles = async (label, interval, intervalMs) => {
+          const cached = this.loadBinanceStrategyCandleCache(symbol, label);
+          if (cached && !shouldRefreshBinanceCandleCache(cached.candles, intervalMs, Date.now())) {
+            cacheInfo.reused_timeframes.push(label);
+            return cached.candles;
+          }
+          try {
+            const query = "symbol=" + encodeURIComponent(symbol) + "&interval=" + interval + "&limit=180";
+            const rows = await fetchJson(base + "klines?" + query, label);
+            if (!Array.isArray(rows) || rows.length < 150) {
+              throw new Error("binance_" + label + "_insufficient_history");
+            }
+            this.saveBinanceStrategyCandleCache(symbol, label, rows, Date.now());
+            cacheInfo.refreshed_timeframes.push(label);
+            return rows;
+          } catch (error) {
+            // A brief provider issue may use a previously validated cache, but
+            // analyzeBinanceMultiTimeframeMarket still applies hard candle-age
+            // and continuity gates before it can become a candidate.
+            if (cached) {
+              cacheInfo.stale_fallback_timeframes.push(label);
+              return cached.candles;
+            }
+            throw error;
+          }
+        };
+        const [candles15m, candles1h, candles4h, depth] = await Promise.all([
+          getCandles("15m", "15m", BINANCE_STRATEGY_INTERVALS["15m"]),
+          getCandles("1h", "1h", BINANCE_STRATEGY_INTERVALS["1h"]),
+          getCandles("4h", "4h", BINANCE_STRATEGY_INTERVALS["4h"]),
+          fetchJson(base + "depth?symbol=" + encodeURIComponent(symbol) + "&limit=20", "depth")
         ]);
-        const labels = ["15m", "1h", "4h", "depth"];
-        const payloads = await Promise.all(requests.map(async (item, index) => {
-          if (!item.ok) throw new Error("binance_" + labels[index] + "_http_" + item.status);
-          return item.json();
-        }));
         const symbolRow = this.sql.exec(
           "SELECT status,opened_at_ms,closed_at_ms FROM trades WHERE symbol=? ORDER BY opened_at_ms DESC,id DESC LIMIT 1",
           symbol.slice(0, -4) + "/USDT"
@@ -210,18 +272,18 @@ export class TradingEngine extends DurableObject {
         if (symbolRow?.status === "OPEN") symbolBlockReasons.push("position_already_open");
         else if (symbolRow) {
           const lastAt = Number(symbolRow.closed_at_ms || symbolRow.opened_at_ms);
-          if (Number.isFinite(lastAt) && nowMs - lastAt < 4 * 60 * 60 * 1000) {
+          if (Number.isFinite(lastAt) && snapshotAtMs - lastAt < 4 * 60 * 60 * 1000) {
             symbolBlockReasons.push("symbol_cooldown_4h");
           }
         }
         const analysis = analyzeBinanceMultiTimeframeMarket({
           symbol,
           ticker,
-          depth: payloads[3],
+          depth,
           candlesByInterval: {
-            "15m": payloads[0],
-            "1h": payloads[1],
-            "4h": payloads[2]
+            "15m": candles15m,
+            "1h": candles1h,
+            "4h": candles4h
           },
           nowMs: Date.now(),
           costs: {
@@ -231,6 +293,7 @@ export class TradingEngine extends DurableObject {
           portfolioBlockReasons: uniquePortfolioBlocks,
           symbolBlockReasons
         });
+        analysis.candle_cache = cacheInfo;
         return analysis;
       } catch (error) {
         return {
@@ -253,6 +316,7 @@ export class TradingEngine extends DurableObject {
       }
     });
 
+    const allCacheStates = results.map((item) => item.candle_cache).filter(Boolean);
     return {
       status: "completed",
       source: "Binance Spot public REST market data",
@@ -262,6 +326,12 @@ export class TradingEngine extends DurableObject {
       analyzed_markets: results.filter((item) => item.status === "analyzed").length,
       candidate_count: results.filter((item) => item.signal === "LONG_CANDIDATE").length,
       paper_review_ready_count: results.filter((item) => item.paper_trade?.status === "PAPER_REVIEW_READY").length,
+      candle_cache_summary: {
+        reused_timeframes: allCacheStates.reduce((sum, item) => sum + item.reused_timeframes.length, 0),
+        refreshed_timeframes: allCacheStates.reduce((sum, item) => sum + item.refreshed_timeframes.length, 0),
+        stale_fallback_timeframes: allCacheStates.reduce((sum, item) => sum + item.stale_fallback_timeframes.length, 0),
+        note: "Closed 15m/1h/4h candles are refreshed only when a new closed bar is due; every scan still fetches fresh public ticker and order-book depth."
+      },
       portfolio: {
         open_positions: portfolio.open_positions,
         exposure_usd: portfolio.exposure_usd,
