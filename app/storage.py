@@ -110,29 +110,9 @@ class Storage:
                 );
                 CREATE INDEX IF NOT EXISTS idx_equity_snapshots_created_at
                     ON equity_snapshots(created_at);
-                CREATE TABLE IF NOT EXISTS testnet_orders (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    idempotency_key TEXT NOT NULL UNIQUE,
-                    client_order_id TEXT NOT NULL UNIQUE,
-                    exchange_order_id TEXT,
-                    symbol TEXT NOT NULL,
-                    side TEXT NOT NULL CHECK(side IN ('BUY','SELL')),
-                    amount REAL NOT NULL,
-                    price REAL NOT NULL,
-                    notional_usdt REAL NOT NULL,
-                    status TEXT NOT NULL,
-                    filled REAL NOT NULL DEFAULT 0,
-                    remaining REAL NOT NULL DEFAULT 0,
-                    average REAL,
-                    cost REAL NOT NULL DEFAULT 0,
-                    error_code TEXT,
-                    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
-                    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-                );
-                CREATE INDEX IF NOT EXISTS idx_testnet_orders_status ON testnet_orders(status);
-                CREATE INDEX IF NOT EXISTS idx_testnet_orders_created_at ON testnet_orders(created_at);
                 """
             )
+            conn.execute("DROP TABLE IF EXISTS testnet_orders")
             conn.execute(
                 "INSERT OR IGNORE INTO portfolio(id, initial_capital_usd) VALUES(1, ?)",
                 (float(initial_capital),),
@@ -312,79 +292,6 @@ class Storage:
             ).fetchall()
         return [dict(row) for row in rows]
 
-
-    def create_testnet_order(self, values: dict[str, Any], max_open_orders: int = 3) -> None:
-        with self.connection() as conn:
-            conn.execute("BEGIN IMMEDIATE")
-            halted_row = conn.execute(
-                "SELECT value_json FROM app_settings WHERE key='testnet_order_halted'"
-            ).fetchone()
-            if halted_row is not None and json.loads(halted_row["value_json"]):
-                raise ValueError("Testnet emergency order lock is active; no new orders are allowed.")
-            active = conn.execute(
-                "SELECT COUNT(*) AS n FROM testnet_orders "
-                "WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN')"
-            ).fetchone()
-            if int(active["n"] or 0) >= max(1, min(int(max_open_orders), 10)):
-                raise ValueError("Maximum number of open or unresolved Testnet orders reached.")
-            conn.execute(
-                "INSERT INTO testnet_orders(idempotency_key, client_order_id, symbol, side, amount, price, "
-                "notional_usdt, status) VALUES(?,?,?,?,?,?,?,?)",
-                (values["idempotency_key"], values["client_order_id"], values["symbol"], values["side"],
-                 float(values["amount"]), float(values["price"]), float(values["notional_usdt"]), values["status"]),
-            )
-
-    @staticmethod
-    def _testnet_order_row(row: sqlite3.Row | None) -> dict[str, Any] | None:
-        return dict(row) if row is not None else None
-
-    def get_testnet_order_by_key(self, idempotency_key: str) -> dict[str, Any] | None:
-        with self.connection() as conn:
-            row = conn.execute("SELECT * FROM testnet_orders WHERE idempotency_key=?", (idempotency_key,)).fetchone()
-        return self._testnet_order_row(row)
-
-    def get_testnet_order_by_client_id(self, client_order_id: str) -> dict[str, Any] | None:
-        with self.connection() as conn:
-            row = conn.execute("SELECT * FROM testnet_orders WHERE client_order_id=?", (client_order_id,)).fetchone()
-        return self._testnet_order_row(row)
-
-    def update_testnet_order(self, client_order_id: str, values: dict[str, Any]) -> None:
-        allowed = {"exchange_order_id", "symbol", "side", "amount", "price", "notional_usdt",
-                   "status", "filled", "remaining", "average", "cost", "error_code"}
-        updates = {key: value for key, value in values.items() if key in allowed}
-        if not updates:
-            return
-        updates["updated_at"] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        assignments = ", ".join(f"{key}=?" for key in updates)
-        with self.connection() as conn:
-            conn.execute(
-                f"UPDATE testnet_orders SET {assignments} WHERE client_order_id=?",
-                (*updates.values(), client_order_id),
-            )
-
-    def list_testnet_orders(self, limit: int = 50) -> list[dict[str, Any]]:
-        safe_limit = max(1, min(int(limit), 100))
-        with self.connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM testnet_orders ORDER BY id DESC LIMIT ?", (safe_limit,)
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def list_active_testnet_orders(self) -> list[dict[str, Any]]:
-        """Return every open or ambiguous app-owned order, independent of UI history limits."""
-        with self.connection() as conn:
-            rows = conn.execute(
-                "SELECT * FROM testnet_orders "
-                "WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN') ORDER BY id ASC"
-            ).fetchall()
-        return [dict(row) for row in rows]
-
-    def count_open_testnet_orders(self) -> int:
-        with self.connection() as conn:
-            row = conn.execute(
-                "SELECT COUNT(*) AS n FROM testnet_orders WHERE status IN ('OPEN','PARTIALLY_FILLED','SUBMITTING','UNKNOWN')"
-            ).fetchone()
-        return int(row["n"] or 0)
 
     def portfolio_summary(
         self,
