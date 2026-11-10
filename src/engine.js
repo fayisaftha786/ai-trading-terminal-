@@ -1434,22 +1434,31 @@ export class TradingEngine extends DurableObject {
       }
     }
 
-    // Candle/history requests can age the first market's L2 book while later
-    // markets are scanned. Refresh Coinbase books after all candle work and
-    // immediately before entry gates; never relax the strict 15s freshness rule.
+    // Candle/history requests can age L2 snapshots while later markets are
+    // scanned. Refresh the exact entry venue after all candle work and immediately
+    // before exits/entry gates. Bitstamp is permitted here only for an open
+    // legacy position recorded with that provider; new candidates remain Coinbase-only.
     const finalBookRequestState = createCoinbaseRequestState();
     for (const market of markets) {
-      if (market.status !== "live" || market.market_data_provider !== "coinbase_exchange") continue;
+      if (market.status !== "live") continue;
+      const provider = market.market_data_provider;
+      const legacyBitstampExit = provider === "bitstamp_spot" &&
+        legacyBitstampExitSymbols.has(market.symbol);
+      if (provider !== "coinbase_exchange" && !legacyBitstampExit) continue;
       try {
-        const freshBook = await fetchCoinbaseOrderBook(market.product, finalBookRequestState);
+        const freshBook = provider === "coinbase_exchange"
+          ? await fetchCoinbaseOrderBook(market.product, finalBookRequestState)
+          : await fetchBitstampOrderBook(market.product, finalBookRequestState);
         Object.assign(market, freshBook);
         market.spread_bps = ((freshBook.ask - freshBook.bid) / ((freshBook.ask + freshBook.bid) / 2)) * 10000;
-        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+        market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "available", book_error: null,
-          book_freshness_source: "final_post_candle_local_retrieval_time",
+          book_freshness_source: provider === "coinbase_exchange"
+            ? "final_post_candle_local_retrieval_time"
+            : "final_post_candle_legacy_bitstamp_exchange_timestamp",
           book_sequence_available: freshBook.book_sequence !== null };
       } catch (error) {
-        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+        market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "provider_error",
           book_error: String(error?.code || error?.message || "order_book_refresh_failed").slice(0, 100) };
         market.book_retrieved_at_ms = null; market.book_age_ms = null;
