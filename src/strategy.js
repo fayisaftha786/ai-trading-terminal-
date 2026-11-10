@@ -615,7 +615,8 @@ export function assessCrossMarketContext(
     const market = bySymbol.get(symbol);
     const oneHour = market?.primary?.regime;
     const sixHour = market?.higher?.regime;
-    if (!isFreshTickerEvent(market, nowMs, 120000) || !supported.has(oneHour) || !supported.has(sixHour)) {
+    if (market?.market_data_provider !== "coinbase_exchange" ||
+        !isFreshTickerEvent(market, nowMs, 120000) || !supported.has(oneHour) || !supported.has(sixHour)) {
       missing.push(symbol);
       continue;
     }
