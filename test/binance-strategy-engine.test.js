@@ -11,6 +11,8 @@ test("Binance strategy uses persistent closed-candle cache and current REST dept
   assert.match(engine, /saveBinanceStrategyCandleCache/);
   assert.match(engine, /depth\?symbol=/);
   assert.match(engine, /ticker\/24hr\?symbols=/);
+  assert.match(engine, /https:\\/\\/api\\.binance\\.com\\/api\\/v3\\//);
+  assert.doesNotMatch(engine, /data-api\\.binance\\.vision/);
   assert.match(engine, /stale_fallback_timeframes/);
 });
 
