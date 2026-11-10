@@ -251,8 +251,8 @@ function normalizeSpotFeeSummary(payload, checkedAtMs = Date.now()) {
     if (typeof value !== "string" && typeof value !== "number") return null;
     const raw = String(value);
     if (raw.length > 40 || !(allowRebate
-      ? /^-?(?:0|[1-9]\\d*)(?:\\.\\d+)?$/
-      : /^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/).test(raw)) return null;
+      ? /^-?(?:0|[1-9][0-9]*)(?:[.][0-9]+)?$/
+      : /^(?:0|[1-9][0-9]*)(?:[.][0-9]+)?$/).test(raw)) return null;
     const rate = Number(raw);
     if (!Number.isFinite(rate) || rate > 0.05 || rate < (allowRebate ? -0.01 : 0)) return null;
     return { rate: raw, bps: Number((rate * 10000).toFixed(4)) };
@@ -264,7 +264,7 @@ function normalizeSpotFeeSummary(payload, checkedAtMs = Date.now()) {
   }
   const pricingTier = typeof tier.pricing_tier === "string" &&
     /^[A-Za-z0-9 _-]{1,40}$/.test(tier.pricing_tier)
-    ? tier.pricing_tier.trim().replace(/\\s+/g, "_").toLowerCase()
+    ? tier.pricing_tier.trim().replace(/[ ]+/g, "_").toLowerCase()
     : null;
   return {
     status: "verified",
