@@ -15,7 +15,7 @@ class Settings:
     environment: str = os.getenv("APP_ENV", "development")
     database_path: Path = Path(os.getenv("DATABASE_PATH", "data/trading.db"))
     initial_capital_usd: float = float(os.getenv("PAPER_INITIAL_CAPITAL_USD", "100"))
-    cex_exchange: str = os.getenv("CEX_EXCHANGE", "coinbase").lower()
+    cex_exchange: str = "coinbase"
     cex_symbols: tuple[str, ...] = tuple(
         s.strip() for s in os.getenv("CEX_SYMBOLS", "BTC/USD,ETH/USD,SOL/USD").split(",") if s.strip()
     )
