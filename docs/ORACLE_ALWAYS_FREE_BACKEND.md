@@ -41,7 +41,7 @@ sudo ./bootstrap.sh
 
 The script is intended for an ARM64 Ubuntu A1 VM. It installs Docker, clones the public repository's **main** branch, builds the current PAPER-only backend, creates a persistent SQLite directory, generates a strong app secret, and asks you to choose a strong dashboard password (20+ alphanumeric/dot/underscore/hyphen characters). It does not ask for or store exchange API keys. It binds the app to 127.0.0.1:8000 only.
 
-The current backend uses Binance public data first. If Binance is blocked/unavailable or a market's quote/depth/timestamp data is incomplete, it falls back to the official Coinbase Exchange public REST endpoints for BTC-USD, ETH-USD and SOL-USD. The app keeps BTC/USDT, ETH/USDT and SOL/USDT ledger symbols, so Coinbase USD prices carry a small stablecoin-basis difference. If both data sources fail, automatic signals fail closed. Do not use proxies or VPNs to bypass regional exchange restrictions.
+The backend uses Coinbase Exchange public REST endpoints for BTC-USD, ETH-USD and SOL-USD. Market-data errors fail closed and automatic signals remain HOLD when fresh, complete data is unavailable. Do not use proxies or VPNs to bypass regional exchange restrictions.
 
 After the script completes, sign the VM into your personal Tailscale network (free Personal plan is intended for non-commercial personal use): https://tailscale.com/download/linux . Install Tailscale on your Android phone and sign in to the same tailnet. Then, on the VM, run:
 
@@ -65,10 +65,10 @@ sudo tailscale serve status
 
 Then open the private HTTPS Tailscale Serve URL in a browser first. Sign in and run a manual market scan. Confirm the CEX provider reports live markets, verify candle integrity and check that no provider errors are present. Only then use the UI's Auto Scan / Auto Paper controls. On Android, open the AI Trading Terminal APK, choose Cloud dashboard, and enter that same private HTTPS URL. The APK uses HTTPS only and does not need exchange keys.
 
-The app is PAPER-only by default on main. The scheduled scanner runs inside the FastAPI process; enable Auto Scan in the dashboard to start automatic market updates, or explicitly opt into Auto Paper only after the provider health is verified. Auto Paper entries are simulated and use existing risk sizing, daily/weekly loss limits, drawdown halt, symbol cooldown and stop/target monitoring. Testnet execution is separate, remains OFF unless separately enabled, and is not configured by this bootstrap. No production LIVE trading route exists. First verify provider reachability from the VM; if both public data providers are restricted in the Oracle region, the strategy must remain HOLD.
+The app is PAPER-only by default on main. The scheduled scanner runs inside the FastAPI process; enable Auto Scan in the dashboard to start automatic market updates, or explicitly opt into Auto Paper only after the provider health is verified. Auto Paper entries are simulated and use existing risk sizing, daily/weekly loss limits, drawdown halt, symbol cooldown and stop/target monitoring. Coinbase live order execution remains locked and is not configured by this bootstrap. No production LIVE trading route exists. First verify provider reachability from the VM; if Coinbase public market data is unavailable in the Oracle region, the strategy must remain HOLD.
 
 ## Important limitations
 
 - I cannot create the VM inside your Oracle account without you completing Oracle's account and console steps. Do not share your Oracle password, card details, SSH private key, Tailscale auth key, or exchange secrets in chat.
 - Oracle free capacity, account approval, and region availability are not guaranteed.
-- This setup is not yet a verified live trading bot. It provides a private persistent PAPER backend only. Testnet automation requires separate authenticated exchange lifecycle tests and explicit opt-in after verification.
+- This setup is not yet a verified live trading bot. It provides a private persistent PAPER backend only. Any future live execution requires separate authenticated exchange lifecycle tests and explicit opt-in after verification.

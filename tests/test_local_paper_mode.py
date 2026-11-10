@@ -7,7 +7,8 @@ JAVA = ANDROID / "app/src/main/java/app/aitradingterminal"
 
 def test_local_demo_persists_timestamped_closed_candles_and_rejects_stale_market_data():
     source = (JAVA / "LocalPaperActivity.java").read_text()
-    assert "x.getLong(0)" in source and "x.getLong(6)" in source
+    assert "x.getLong(0)*1000L" in source and "closeTime=openTime+intervalMs-1L" in source
+    assert "api.exchange.coinbase.com/products/BTC-USD/candles" in source
     assert "open_time INTEGER NOT NULL UNIQUE" in source
     assert "close_time INTEGER NOT NULL" in source
     assert "MAX_CANDLE_AGE_MS" in source

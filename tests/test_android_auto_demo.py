@@ -24,12 +24,12 @@ def test_auto_demo_runs_only_in_foreground_and_keeps_open_trade_exit_checks():
     assert "onDestroy(){mainHandler.removeCallbacks(autoRefreshTask)" in source
 
 
-def test_auto_demo_fetches_only_closed_contiguous_1h_and_4h_candles():
+def test_auto_demo_fetches_only_closed_contiguous_1h_and_6h_candles():
     source = (JAVA / "LocalPaperActivity.java").read_text()
     assert 'fetchCandles("1h",200,HOUR_MS,MAX_CANDLE_AGE_MS)' in source
-    assert 'fetchCandles("4h",180,FOUR_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS)' in source
+    assert 'fetchCandles("6h",180,SIX_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS)' in source
     assert "if(closeTime>=now) continue" in source
-    assert "openTime-previousOpen!=intervalMs" in source
+    assert "out.get(i).openTime-out.get(i-1).openTime!=intervalMs" in source
     assert "PaperSignal.MIN_HISTORY" in source
     assert 'interval+" candles are required' in source
 
@@ -37,11 +37,11 @@ def test_auto_demo_fetches_only_closed_contiguous_1h_and_4h_candles():
 def test_auto_demo_checks_live_ticker_spread_depth_and_daily_quote_volume():
     source = (JAVA / "LocalPaperActivity.java").read_text()
     signal = (JAVA / "PaperSignal.java").read_text()
-    assert "ticker.getLong(\"closeTime\")" in source
-    assert "https://api.binance.com/api/v3/depth?symbol=BTCUSDT&limit=10" in source
-    assert "bidDepth,askDepth,ticker.getDouble(\"quoteVolume\")" in source
+    assert "ticker.getString(\"time\")" in source
+    assert "https://api.exchange.coinbase.com/products/BTC-USD/book?level=2" in source
+    assert "bidDepth,askDepth,quoteVolume" in source
     assert "db.openAuto(snapshot.quote.ask,latest.openTime)" in source
-    assert "Math.min(bookRetrievedAt,depthRetrievedAt)" in source
+    assert "Math.min(tickerRetrievedAt,bookRetrievedAt)" in source
     assert "MAX_SPREAD_BPS = 25.0" in signal
     assert "MIN_QUOTE_VOLUME_USD = 1_000_000.0" in signal
     assert "MIN_TOP10_DEPTH_USD = 5_000.0" in signal

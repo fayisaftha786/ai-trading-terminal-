@@ -14,19 +14,15 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from app.schemas import (BacktestRequest, LoginRequest, PaperOrderRequest, RiskUpdate, ScanAutomationRequest,
-                          SignalBacktestRequest, SignalWalkForwardRequest,
-                          TestnetKillSwitchResetRequest, TestnetLimitOrderRequest, WalkForwardRequest)
+                          SignalBacktestRequest, SignalWalkForwardRequest, WalkForwardRequest)
 from app.services.backtest import (run_ema_backtest, run_walk_forward, run_signal_backtest,
                                     run_signal_walk_forward)
 from app.services.automation import AutoPaperEngine
-from app.services.binance_account import BinanceAccountUnavailable, BinanceSpotReadOnly
 from app.services.mode_gate import assess_demo_readiness
 from app.services.market_data import MarketDataService
 from app.services.paper import PaperBroker
 from app.services.performance import build_performance_report
 from app.services.risk import safe_cost_assumptions, validate_risk_profile
-from app.services.testnet import (BinanceSpotTestnet, TestnetOrderRejected,
-                                   TestnetOrderUncertain, TestnetUnavailable)
 from app.services.strategy import analyze_candles, score_solana_token
 from app.services.strategy_lab import evaluate_strategy_candidates
 from app.services.workers import WorkerManager
@@ -55,8 +51,6 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     market_data = MarketDataService(cfg)
     broker = PaperBroker(db)
     auto_paper = AutoPaperEngine(db, broker)
-    testnet = BinanceSpotTestnet(cfg)
-    binance_readonly = BinanceSpotReadOnly(cfg)
     worker_manager = WorkerManager(concurrency=4, timeout_seconds=4.0, retries=1)
     worker_analysis_lock = asyncio.Lock()
 
@@ -214,8 +208,6 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     app.state.db = db
     app.state.market_data = market_data
     app.state.paper_broker = broker
-    app.state.testnet = testnet
-    app.state.binance_readonly = binance_readonly
     app.state.worker_manager = worker_manager
     app.state.worker_analysis_lock = worker_analysis_lock
     app.state.settings = cfg
@@ -278,122 +270,21 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
         db.log_event("auth_login", "Dashboard sign-in succeeded", {"source": client_host})
         return {"access_token": token, "token_type": "Bearer", "expires_in": cfg.auth_token_ttl_minutes * 60}
 
-    @app.get("/api/binance/account/status")
-    async def binance_account_status() -> dict[str, Any]:
-        return binance_readonly.status()
-
-    @app.post("/api/binance/account/connection-check")
-    async def binance_account_connection_check() -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(binance_readonly.check_account)
-            db.log_event("binance_readonly_connection", "Binance production read-only account check succeeded", {
-                "environment": "production_read_only",
-                "asset_count": result.get("asset_count", 0),
-                "live_trading_enabled": False,
-            })
-            return result
-        except BinanceAccountUnavailable as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get("/api/testnet/status")
-    async def testnet_status() -> dict[str, Any]:
-        return testnet.status(halted=bool(db.get_setting("testnet_order_halted", False)))
-
-    @app.post("/api/testnet/connection-check")
-    async def testnet_connection_check() -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(testnet.check_account)
-            db.log_event("testnet_connection", "Binance Spot Testnet account check succeeded", {
-                "environment": "testnet_only", "usdt_free": result.get("usdt_free", 0.0)})
-            return result
-        except TestnetUnavailable as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get("/api/testnet/orders")
-    async def testnet_orders(limit: int = 50) -> dict[str, Any]:
-        return {"orders": db.list_testnet_orders(limit), "environment": "testnet_only",
-                "live_trading_enabled": False}
-
-    @app.post("/api/testnet/orders")
-    async def testnet_create_order(payload: TestnetLimitOrderRequest) -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(testnet.create_limit_order, payload.model_dump(), db)
-            if not result.get("replayed"):
-                order = result.get("order") or {}
-                db.log_event("testnet_limit_order", "Bounded Binance Spot Testnet limit order submitted", {
-                    "environment": "testnet_only", "symbol": order.get("symbol"),
-                    "side": order.get("side"), "status": order.get("status"),
-                    "notional_usdt": order.get("notional_usdt"),
-                    "client_order_id": order.get("client_order_id")})
-            return result
-        except TestnetUnavailable as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        except TestnetOrderRejected as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        except TestnetOrderUncertain as exc:
-            db.log_event("testnet_order_uncertain", "Testnet order requires reconciliation; resubmission blocked", {})
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-    @app.post("/api/testnet/orders/{client_order_id}/refresh")
-    async def testnet_refresh_order(client_order_id: str) -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(testnet.refresh_order, client_order_id, db)
-            db.log_event("testnet_order_refresh", "Testnet order status refresh attempted", {
-                "client_order_id": client_order_id, "reconciled": result.get("reconciled", True),
-                "status": (result.get("order") or {}).get("status")})
-            return result
-        except TestnetUnavailable as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.post("/api/testnet/orders/{client_order_id}/cancel")
-    async def testnet_cancel_order(client_order_id: str) -> dict[str, Any]:
-        try:
-            result = await asyncio.to_thread(testnet.cancel_order, client_order_id, db)
-            db.log_event("testnet_order_cancel", "Binance Spot Testnet cancellation requested", {
-                "client_order_id": client_order_id, "status": (result.get("order") or {}).get("status")})
-            return result
-        except TestnetUnavailable as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.post("/api/testnet/kill-switch")
-    async def testnet_kill_switch() -> dict[str, Any]:
-        result = await asyncio.to_thread(testnet.emergency_stop, db)
-        db.log_event("testnet_kill_switch", "Persistent Testnet order lock activated", {
-            "canceled_count": len(result["canceled_client_order_ids"]),
-            "unresolved_count": len(result["unresolved_client_order_ids"])})
-        return result
-
-    @app.post("/api/testnet/kill-switch/reset")
-    async def reset_testnet_kill_switch(payload: TestnetKillSwitchResetRequest) -> dict[str, Any]:
-        unresolved = db.count_open_testnet_orders()
-        if unresolved:
-            raise HTTPException(status_code=409, detail=(
-                f"Cannot reset: {unresolved} open or unresolved Testnet order(s) remain. "
-                "Reconcile or cancel them first."
-            ))
-        db.set_setting("testnet_order_halted", False)
-        db.log_event("testnet_kill_switch_reset", "Testnet order lock reset after ledger reconciliation", {})
-        return {"halted": False, "order_execution_enabled": testnet.status(halted=False)["order_execution_enabled"],
-                "live_trading_enabled": False}
-
     @app.get("/api/health")
     async def health() -> dict[str, Any]:
         # Keep the public platform health probe deliberately low-information.
-        # Trading state, logs, exchange configuration and Testnet status remain private.
+        # Trading state, logs and exchange configuration remain private.
         if auth_required:
             return {"status": "ok", "mode": "paper_only", "live_trading_enabled": False,
                     "version": app.version}
         return {"status": "ok", "mode": "paper_only", "automatic_strategy_mode": "paper_only",
-                "testnet_manual_orders_enabled": testnet.status(
-                    halted=bool(db.get_setting("testnet_order_halted", False)))["order_execution_enabled"],
                 "live_trading_enabled": False,
                 "automatic_paper_trading_enabled": bool(app.state.auto_paper_enabled),
                 "automatic_scan_enabled": bool(app.state.auto_scan_enabled),
                 "last_scan_at": app.state.last_scan_at or None,
                 "last_scan_error": app.state.last_scan_error,
                 "database": "connected", "version": app.version,
-                "client": "local_development_dashboard",
-                "testnet": testnet.status(halted=bool(db.get_setting("testnet_order_halted", False)))}
+                "client": "local_development_dashboard"}
 
     @app.get("/api/config")
     async def get_config() -> dict[str, Any]:
@@ -402,7 +293,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
                 "jupiter_provider": "Jupiter Tokens API v2",
                 "analysis_model": "deterministic EMA/RSI + heuristic screening; no trained ML model or LLM",
                 "initial_capital_usd": cfg.initial_capital_usd,
-                "risk": db.get_risk(), "testnet": testnet.status(halted=bool(db.get_setting("testnet_order_halted", False)))}
+                "risk": db.get_risk()}
 
     @app.get("/api/dashboard")
     async def dashboard() -> dict[str, Any]:
@@ -665,7 +556,7 @@ def create_app(config: Settings | None = None, db_path: str | Path | None = None
     async def live_execute() -> None:
         raise HTTPException(status_code=423, detail=(
             "Production/live execution is intentionally disabled. This route never calls a production order endpoint. "
-            "The separately gated Binance Spot Testnet routes are sandbox-only and do not enable live trading."
+            "No exchange order endpoint is enabled in this release."
         ))
 
     @app.get("/api/strategies/multi/{symbol:path}")

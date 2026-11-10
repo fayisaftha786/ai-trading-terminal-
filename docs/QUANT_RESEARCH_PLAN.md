@@ -104,7 +104,7 @@ The current product remains a paper-trading research terminal. No private exchan
 ### Live gate (separate project/release)
 - Provider and jurisdiction eligibility confirmed for the user.
 - Security review of key storage, signing policy, permissions, network access and dashboard authentication.
-- Exchange sandbox/testnet or Solana devnet integration tests, then tiny capped pilot only after explicit user approval.
+- Coinbase sandbox or Solana devnet integration tests, then tiny capped pilot only after explicit user approval.
 - Withdrawal permissions disabled; no main wallet seed phrase ever collected.
 - Actual fills/fees/chain balances reconciled; ambiguous submissions queried before retry.
 - Independent kill switch, spend caps and daily/weekly mark-to-market loss stops.
@@ -140,6 +140,6 @@ A v0.3.9 replay audit also fixed entry-candle protective-exit handling: after a 
 - Entry-bar stop and target checks are included after next-open fills. Simultaneous OHLC touches resolve stop-first; this is intentionally conservative because candle data does not reveal intrabar sequencing.
 - Automatic paper entry risk budgets include observed spread in addition to fees/slippage. Take-profit fills use the configured target reference rather than optimistic mark-price improvement.
 - Portfolio sizing/open insertion is serialized for the single-worker local runtime; this is not a distributed lock.
-- A 120-test checkpoint includes regression coverage for entry-bar exits, scan/exit-monitor behavior and Testnet emergency stop beyond the recent-history page.
+- A 120-test checkpoint includes regression coverage for entry-bar exits, scan/exit-monitor behavior and emergency-stop behavior beyond the recent-history page.
 
 The research remains candle-based and does not reproduce historical spread/depth, queue position, partial fills, latency, market impact or cross-asset correlation. A real forward paper sample and authenticated sandbox reconciliation remain outstanding.

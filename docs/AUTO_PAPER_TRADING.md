@@ -2,11 +2,11 @@
 
 ## Scope and operating boundary
 
-Automatic execution is restricted to CEX spot long-only **paper simulations**. No production order is transmitted, and this engine cannot move real funds. The separately gated Binance Spot Testnet workflow is explicit/manual and isolated from automatic strategy decisions and paper P&L. Solana is discovery/screening only.
+Automatic execution is restricted to CEX spot long-only **paper simulations**. No production order is transmitted, and this engine cannot move real funds. Coinbase is the sole centralized-exchange market-data provider. Solana is discovery/screening only.
 
 ## Decision pipeline
 
-1. Fetch public CCXT tickers for the configured spot watchlist.
+1. Fetch Coinbase public market data for the configured USD spot watchlist.
 2. Require a live exchange timestamp within 120 seconds, finite/nonzero last/bid/ask, a non-crossed quote and spread no wider than 25 bps.
 3. Fetch top-10 order-book depth. Fail closed when depth is unavailable, older than 15 seconds, negative, or either side has less than 5,000 quote units. If the exchange omits a book timestamp, only local retrieval time is available and the weaker provenance is recorded.
 4. Require at least 1,000,000 quote-volume units over 24h and a USD-like quote asset (USD/USDT/USDC/FDUSD).
@@ -56,6 +56,6 @@ The older EMA20/50 crossover endpoint is a **separate comparator**, not validati
 
 ## Forward evidence and release gates
 
-`/api/performance` uses the closed paper ledger and observed equity snapshots; it is not a live performance statement. Require at least 30 calendar days of forward paper operation and a meaningful sample (target 200 trades where opportunities permit), multiple assets/regimes, no ledger mismatch, realistic fill comparisons and verified kill-switch/restart behavior before considering any further execution stage. A good backtest, Testnet fill or passed unit test does not prove positive future returns.
+`/api/performance` uses the closed paper ledger and observed equity snapshots; it is not a live performance statement. Require at least 30 calendar days of forward paper operation and a meaningful sample (target 200 trades where opportunities permit), multiple assets/regimes, no ledger mismatch, realistic fill comparisons and verified kill-switch/restart behavior before considering any further execution stage. A good backtest or passed unit test does not prove positive future returns.
 
 For a real-money release, require separate jurisdiction/provider eligibility review, security/authentication architecture, independent secrets review, trade-only keys with withdrawals disabled, private-order/balance reconciliation, exchange-native protective orders, chaos/integration tests, independent emergency stop, caps, and explicit user approval. Production stays hard-locked with HTTP 423.

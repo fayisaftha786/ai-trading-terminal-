@@ -81,8 +81,3 @@ def test_token_expiry_and_tampering_fail_closed():
     with pytest.raises(InvalidAccessToken):
         verify_access_token(token + "x", username="owner", secret=SECRET, max_ttl_minutes=15, now=1_001)
 
-
-def test_binance_account_endpoints_require_cloud_authentication(tmp_path):
-    with cloud_client(tmp_path) as client:
-        assert client.get("/api/binance/account/status").status_code == 401
-        assert client.post("/api/binance/account/connection-check").status_code == 401

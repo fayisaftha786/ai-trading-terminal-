@@ -8,7 +8,7 @@ These are deterministic Python analysis workers, not 12 separate trained AI/LLM 
 
 | Worker | Responsibility | Current source |
 |---|---|---|
-| Market Data & Integrity | Provider, closed candles, contiguous data and history quality | CCXT / MarketDataService |
+| Market Data & Integrity | Provider, closed candles, contiguous data and history quality | CoinbasePublicAdapter / MarketDataService |
 | Trend Analyst | EMA trend, ADX and higher-timeframe context | analyze_candles |
 | Momentum Analyst | MACD, histogram slope and ROC | analyze_candles momentum diagnostics |
 | Volume Analyst | Recent/prior closed-bar volume ratio | analyze_candles |
@@ -41,9 +41,9 @@ Supported timeframes are 1m, 5m, 15m, 30m, 1h, 2h, 4h, and 1d. Candle limits are
 
 ## Safety boundary
 
-This worker system is diagnostic and read-only. execution_authorized and live_trading_enabled are always false in its results. It does not call the Testnet order service, production order endpoints, or paper broker. It does not change the current BUY_CANDIDATE rules or enable automatic paper trading. Existing candle integrity, quote freshness, spread/depth and portfolio risk gates remain the owners of paper-entry decisions.
+This worker system is diagnostic and read-only. execution_authorized and live_trading_enabled are always false in its results. It does not call production order endpoints or the paper broker. It does not change the current BUY_CANDIDATE rules or enable automatic paper trading. Existing candle integrity, quote freshness, spread/depth and portfolio risk gates remain the owners of paper-entry decisions.
 
-Live-money order execution remains hard-disabled. Testnet remains separately gated. No profit or prediction guarantee is made.
+Live-money order execution remains hard-disabled. Coinbase live orders remain separately gated. No profit or prediction guarantee is made.
 
 ## Not yet implemented
 

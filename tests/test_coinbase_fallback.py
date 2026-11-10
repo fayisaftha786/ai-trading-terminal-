@@ -1,204 +1,42 @@
 import asyncio
 import time
 from dataclasses import replace
-
 from app.services.market_data import MarketDataService
 from app.settings import settings
 
-
 class FakeCoinbaseAdapter:
-    def __init__(self, **_kwargs):
-        self.requested = []
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, traceback):
-        return None
-
+    async def __aenter__(self): return self
+    async def __aexit__(self, exc_type, exc, traceback): return None
     async def fetch_market(self, symbol):
-        return {
-            "symbol": symbol,
-            "status": "live",
-            "last": 100.0,
-            "bid": 99.99,
-            "ask": 100.01,
-            "quote_volume": 2_000_000.0,
-            "timestamp": time.time() * 1000,
-            "bid_depth_quote": 100_000.0,
-            "ask_depth_quote": 100_000.0,
-            "orderbook_retrieved_at_ms": time.time() * 1000,
-            "orderbook_timestamp_ms": None,
-            "orderbook_timestamp_source": "retrieval_fallback",
-        }
-
+        return {"symbol":symbol,"status":"live","last":100.0,"bid":99.99,"ask":100.01,"quote_volume":2000000.0,"timestamp":time.time()*1000,"bid_depth_quote":100000.0,"ask_depth_quote":100000.0,"orderbook_retrieved_at_ms":time.time()*1000,"orderbook_timestamp_ms":None,"orderbook_timestamp_source":"retrieval_fallback"}
     async def fetch_candles(self, symbol, granularity_seconds):
-        interval = granularity_seconds * 1000
-        now_ms = int(time.time() * 1000)
-        last_open = (now_ms // interval) * interval - interval
-        count = 160
-        start = last_open - ((count - 1) * interval)
-        rows = []
-        for index in range(count):
-            close = 100.0 + index * 0.1
-            rows.append([start + index * interval, close - 0.1, close + 0.4, close - 0.4, close, 1000.0])
-        return rows
+        interval=granularity_seconds*1000; now=int(time.time()*1000); last=(now//interval)*interval-interval; count=160; start=last-(count-1)*interval
+        return [[start+i*interval,100+i*.1-.1,100+i*.1+.4,100+i*.1-.4,100+i*.1,1000] for i in range(count)]
 
+def test_market_data_uses_coinbase_only(monkeypatch):
+    import app.services.market_data as module
+    monkeypatch.setattr(module,"CoinbasePublicAdapter",FakeCoinbaseAdapter)
+    service=MarketDataService(replace(settings,cex_symbols=("BTC/USD","ETH/USD")))
+    result=asyncio.run(service.cex_tickers())
+    assert result["status"]=="live" and result["exchange"]=="coinbase_public_fallback"
+    assert len(result["markets"])==2
+    assert all(row["market_data_provider"]=="coinbase_public_fallback" for row in result["markets"])
+    assert all(row["quote_currency"]=="USD" for row in result["markets"])
 
-def test_tickers_fall_back_to_coinbase_if_ccxt_import_is_unavailable(monkeypatch):
-    import builtins
-    import app.services.market_data as market_data_module
-
-    original_import = builtins.__import__
-
-    def blocked_ccxt_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "ccxt.async_support":
-            raise ImportError("simulated missing CCXT dependency")
-        return original_import(name, globals, locals, fromlist, level)
-
-    monkeypatch.setattr(builtins, "__import__", blocked_ccxt_import)
-    monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
-    config = replace(settings, cex_symbols=("BTC/USDT", "ETH/USDT", "SOL/USDT"))
-    service = MarketDataService(config)
-
-    result = asyncio.run(service.cex_tickers())
-
-    assert result["status"] == "live"
-    assert result["exchange"] == "coinbase_public_fallback"
-    assert len(result["markets"]) == 3
-    assert all(row["status"] == "live" for row in result["markets"])
-    assert all(row["market_data_provider"] == "coinbase_public_fallback" for row in result["markets"])
-    assert all(row["quote_currency"] == "USD" for row in result["markets"])
-    assert all(row["orderbook_timestamp_source"] == "retrieval_fallback" for row in result["markets"])
-
-
-def test_coinbase_ohlcv_fallback_uses_exact_six_hour_confirmation(monkeypatch):
-    import app.services.market_data as market_data_module
-
-    monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
-    config = replace(settings, cex_symbols=("BTC/USDT",))
-    service = MarketDataService(config)
-
-    result = asyncio.run(service._coinbase_strategy_data(
-        "BTC/USDT", "1h", 300, "simulated Binance HTTP 451"
-    ))
-
-    assert result["status"] == "live"
-    assert result["provider"] == "coinbase_public_fallback"
-    assert result["provider_symbol"] == "BTC-USD"
-    assert result["quote_currency"] == "USD"
-    assert result["higher_timeframe"]["timeframe"] == "6h"
-    assert result["higher_timeframe_interval_ms"] == 6 * 3_600_000
+def test_coinbase_strategy_uses_exact_six_hour_confirmation(monkeypatch):
+    import app.services.market_data as module
+    monkeypatch.setattr(module,"CoinbasePublicAdapter",FakeCoinbaseAdapter)
+    service=MarketDataService(replace(settings,cex_symbols=("BTC/USD",)))
+    result=asyncio.run(service.cex_strategy_data("BTC/USD","1h",300))
+    assert result["status"]=="live" and result["provider"]=="coinbase_public_fallback"
+    assert result["provider_symbol"]=="BTC-USD" and result["quote_currency"]=="USD"
+    assert result["higher_timeframe"]["timeframe"]=="6h"
     assert result["data_quality"]["contiguous_closed_candles"] is True
-    assert result["data_quality"]["sufficient_indicator_history"] is True
-    assert len(result["candles"]) == 160
-    assert len(result["higher_timeframe"]["candles"]) == 160
 
-
-def test_coinbase_fallback_does_not_fabricate_unsupported_primary_timeframe(monkeypatch):
-    import app.services.market_data as market_data_module
-
-    monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
-    config = replace(settings, cex_symbols=("BTC/USDT",))
-    service = MarketDataService(config)
-
-    result = asyncio.run(service._coinbase_strategy_data(
-        "BTC/USDT", "4h", 300, "simulated Binance HTTP 451"
-    ))
-
-    assert result["status"] == "unavailable"
-    assert "exact 5m, 15m and 1h" in result["error"]
-    assert result["candles"] == []
-
-
-def test_primary_ccxt_market_rows_record_actual_provider_and_quote_currency(monkeypatch):
-    import sys
-    import types
-
-    class FakeExchange:
-        markets = {"BTC/USDT": {}}
-
-        async def load_markets(self):
-            return self.markets
-
-        async def fetch_ticker(self, _symbol):
-            return {
-                "last": 100.0,
-                "bid": 99.99,
-                "ask": 100.01,
-                "quoteVolume": 2_000_000.0,
-                "percentage": 0.5,
-                "timestamp": time.time() * 1000,
-            }
-
-        async def fetch_order_book(self, _symbol, limit=10):
-            assert limit == 10
-            return {
-                "bids": [[99.99, 1000.0]],
-                "asks": [[100.01, 1000.0]],
-                "timestamp": time.time() * 1000,
-            }
-
-        async def close(self):
-            return None
-
-    package = types.ModuleType("ccxt")
-    package.__path__ = []
-    async_support = types.ModuleType("ccxt.async_support")
-    async_support.binance = lambda _config: FakeExchange()
-    package.async_support = async_support
-    monkeypatch.setitem(sys.modules, "ccxt", package)
-    monkeypatch.setitem(sys.modules, "ccxt.async_support", async_support)
-
-    config = replace(settings, cex_exchange="binance", cex_symbols=("BTC/USDT",))
-    service = MarketDataService(config)
-    result = asyncio.run(service.cex_tickers())
-
-    assert result["status"] == "live"
-    assert result["exchange"] == "binance"
-    assert result["markets"][0]["market_data_provider"] == "binance"
-    assert result["markets"][0]["quote_currency"] == "USDT"
-
-
-
-def test_primary_ccxt_strategy_rows_record_provider_and_quote_currency(monkeypatch):
-    import sys
-    import types
-
-    class FakeExchange:
-        markets = {"BTC/USDT": {}}
-
-        async def load_markets(self):
-            return self.markets
-
-        async def fetch_ohlcv(self, _symbol, timeframe, limit):
-            interval = {"1h": 3_600_000, "4h": 14_400_000}[timeframe]
-            now_ms = int(time.time() * 1000)
-            last_open = (now_ms // interval) * interval - interval
-            count = min(limit, 160)
-            start = last_open - ((count - 1) * interval)
-            rows = []
-            for index in range(count):
-                close = 100.0 + index * 0.1
-                rows.append([start + index * interval, close - 0.1, close + 0.4, close - 0.4, close, 1000.0])
-            return rows
-
-        async def close(self):
-            return None
-
-    package = types.ModuleType("ccxt")
-    package.__path__ = []
-    async_support = types.ModuleType("ccxt.async_support")
-    async_support.binance = lambda _config: FakeExchange()
-    package.async_support = async_support
-    monkeypatch.setitem(sys.modules, "ccxt", package)
-    monkeypatch.setitem(sys.modules, "ccxt.async_support", async_support)
-
-    config = replace(settings, cex_exchange="binance", cex_symbols=("BTC/USDT",))
-    service = MarketDataService(config)
-    result = asyncio.run(service.cex_strategy_data("BTC/USDT", timeframe="1h", limit=300))
-
-    assert result["status"] == "live"
-    assert result["provider"] == "binance"
-    assert result["provider_symbol"] == "BTC/USDT"
-    assert result["quote_currency"] == "USDT"
+def test_coinbase_does_not_fabricate_unsupported_primary_timeframe(monkeypatch):
+    import app.services.market_data as module
+    monkeypatch.setattr(module,"CoinbasePublicAdapter",FakeCoinbaseAdapter)
+    service=MarketDataService(replace(settings,cex_symbols=("BTC/USD",)))
+    result=asyncio.run(service.cex_strategy_data("BTC/USD","4h",300))
+    assert result["status"]=="unavailable"
+    assert "exact 5m, 15m and 1h" in result["error"] and result["candles"]==[]

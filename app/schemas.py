@@ -58,7 +58,7 @@ class SignalBacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candles: list[list[float]] = Field(min_length=200, max_length=5000)
     higher_timeframe_candles: list[list[float]] = Field(min_length=150, max_length=1000)
-    higher_timeframe_interval_ms: Literal[14_400_000, 21_600_000] = 14_400_000
+    higher_timeframe_interval_ms: Literal[14_400_000, 21_600_000] = 21_600_000
     timeframe: Literal["1h"] = "1h"
 
 
@@ -73,26 +73,6 @@ class SignalWalkForwardRequest(BaseModel):
     folds: int = Field(default=3, ge=2, le=6)
 
 
-
-class TestnetLimitOrderRequest(BaseModel):
-    """A bounded, explicit LIMIT order for Binance Spot Testnet only."""
-
-    idempotency_key: str = Field(min_length=8, max_length=64, pattern=r"^[A-Za-z0-9_-]+$")
-    symbol: str = Field(min_length=4, max_length=24, pattern=r"^[A-Z0-9]{2,20}/USDT$")
-    side: Literal["buy", "sell"]
-    amount: float = Field(gt=0, le=1_000_000)
-    price: float = Field(gt=0, le=1_000_000_000)
-
-    @field_validator("amount", "price")
-    @classmethod
-    def finite_positive(cls, value: float) -> float:
-        if not __import__("math").isfinite(value):
-            raise ValueError("Value must be finite")
-        return value
-
-
-class TestnetKillSwitchResetRequest(BaseModel):
-    confirmation: Literal["RESET TESTNET ORDER LOCK"]
 
 
 class LoginRequest(BaseModel):

@@ -94,9 +94,6 @@ td,th{border-bottom:1px solid #24334b}
 .radar-live-dot.off{background:var(--red)}
 .radar-monitor{font-size:9px;letter-spacing:.1em;font-weight:900;color:#a9a0ff}
 .radar-caption{font-size:11px;color:var(--muted);line-height:1.55;margin-top:10px}
-#binanceRadarPanel .row{margin-bottom:8px}
-#binanceRadarPanel .tag{white-space:nowrap}
-#binanceRadarRows td{white-space:nowrap}
 section[id]{scroll-margin-top:82px}
 @media(max-width:760px){
  main{padding:12px 10px 42px}
@@ -158,8 +155,6 @@ section[id]{scroll-margin-top:82px}
 <nav class="app-nav" aria-label="Trading terminal sections">
   <a href="#modePanel">OVERVIEW</a>
   <a href="#liveMarketPanel">MARKETS</a>
-  <a href="#binanceRadarPanel">50-MARKET RADAR</a>
-  <a href="#binanceStrategyPanel">AI BRAIN</a>
   <a href="#marketIntelligencePanel">INTELLIGENCE</a>
   <a href="#exchangeConnections">EXCHANGES</a>
   <a href="#automationPanel">AUTOMATION</a>
@@ -188,73 +183,6 @@ section[id]{scroll-margin-top:82px}
   <p class="note">Streaming ticker prices are display-only and do not feed the strategy or execute trades. The chart uses validated, closed Coinbase candles from the research archive. WebSocket disconnection, stale timestamps or missing candles are shown explicitly; no synthetic prices are generated.</p>
 </section>
 <section class="panel"><div class="row"><h2>BTC-led market regime</h2><span id="marketContextMode" class="tag">WAITING</span></div><p id="marketContextSummary" class="note">Waiting for fresh BTC, ETH and SOL closed-candle regimes. Long entries remain blocked until BTC trend and market breadth align.</p></section>
-<section class="panel" id="binanceRadarPanel">
-  <div class="row">
-    <div>
-      <div class="eyebrow">LIVE MARKET INTELLIGENCE / BINANCE SPOT</div>
-      <h2>50-market liquidity radar</h2>
-      <div class="muted">Dynamic top-volume USDT Spot pairs · live ticker streams · public data only</div>
-    </div>
-    <span id="radarFeedState" class="tag">WAITING FOR DATA</span>
-  </div>
-  <div class="grid radar-kpis">
-    <article class="radar-kpi"><div class="label">MARKETS TRACKED</div><strong id="radarMarketCount">—</strong><small>Top liquid markets</small></article>
-    <article class="radar-kpi"><div class="label">FRESH STREAMS</div><strong id="radarLiveCount">—</strong><small>Updated within 6 seconds</small></article>
-    <article class="radar-kpi"><div class="label">MEDIAN SPREAD</div><strong id="radarMedianSpread">—</strong><small>Best bid / best ask · bps</small></article>
-    <article class="radar-kpi"><div class="label">LARGEST 24H MOVE</div><strong id="radarTopMover">—</strong><small>Absolute percentage move</small></article>
-  </div>
-  <div class="row"><small class="muted" id="radarLastUpdate">Waiting for first stream event</small><small class="muted">Auto-pauses when this dashboard tab is hidden</small></div>
-  <div class="radar-toolbar">
-    <input id="radarSearch" type="search" autocomplete="off" maxlength="24" placeholder="Search BTC, ETH, SOL…" aria-label="Search Binance markets">
-    <select id="radarFilter" aria-label="Filter Binance markets">
-      <option value="all">All markets</option>
-      <option value="gainers">Gainers</option>
-      <option value="losers">Decliners</option>
-      <option value="tight">Tight spreads ≤ 12 bps</option>
-    </select>
-    <select id="radarSort" aria-label="Sort Binance markets">
-      <option value="volume">Sort · 24h volume</option>
-      <option value="move">Sort · 24h move</option>
-      <option value="tight">Sort · Tightest spread</option>
-    </select>
-    <button id="radarRefresh" type="button">Refresh universe</button>
-  </div>
-  <div class="table-wrap radar-table">
-    <table>
-      <thead><tr><th>MARKET</th><th>BINANCE LAST</th><th>24H CHANGE</th><th>BID / ASK SPREAD</th><th>COINBASE REF. GAP*</th><th>24H QUOTE VOLUME</th><th>FEED AGE</th><th>MODE</th></tr></thead>
-      <tbody id="binanceRadarRows"><tr><td colspan="8">Waiting for Binance public market data. No synthetic prices are used.</td></tr></tbody>
-    </table>
-  </div>
-  <p class="radar-caption" id="radarUniverseNote">Market universe loads from Binance public 24-hour ticker statistics. The dashboard subscribes to up to 50 individual Spot ticker streams over one market-data-only WebSocket connection.</p>
-  <p class="note">COINBASE-ONLY ACCOUNT MODE · Coinbase Advanced is the only exchange account and order connector in this dashboard. Binance is retained only as optional public-market research data; no Binance account connection or Binance order execution is used. RESEARCH / MONITOR ONLY · This radar does not generate BUY/SELL signals or submit orders. *The Coinbase reference gap is shown only for BTC, ETH and SOL and assumes USD/USDT parity; it is not an executable arbitrage price. Fees, order-book depth, quote-asset basis, latency, market impact and account restrictions must be checked before any cross-venue strategy could be considered.</p>
-</section>
-<section class="panel ai-brain-panel" id="binanceStrategyPanel">
-  <div class="row ai-brain-header">
-    <div>
-      <div class="eyebrow">STRATEGY INTELLIGENCE / BINANCE SPOT</div>
-      <h2>AI Brain · 50-market multi-timeframe engine</h2>
-      <div class="muted">15m trigger · 1h setup · 4h regime · live spread, depth and net-cost gates</div>
-    </div>
-    <div class="ai-brain-actions"><span id="aiBrainFeed" class="tag">NOT RUN</span><button id="runAiBrain" class="primary" type="button">Run 50-market analysis</button></div>
-  </div>
-  <div class="grid ai-brain-kpis">
-    <article class="ai-brain-kpi"><div class="label">RADAR UNIVERSE</div><strong id="aiBrainUniverse">50</strong><small>Binance USDT Spot markets</small></article>
-    <article class="ai-brain-kpi"><div class="label">ANALYZED</div><strong id="aiBrainAnalyzed">—</strong><small>Three verified candle frames</small></article>
-    <article class="ai-brain-kpi"><div class="label">LONG CANDIDATES</div><strong id="aiBrainCandidates">—</strong><small>All three timeframes aligned</small></article>
-    <article class="ai-brain-kpi"><div class="label">PAPER REVIEW READY</div><strong id="aiBrainPaperReady">—</strong><small>Passed data, liquidity and cost gates</small></article>
-  </div>
-  <div class="ai-brain-progress"><div id="aiBrainProgressBar"></div></div>
-  <div class="row ai-brain-meta"><small id="aiBrainProgressText" class="muted">Run analysis to evaluate all markets. This scan is on-demand.</small><small id="aiBrainUpdated" class="muted">No analysis timestamp</small></div>
-  <div class="ai-brain-pipeline">
-    <span>01 RADAR</span><i>→</i><span>02 ANALYSIS</span><i>→</i><span>03 SIGNAL</span><i>→</i><span>04 RISK CHECK</span><i>→</i><span>05 PAPER REVIEW</span><i>→</i><span>06 PERFORMANCE</span>
-  </div>
-  <div class="table-wrap ai-brain-table"><table>
-    <thead><tr><th>MARKET</th><th>SCORE</th><th>VOTES</th><th>15M</th><th>1H</th><th>4H</th><th>SPREAD</th><th>ROUND-TRIP</th><th>NET EDGE*</th><th>RISK CHECK</th><th>PAPER STAGE</th></tr></thead>
-    <tbody id="aiBrainRows"><tr><td colspan="11">Waiting for a live multi-timeframe analysis.</td></tr></tbody>
-  </table></div>
-  <p class="note" id="aiBrainStatus">No analysis has been run. A candidate requires aligned 15m, 1h and 4h bullish structure, volume participation and eight transparent specialist votes. Fresh closed candles, current quotes, liquidity, net-cost edge and portfolio risk vetoes must all pass.</p>
-  <p class="radar-caption">*Estimated net edge is a rule-based scenario using 1h ATR, a fixed target multiple, configured paper fee/slippage and current top-of-book spread. It is not a forecast, probability or guaranteed fill. "PAPER REVIEW READY" is not an order: this module is read-only and creates zero paper or live trades. Existing Coinbase paper automation remains separate.</p>
-</section>
 <div class="grid" id="portfolioOverview">
 <article class="card"><div class="label">PAPER EQUITY</div><div class="value" id="equity">$10.00</div><div class="muted">Simulated USD</div></article>
 <article class="card"><div class="label">NET REALIZED P&amp;L</div><div class="value" id="realized">$0.00</div><div class="muted">Closed paper trades</div></article>
@@ -282,27 +210,6 @@ section[id]{scroll-margin-top:82px}
 <div class="controls"><button id="livePreflight" type="button">Verify / refresh Coinbase account</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
 <div class="controls"><label>SPOT product<br><select class="live-input" id="liveProduct"><option value="">Run account preflight first</option></select></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
 <pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Configure CDP credentials only through Cloudflare Worker secrets; never paste them into chat or the browser.</pre></section>
-<section class="panel hidden" id="binanceReadonlyPanel" aria-hidden="true">
-  <div class="row"><h2>BINANCE SPOT · READ-ONLY ACCOUNT CONNECTION</h2><span id="binanceState" class="tag bad">NOT CONFIGURED</span></div>
-  <p class="note">This connection reads your production Binance Spot account and available balances only. It never places orders, transfers funds or withdraws. The app verifies the API key permissions before reading balances; any enabled trade, margin, futures, options, transfer or withdrawal capability blocks the read-only check. Add credentials only as Cloudflare Worker Secrets, never in this page or chat.</p>
-  <p class="note">Create a separate Binance API key with Reading enabled only. Keep Spot &amp; Margin Trading, Withdrawals, Internal Transfer, Universal Transfer, Margin, Futures, Options, FIX and Portfolio Margin permissions OFF. Configure BINANCE_READONLY_ENABLED=true, BINANCE_READONLY_API_KEY and BINANCE_READONLY_API_SECRET in Worker Secrets. An IP allowlist on the Binance key is recommended where it can be configured safely.</p>
-  <div class="coinbase-connect-shell">
-    <div class="coinbase-connect-top"><div><div class="eyebrow">SECURE EXCHANGE LINK</div><h3>Binance connection center</h3><p class="muted">Signed API permission check · Spot balance sync · read-only adapter</p></div><div class="connection-sync"><span id="binanceSyncState" class="feed-pill">NOT CHECKED</span><small id="binanceLastSync">No authenticated account check yet</small></div></div>
-    <div class="connection-grid" id="binanceConnectionGrid">
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Worker credentials</strong><small>Waiting for secure configuration</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Signed API authentication</strong><small>Preflight not run</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Read permission</strong><small>Not verified</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Spot trading disabled</strong><small>Not verified</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Withdrawals disabled</strong><small>Not verified</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Transfers disabled</strong><small>Not verified</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Other trading scopes disabled</strong><small>Margin, Futures, Options and FIX not verified</small></div></div>
-      <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Order execution</strong><small>Not available in this Binance connector</small></div></div>
-    </div>
-    <div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE SPOT BALANCES</div><div id="binanceBalances" class="balance-grid"><span class="muted">Run the read-only account check to retrieve balances.</span></div></div><div class="connection-data-card"><div class="label">PAIR-SPECIFIC SPOT COMMISSION</div><div id="binanceFees" class="balance-grid"><span class="muted">Maker/taker rates will appear after the signed account check.</span></div></div><div class="connection-data-card"><div class="label">READ-ONLY ACCOUNT STATUS</div><div id="binanceSummary" class="status">Binance credentials are not configured · account sync OFF</div><div class="connection-footnote">No Binance order, cancel, transfer or withdrawal route is exposed by this connector.</div></div></div>
-  </div>
-  <div class="controls"><button id="binancePreflight" type="button">Verify / refresh Binance account</button><span id="binanceStatusText" class="status">Credentials are configured only through Cloudflare Worker Secrets.</span></div>
-  <pre id="binanceDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No Binance account preflight has been run. Binance is not connected until signed permissions and read-only balances are verified.</pre>
-</section>
 <section class="panel" id="automationPanel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
 <section class="panel" id="marketIntelligencePanel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
 <section class="panel" id="microScalpPanel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
@@ -473,7 +380,7 @@ setInterval(updateTickerFreshness,3000);
 
 function showLogin(){closeMarketFeed();$("app").classList.add("hidden");$("login").classList.remove("hidden");}let currentTradingMode="demo";
 let livePreviewResult=null;
-function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();loadBinanceStatus();connectMarketFeed();loadMarketChart();}
+function showApp(){$("login").classList.add("hidden");$("app").classList.remove("hidden");loadLiveStatus();loadTradingMode();connectMarketFeed();loadMarketChart();}
 $("loginForm").addEventListener("submit",async(event)=>{event.preventDefault();$("loginError").textContent="Signing in…";try{const response=await fetch("/api/auth/login",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({username:$("username").value,password:$("password").value})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Sign-in failed");token=data.access_token;sessionStorage.setItem("att_cf_token",token);$("password").value="";showApp();await refresh();}catch(error){$("loginError").textContent=error.message;}});
 $("logout").addEventListener("click",()=>{token="";sessionStorage.removeItem("att_cf_token");showLogin();});
 
@@ -493,11 +400,6 @@ let coinbasePreflightResult=null;
 let coinbasePreflightAtMs=0;
 let coinbasePreflightInFlight=null;
 const COINBASE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
-let binanceStaticStatus=null;
-let binancePreflightResult=null;
-let binancePreflightAtMs=0;
-let binancePreflightInFlight=null;
-const BINANCE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
 
 function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePreflightResult,checkedAtMs=coinbasePreflightAtMs){
   const permissions=result?.permissions||null;
@@ -724,143 +626,6 @@ async function loadLiveStatus(){
     $("liveSubmit").disabled=true;
   }
 }
-function renderBinanceConnection(status=binanceStaticStatus,result=binancePreflightResult,checkedAtMs=binancePreflightAtMs){
-  const permissions=result?.permissions||null;
-  const authenticated=result?.authenticated===true||result?.connected===true;
-  const checked=!!result;
-  const writeFlags=[
-    "enableWithdrawals","enableInternalTransfer","permitsUniversalTransfer","enableMargin",
-    "enableFutures","enableVanillaOptions","enableFixApiTrade","enableSpotAndMarginTrading",
-    "enablePortfolioMarginTrading"
-  ];
-  const everyWriteFlagOff=!!permissions&&writeFlags.every(key=>permissions[key]===false);
-  const checks=[
-    {title:"Worker credentials",detail:status?.credentials_configured===true?"API key and secret are present in Worker Secrets":"Add Binance credentials only in Worker Secrets",ok:status?.credentials_configured===true,known:true},
-    {title:"Signed API authentication",detail:authenticated?"Binance signed permission endpoint authenticated":checked?"Permission check did not pass":"Preflight not run",ok:authenticated,known:checked},
-    {title:"Read permission",detail:permissions?.enableReading===true?"Enable Reading is ON":permissions?"Enable Reading is missing or OFF":"Not verified",ok:permissions?.enableReading===true,known:!!permissions},
-    {title:"Spot trading disabled",detail:permissions?.enableSpotAndMarginTrading===false?"Spot & Margin Trading is OFF":permissions?"Spot & Margin Trading is ON or unverified":"Not verified",ok:permissions?.enableSpotAndMarginTrading===false,known:!!permissions},
-    {title:"Withdrawals disabled",detail:permissions?.enableWithdrawals===false?"Withdrawals are OFF":permissions?"Withdrawal permission is ON or unverified":"Not verified",ok:permissions?.enableWithdrawals===false,known:!!permissions},
-    {title:"Transfers disabled",detail:permissions?.enableInternalTransfer===false&&permissions?.permitsUniversalTransfer===false?"Internal and universal transfers are OFF":permissions?"A transfer permission is ON or unverified":"Not verified",ok:permissions?.enableInternalTransfer===false&&permissions?.permitsUniversalTransfer===false,known:!!permissions},
-    {title:"Other trading scopes disabled",detail:permissions?(["enableMargin","enableFutures","enableVanillaOptions","enableFixApiTrade","enablePortfolioMarginTrading"].every(key=>permissions[key]===false)?"Margin, Futures, Options, FIX and Portfolio Margin are OFF":"One or more additional trading scopes are ON or unverified"):"Not verified",ok:!!permissions&&["enableMargin","enableFutures","enableVanillaOptions","enableFixApiTrade","enablePortfolioMarginTrading"].every(key=>permissions[key]===false),known:!!permissions},
-    {title:"Order execution",detail:"No Binance order or cancel capability exists in this read-only adapter",ok:true,known:true}
-  ];
-  const grid=$("binanceConnectionGrid");
-  if(grid){
-    grid.replaceChildren();
-    for(const item of checks){
-      const tile=document.createElement("div"),dot=document.createElement("span"),copy=document.createElement("div");
-      tile.className="connection-tile";
-      dot.className="connection-dot "+(!item.known?"pending":item.ok?"good":"bad");
-      const title=document.createElement("strong"),detail=document.createElement("small");
-      title.textContent=item.title;detail.textContent=item.detail;copy.append(title,detail);tile.append(dot,copy);grid.append(tile);
-    }
-  }
-  const connected=result?.status==="connected_read_only"&&result?.connected===true&&everyWriteFlagOff&&permissions?.enableReading===true;
-  const sync=$("binanceSyncState");
-  if(sync){
-    sync.textContent=connected?"CONNECTED · READ ONLY":!status?.enabled||!status?.credentials_configured?"NOT CONFIGURED":!checked?"PREFLIGHT REQUIRED":result?.status==="provider_check_failed"?"SYNC FAILED":"CHECKS BLOCKED";
-    sync.className="feed-pill "+(connected?"live":!checked&&status?.account_preflight_available?"stale":"offline");
-  }
-  $("binanceState").textContent=connected?"ACCOUNT VERIFIED · READ ONLY":!status?.enabled||!status?.credentials_configured?"NOT CONFIGURED":"READ-ONLY CHECK REQUIRED";
-  $("binanceState").className="tag "+(connected?"good":"bad");
-  $("binanceLastSync").textContent=checkedAtMs?"Last read-only account check · "+new Date(checkedAtMs).toLocaleString():"No authenticated account check yet";
-  const balancesBox=$("binanceBalances");
-  balancesBox.replaceChildren();
-  const balances=Array.isArray(result?.balances)?result.balances:[];
-  if(!connected||!balances.length){
-    const empty=document.createElement("span");empty.className="muted";
-    empty.textContent=connected?"No non-zero Spot balances returned.":"Run the read-only account check to retrieve balances.";
-    balancesBox.append(empty);
-  }else{
-    for(const row of balances){
-      const pill=document.createElement("div"),amount=document.createElement("strong"),label=document.createElement("small");
-      pill.className="balance-pill";amount.textContent=String(row.total);
-      label.textContent=String(row.asset)+" · free "+String(row.free)+" · locked "+String(row.locked);
-      pill.append(amount,label);balancesBox.append(pill);
-    }
-  }
-  const feeBox=$("binanceFees");
-  if(feeBox){
-    feeBox.replaceChildren();
-    const feeRows=Array.isArray(result?.fees?.symbols)?result.fees.symbols:[];
-    if(!connected||!feeRows.length){
-      const empty=document.createElement("span");empty.className="muted";
-      empty.textContent=connected?"Pair commission data unavailable; do not substitute a guessed fee.":"Run the signed read-only account check to verify actual Binance pair fees.";
-      feeBox.append(empty);
-    }else{
-      for(const row of feeRows){
-        const pill=document.createElement("div"),amount=document.createElement("strong"),label=document.createElement("small");
-        pill.className="balance-pill";
-        amount.textContent=row.status==="verified"
-          ?String(row.symbol)+" · Maker "+Number(row.conservative_maker_bps).toFixed(2)+" / Taker "+Number(row.conservative_taker_bps).toFixed(2)+" bps"
-          :String(row.symbol)+" · Fee unavailable";
-        const discount=row.bnb_discount||{};
-        label.textContent=row.status!=="verified"?(row.error_code||"Not verified"):
-          "Conservative incl. tax/special · BNB potential "+(discount.potential_taker_bps_with_bnb==null?"not counted":Number(discount.potential_taker_bps_with_bnb).toFixed(2)+" taker bps");
-        pill.append(amount,label);feeBox.append(pill);
-      }
-    }
-  }
-  const blockers=Array.isArray(result?.blockers)?result.blockers:[];
-  $("binanceSummary").textContent=connected
-    ? "Authenticated · "+String(result.balance_count||0)+" non-zero Spot asset(s) · read-only permissions verified · orders disabled"
-    : blockers.length?blockers.join(" · "):status?.account_preflight_available?"Ready for signed Binance permission check":"Configure the read-only connector in Cloudflare Worker Secrets";
-  $("binanceStatusText").textContent=connected?"Binance account is connected in read-only mode.":status?.credentials_configured?"Credentials are present; a permission and balance check is required.":"Credentials are configured only through Cloudflare Worker Secrets.";
-}
-
-async function runBinancePreflight({silent=false,force=false}={}){
-  if(binancePreflightInFlight)return binancePreflightInFlight;
-  if(!token)return null;
-  if(!force&&binancePreflightResult&&Date.now()-binancePreflightAtMs<BINANCE_ACCOUNT_SYNC_INTERVAL_MS)return binancePreflightResult;
-  binancePreflightInFlight=(async()=>{
-    if(!silent){$("binancePreflight").disabled=true;$("binancePreflight").textContent="Verifying Binance…";}
-    try{
-      const result=await api("/api/binance/preflight",{method:"POST",body:"{}"});
-      binancePreflightResult=result;binancePreflightAtMs=Date.now();
-      renderBinanceConnection(binanceStaticStatus,result,binancePreflightAtMs);
-      $("binanceDetails").textContent=JSON.stringify({
-        status:result.status,authenticated:result.authenticated===true,connected:result.connected===true,
-        permissions:result.permissions||null,balances:result.balances||[],fees:result.fees||null,blockers:result.blockers||[],
-        order_execution_available:false,live_trading_enabled:false,environment:"production_read_only"
-      },null,2);
-      return result;
-    }catch(error){
-      binancePreflightResult={status:"provider_check_failed",blockers:[error.message]};
-      binancePreflightAtMs=Date.now();
-      renderBinanceConnection(binanceStaticStatus,binancePreflightResult,binancePreflightAtMs);
-      $("binanceDetails").textContent="Binance account preflight failed: "+error.message;
-      throw error;
-    }finally{
-      if(!silent){$("binancePreflight").disabled=false;$("binancePreflight").textContent="Verify / refresh Binance account";}
-      binancePreflightInFlight=null;
-    }
-  })();
-  return binancePreflightInFlight;
-}
-
-async function loadBinanceStatus(){
-  try{
-    const status=await api("/api/binance/status");
-    binanceStaticStatus=status;
-    renderBinanceConnection(status,binancePreflightResult,binancePreflightAtMs);
-    if(status.account_preflight_available===true){
-      await runBinancePreflight({silent:true}).catch(()=>null);
-    }
-  }catch(error){
-    binanceStaticStatus=null;
-    $("binanceState").textContent="CONNECTION STATUS UNAVAILABLE";
-    $("binanceState").className="tag bad";
-    $("binanceSyncState").textContent="STATUS UNAVAILABLE";
-    $("binanceSyncState").className="feed-pill offline";
-    $("binanceSummary").textContent=error.message;
-    $("binanceStatusText").textContent=error.message;
-  }
-}
-$("binancePreflight").addEventListener("click",async()=>{
-  try{await runBinancePreflight({force:true});}
-  catch(error){$("binanceStatusText").textContent="Binance account check failed: "+error.message;}
-});
-
 async function loadTradingMode(){
   try{
     const [state,automation]=await Promise.all([
@@ -1094,120 +859,6 @@ $("stop").addEventListener("click",async()=>{if(!confirm("Emergency stop will di
 $("reset").addEventListener("click",async()=>{if(!confirm("Reset the paper-entry halt? All open paper positions must already be closed. Auto-entry will remain OFF."))return;try{await api("/api/automation/reset",{method:"POST"});await refresh();}catch(error){alert(error.message);}});
 $("scan").addEventListener("click",async()=>{$("scan").disabled=true;$("scan").textContent="Scanning…";try{await api("/api/scan",{method:"POST"});await refresh();}catch(error){alert(error.message);}finally{$("scan").disabled=false;$("scan").textContent="Scan now";}});
 
-let binanceStrategyResults=[];
-let binanceStrategyLastRunAt=0;
-function renderBinanceStrategyRows(){
-  const rows=binanceStrategyResults.slice().sort((a,b)=>{
-    const aReady=a.paper_trade?.status==="PAPER_REVIEW_READY"?1:0;
-    const bReady=b.paper_trade?.status==="PAPER_REVIEW_READY"?1:0;
-    return bReady-aReady || Number(b.composite_score||0)-Number(a.composite_score||0);
-  });
-  $("aiBrainRows").innerHTML=rows.map((item)=>{
-    const tf=(label)=>{
-      const value=item.multi_timeframe?.[label];
-      if(!value)return '<span class="ai-status bad">NO DATA</span>';
-      const healthy=value.audit_ok===true;
-      const tone=value.signal==="BUY_CANDIDATE"?"good":healthy?"pending":"bad";
-      return '<span class="ai-status '+tone+'">'+esc(value.regime||"UNKNOWN")+'</span><small>'+esc(value.signal||"HOLD")+' · '+String(value.score??0)+'/100 · RSI '+(Number.isFinite(value.rsi14)?Number(value.rsi14).toFixed(1):"—")+'</small>';
-    };
-    const quality=item.market_quality||{};
-    const cost=item.cost_model||{};
-    const committee=item.strategy_committee||{};
-    const voteCount=Number.isFinite(committee.passed_votes)?committee.passed_votes:0;
-    const voteTotal=Number.isFinite(committee.total_votes)?committee.total_votes:8;
-    const reasons=(item.risk_check?.block_reasons||[]).slice(0,3).join(", ");
-    const riskPassed=item.risk_check?.passed===true;
-    const ready=item.paper_trade?.status==="PAPER_REVIEW_READY";
-    const signalTone=item.signal==="LONG_CANDIDATE"?"good":"pending";
-    return '<tr><td><strong>'+esc(item.symbol||item.binance_symbol||"—")+'</strong><small class="muted">'+esc(item.status||"unknown")+'</small></td>'+
-      '<td class="ai-score">'+String(item.composite_score??0)+'/100</td>'+
-      '<td><span class="ai-status '+(committee.unanimous?"good":"pending")+'">'+voteCount+'/'+voteTotal+'</span><small class="ai-reasons">specialist votes</small></td>'+
-      '<td class="tf-cell">'+tf("15m")+'</td><td class="tf-cell">'+tf("1h")+'</td><td class="tf-cell">'+tf("4h")+'</td>'+
-      '<td>'+ (Number.isFinite(quality.spread_bps)?Number(quality.spread_bps).toFixed(2)+" bps":"—")+'</td>'+
-      '<td>'+ (Number.isFinite(cost.round_trip_cost_bps)?Number(cost.round_trip_cost_bps).toFixed(1)+" bps":"—")+'<small class="ai-reasons">'+(cost.fee_source==="binance_account_commission"?"ACCOUNT TAKER FEE · VERIFIED":"CONFIGURED FEE FALLBACK")+'</small></td>'+
-      '<td>'+ (Number.isFinite(cost.estimated_net_edge_bps)?(cost.estimated_net_edge_bps>=0?"+":"")+Number(cost.estimated_net_edge_bps).toFixed(1)+" bps":"—")+'</td>'+
-      '<td><span class="ai-status '+(riskPassed?"good":"bad")+'">'+(riskPassed?"PASS":"BLOCKED")+'</span><small class="ai-reasons">'+esc(reasons||"All strategy and risk checks passed")+'</small></td>'+
-      '<td><span class="ai-status '+(ready?"good":signalTone)+'">'+(ready?"PAPER REVIEW READY":"HOLD / NO TRADE")+'</span></td></tr>';
-  }).join("")||'<tr><td colspan="11">No market analysis results yet.</td></tr>';
-}
-function setAiBrainProgress(done,total,label){
-  const percent=total?Math.min(100,Math.round(done/total*100)):0;
-  $("aiBrainProgressBar").style.width=percent+"%";
-  $("aiBrainProgressText").textContent=label;
-}
-async function runBinanceStrategy(){
-  const button=$("runAiBrain");
-  const symbols=Array.isArray(window.binanceRadarSymbols)?window.binanceRadarSymbols.slice(0,50):[];
-  if(!symbols.length){
-    $("aiBrainStatus").textContent="Binance Radar universe is not ready yet. Refresh the 50-market radar first; analysis will not invent or substitute symbols.";
-    $("aiBrainFeed").textContent="RADAR WAITING";
-    $("aiBrainFeed").className="tag bad";
-    return;
-  }
-  button.disabled=true;
-  button.textContent="Analyzing 0/50…";
-  $("aiBrainFeed").textContent="ANALYZING";
-  $("aiBrainFeed").className="tag";
-  $("aiBrainStatus").textContent="Running one 50-market Binance Spot batch with bounded parallel requests. Closed 15m/1h/4h candles are cached until the next bar closes; current ticker and order-book depth remain fresh on every scan. No trades are being placed.";
-  binanceStrategyResults=[];
-  renderBinanceStrategyRows();
-  const chunks=[];
-  for(let index=0;index<symbols.length;index+=50)chunks.push(symbols.slice(index,index+50));
-  let completed=0;
-  let failures=0;
-  setAiBrainProgress(0,symbols.length,"Running a single request · up to 5 markets analyzed in parallel · candle cache active");
-  try{
-    await Promise.all(chunks.map(async(chunk)=>{
-      try{
-        const data=await api("/api/strategy/binance-intelligence?symbols="+encodeURIComponent(chunk.join(",")));
-        const marketRows=Array.isArray(data.markets)?data.markets:[];
-        binanceStrategyResults.push(...marketRows);
-        const analyzedSymbols=new Set(marketRows.filter((item)=>item.status==="analyzed").map((item)=>String(item.binance_symbol||"").toUpperCase()));
-        failures+=chunk.filter((symbol)=>!analyzedSymbols.has(String(symbol).toUpperCase())).length;
-      }catch(error){
-        failures+=chunk.length;
-        for(const symbol of chunk)binanceStrategyResults.push({
-          symbol:symbol.slice(0,-4)+"/USDT",binance_symbol:symbol,status:"request_error",signal:"HOLD",
-          composite_score:0,risk_check:{passed:false,block_reasons:[error.message]},
-          paper_trade:{status:"BLOCKED",order_created:false}
-        });
-      }
-      completed+=chunk.length;
-      button.textContent="Analyzing "+completed+"/"+symbols.length+"…";
-      $("aiBrainAnalyzed").textContent=String(binanceStrategyResults.filter((item)=>item.status==="analyzed").length);
-      $("aiBrainCandidates").textContent=String(binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length);
-      $("aiBrainPaperReady").textContent=String(binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length);
-      setAiBrainProgress(completed,symbols.length,"Analyzed "+completed+" of "+symbols.length+" markets · "+failures+" markets not fully analyzed");
-      renderBinanceStrategyRows();
-    }));
-    binanceStrategyLastRunAt=Date.now();
-    const analyzed=binanceStrategyResults.filter((item)=>item.status==="analyzed").length;
-    const candidates=binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length;
-    const ready=binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length;
-    const feeVerified=binanceStrategyResults.filter((item)=>item.cost_model?.fee_source==="binance_account_commission").length;
-    const cache=binanceStrategyResults.reduce((total,item)=>{
-      const stats=item.candle_cache||{};
-      total.reused+=Array.isArray(stats.reused_timeframes)?stats.reused_timeframes.length:0;
-      total.refreshed+=Array.isArray(stats.refreshed_timeframes)?stats.refreshed_timeframes.length:0;
-      total.fallback+=Array.isArray(stats.stale_fallback_timeframes)?stats.stale_fallback_timeframes.length:0;
-      return total;
-    },{reused:0,refreshed:0,fallback:0});
-    $("aiBrainFeed").textContent=failures?"PARTIAL · "+analyzed+"/"+symbols.length:"LIVE DATA · "+analyzed+"/"+symbols.length;
-    $("aiBrainFeed").className="tag "+(failures||analyzed!==symbols.length?"bad":"good");
-    $("aiBrainUpdated").textContent="Updated "+new Date(binanceStrategyLastRunAt).toLocaleTimeString();
-    $("aiBrainStatus").textContent=(failures?"Analysis finished with "+failures+" market(s) that did not produce a validated analysis.":"Completed with validated Binance public Spot market data for all requested markets.")+" "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Account taker fee verified for "+feeVerified+"/"+symbols.length+" markets; other markets use the configured paper-fee fallback. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
-    setAiBrainProgress(symbols.length,symbols.length,"Completed "+symbols.length+" markets · "+analyzed+" valid analyses · "+failures+" failures");
-  }catch(error){
-    $("aiBrainFeed").textContent="SCAN ERROR";
-    $("aiBrainFeed").className="tag bad";
-    $("aiBrainStatus").textContent="Strategy scan failed: "+error.message;
-  }finally{
-    button.disabled=false;
-    button.textContent="Run 50-market analysis";
-  }
-}
-$("runAiBrain").addEventListener("click",runBinanceStrategy);
-
 const tournamentNames=["trend_continuation","range_mean_reversion","breakout_continuation"];
 const pct=(value)=>Number.isFinite(value)?Number(value).toFixed(2)+"%":"—";
 const num=(value)=>Number.isFinite(value)?Number(value).toFixed(2):"—";
@@ -1264,18 +915,10 @@ setInterval(()=>{
     });
   }
 },COINBASE_ACCOUNT_SYNC_INTERVAL_MS);
-setInterval(()=>{
-  if(!document.hidden&&token&&binanceStaticStatus?.account_preflight_available===true){
-    runBinancePreflight({silent:true,force:true}).catch((error)=>{
-      $("binanceSyncState").textContent="SYNC FAILED";$("binanceSyncState").className="feed-pill offline";
-      $("binanceLastSync").textContent="Account refresh failed · "+error.message;
-    });
-  }
-},BINANCE_ACCOUNT_SYNC_INTERVAL_MS);
 document.addEventListener("visibilitychange",()=>{
   if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true&&
      (!coinbasePreflightAtMs||Date.now()-coinbasePreflightAtMs>=COINBASE_ACCOUNT_SYNC_INTERVAL_MS)){
     runCoinbasePreflight({silent:true}).catch(()=>{});
   }
 });
-</script><script type="module" src="/binance-radar.js"></script></body></html>
+</script></body></html>
