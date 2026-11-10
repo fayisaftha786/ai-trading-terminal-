@@ -713,6 +713,8 @@ test("Bitstamp fallback rejects a stale exchange-side order-book timestamp", asy
     assert.equal(snapshot.market_data_provider, "bitstamp_spot");
     assert.equal(snapshot.data_quality.book_status, "provider_error");
     assert.equal(snapshot.data_quality.book_error, "provider_timestamp_invalid_or_stale");
+    assert.equal(snapshot.data_quality.legacy_exit_quote_only, true);
+    assert.ok(Number.isFinite(snapshot.quote_received_at_ms));
     assert.ok(Number.isFinite(snapshot.book_event_time_ms));
     assert.ok(snapshot.book_age_ms <= 15000);
   } finally {
