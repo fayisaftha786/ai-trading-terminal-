@@ -945,7 +945,7 @@ export class TradingEngine extends DurableObject {
           return jsonResponse({
             error: "invalid_symbol_batch",
             maximum_symbols_per_batch: BINANCE_STRATEGY_BATCH_LIMIT,
-            expected: "one to ten comma-separated Binance USDT Spot symbols"
+            expected: "one to fifty comma-separated Binance USDT Spot symbols"
           }, 400);
         }
         return jsonResponse(await this.scanBinanceStrategyBatch(symbols));
