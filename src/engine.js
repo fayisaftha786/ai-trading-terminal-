@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
