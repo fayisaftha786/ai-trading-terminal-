@@ -17,7 +17,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders remain disabled. The o
 - Coinbase REST book snapshots use local retrieval-age validation. The Bitstamp exit-only compatibility path additionally requires a fresh exchange timestamp and local retrieval time.
 - Entry universe gates require fresh ticker observation/event time, a recent order-book retrieval (maximum 15 seconds), minimum top-10 depth of USD 5,000 on each side, valid spread, and at least 150 closed, contiguous and fresh candles on 1H and 6H for each configured market.
 - If both providers fail or the secondary snapshot is incomplete, no new entries are allowed. Fresh bid marks may still be retained for PAPER exits when safe. Never use the secondary price to mark or close a position opened on the primary venue.
-- Bitstamp candle archive rows have a separate provider key and are inserted incrementally. Offline strategy tournament continues using Coinbase-only archive data to avoid silent cross-venue blending.
+- Bitstamp historical backfill rows have a separate provider key and are inserted incrementally. Offline strategy tournament continues using Coinbase-only archive data to avoid silent cross-venue blending.
 
 ## PAPER ledger, exits and risk
 
