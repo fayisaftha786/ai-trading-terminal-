@@ -172,14 +172,19 @@ export class TradingEngine extends DurableObject {
 
 
   async scanBinanceStrategyBatch(symbols) {
-    const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr?symbols=" +
-      encodeURIComponent(JSON.stringify(symbols));
+    // Match the browser Radar public-data request: fetch the 24h ticker universe
+    // without a large encoded symbols query, then filter locally. This avoids
+    // WAF false positives on long JSON-array query strings.
+    const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr";
     const tickerResponse = await fetch(tickerUrl, {
       headers: { "accept": "application/json" },
       signal: AbortSignal.timeout(12000)
     });
     if (!tickerResponse.ok) {
-      const error = new Error("binance_ticker_http_" + tickerResponse.status);
+      const errorCode = tickerResponse.status === 403
+        ? "binance_ticker_waf_or_security_block_403"
+        : "binance_ticker_http_" + tickerResponse.status;
+      const error = new Error(errorCode);
       error.status = tickerResponse.status;
       throw error;
     }
@@ -188,7 +193,12 @@ export class TradingEngine extends DurableObject {
       ? tickerPayload
       : (tickerPayload && typeof tickerPayload.symbol === "string" ? [tickerPayload] : null);
     if (!tickerRows) throw new Error("binance_ticker_payload_invalid");
-    const tickerBySymbol = new Map(tickerRows.map((row) => [String(row?.symbol || "").toUpperCase(), row]));
+    const requestedSymbols = new Set(symbols.map((symbol) => String(symbol).trim().toUpperCase()));
+    const tickerBySymbol = new Map(
+      tickerRows
+        .filter((row) => requestedSymbols.has(String(row?.symbol || "").toUpperCase()))
+        .map((row) => [String(row?.symbol || "").toUpperCase(), row])
+    );
     const snapshotAtMs = Date.now();
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
