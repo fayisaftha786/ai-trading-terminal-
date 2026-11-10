@@ -76,29 +76,31 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
 4. Configure the Worker from the repository root:
    - Root directory: leave the field blank/default so Cloudflare uses the repository root
    - Build command: `npm run check && npm test`
-   - Deploy command: `npx wrangler@4 deploy --tag "$WORKERS_CI_COMMIT_SHA" --message "Git commit $WORKERS_CI_COMMIT_SHA"`
+   - Deploy command: `npx wrangler@4 deploy --tag "$WORKERS_CI_COMMIT_SHA" --var "DEPLOY_COMMIT_SHA:$WORKERS_CI_COMMIT_SHA" --message "Git commit $WORKERS_CI_COMMIT_SHA"`
    - Worker name must remain `ai-trading-terminal`, matching `wrangler.jsonc`
-   - Workers Builds provides `WORKERS_CI_COMMIT_SHA`; this tag is exposed at runtime through `CF_VERSION_METADATA`.
+   - Workers Builds provides `WORKERS_CI_COMMIT_SHA`; the tag is exposed at runtime through `CF_VERSION_METADATA`, while `--var DEPLOY_COMMIT_SHA:...` is what the public health endpoint checks against the Git commit. Setting only the tag leaves `deployment_commit_sha` null.
    - Do not add D1, KV, R2, Queues, Containers, paid compute, or any other product. The required SQLite Durable Object is declared in `wrangler.jsonc`.
 5. Select **Save and Deploy**. The first deployment applies the SQLite Durable Object migration. A failed login before secrets are configured is expected; no trading will start.
 6. Open the new Worker → **Settings** → **Variables and Secrets** → **Add** → **Secret**. Add these two runtime secrets:
    - `ADMIN_PASSWORD`: a unique password at least 16 characters long.
    - `SESSION_SECRET`: a randomly generated secret at least 32 characters long.
    Save/deploy the Worker after adding both secrets. Do not reuse your GitHub or email password, and never send either value here. `ADMIN_USERNAME` defaults to `admin`; it can be overridden as a non-secret variable.
-7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `worker_version.id`, `worker_version.tag` (the Git commit SHA when deployed with the command above), and a version timestamp. Compare the tag with the repository `main` SHA before treating the new deployment as current.
+7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `deployment_commit_sha`, `worker_version.id`, `worker_version.tag`, and a version timestamp. Both `deployment_commit_sha` and `worker_version.tag` must match the exact current repository `main` SHA before treating the deployment as current.
 8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, local order-book response retrieval age under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
 9. Confirm the scan timestamp advances after the first alarm and again roughly every 90 seconds. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
 10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real-money order submission is disabled in this build; Coinbase account preflight and order preview do not place an order. Binance Testnet remains disabled.
 11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
 
-### GitHub Actions deploy workflow (separate from Cloudflare Git integration)
+### GitHub Actions deploy workflow (production deployment path)
 
-The repository also contains `.github/workflows/deploy-cloudflare-worker.yml`. It is **manual-dispatch only** and requires two GitHub repository Actions secrets:
+The repository workflow `.github/workflows/deploy-cloudflare-worker.yml` runs on every push to `main` and also supports manual dispatch. It runs source checks, the Node test suite, a Wrangler dry-run build, verifies that Cloudflare deployment credentials are present, deploys the Worker and checks the public health endpoint against the exact Git commit SHA. The successful 2026-11-10 run verified commit `da73f33611663a6b1e45ede253d6eea01bbf7be5` and confirmed PAPER-only mode, live trading OFF and Binance Testnet OFF. This establishes that the two GitHub Actions deployment secrets were configured and accepted at that run; it does not prove that a later independent Cloudflare deployment has not replaced that Worker version.
 
 - `CLOUDFLARE_API_TOKEN` — a narrowly scoped Cloudflare API token with permission to deploy this Worker.
 - `CLOUDFLARE_ACCOUNT_ID` — the target Cloudflare account identifier.
 
-These GitHub Actions secrets are separate from the Worker's runtime secrets (`ADMIN_PASSWORD` and `SESSION_SECRET`). On 2026-11-08, the repository Actions secrets page showed that both required deployment secret names were missing. Add them yourself under GitHub → repository **Settings** → **Secrets and variables** → **Actions** before using **Actions** → **Deploy Cloudflare Worker** → **Run workflow**. Never paste their values into chat, commit them, or put them in ordinary workflow variables. Until these secrets exist, the manual GitHub Actions deployment cannot run. Cloudflare Dashboard Git integration can be used instead and does not require these GitHub Actions secrets.
+These GitHub Actions secrets are separate from the Worker's runtime secrets (`ADMIN_PASSWORD` and `SESSION_SECRET`). Never paste their values into chat, commit them, or put them in ordinary workflow variables.
+
+**Use one production deployment source of truth.** The GitHub Actions workflow already deploys on `main` pushes. If Cloudflare Workers Builds is also enabled for the same production Worker, either disable its automatic deployment or configure the command above so it sets both `worker_version.tag` and `deployment_commit_sha` to the same `WORKERS_CI_COMMIT_SHA`. Otherwise a second deployment can replace the verified GitHub Actions revision and leave the health endpoint unable to prove which source commit is running.
 
 Cloudflare's Git integration instructions: [Workers Builds](https://developers.cloudflare.com/workers/ci-cd/builds/) and [build configuration](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/). Runtime secrets are configured separately from build variables; see [Cloudflare Worker secrets](https://developers.cloudflare.com/workers/configuration/secrets/).
 
@@ -107,7 +109,7 @@ Cloudflare's Git integration instructions: [Workers Builds](https://developers.c
 For a trusted computer with Node.js 22+:
 ```sh
 npm install
-npx wrangler@4 deploy --tag "$GITHUB_SHA" --message "Git commit $GITHUB_SHA"
+npx wrangler@4 deploy --tag "$GITHUB_SHA" --var "DEPLOY_COMMIT_SHA:$GITHUB_SHA" --message "Git commit $GITHUB_SHA"
 npx wrangler secret put ADMIN_PASSWORD
 npx wrangler secret put SESSION_SECRET
 ```
