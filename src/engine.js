@@ -118,7 +118,7 @@ export class TradingEngine extends DurableObject {
     return this.sql.exec(
       "SELECT candle_open_ms AS time,open,high,low,close,volume FROM research_candles " +
       "WHERE exchange=? AND product=? AND timeframe_seconds=? " +
-      "ORDER BY candle_open_ms DESC LIMIT 300",
+      "ORDER BY candle_open_ms DESC LIMIT 150",
       exchange, product, timeframeSeconds
     ).toArray().reverse().map((row) => ({
       time: Number(row.time),
@@ -1905,8 +1905,9 @@ export class TradingEngine extends DurableObject {
     const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
     const coinbaseState = createCoinbaseRequestState();
     const requestState = coinbaseState;
+    const initialOpenTrades = this.getOpenTrades();
     const legacyBitstampExitSymbols = new Set(
-      this.getOpenTrades()
+      initialOpenTrades
         .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
         .map((trade) => trade.symbol)
     );
@@ -1990,7 +1991,9 @@ export class TradingEngine extends DurableObject {
       }
     }
 
-    const refreshedMarkets = this.getMarkets();
+    // The market objects above were updated in place and persisted by saveMarket().
+    // Reuse them instead of reading all snapshot rows a second time on every 10s alarm.
+    const refreshedMarkets = markets;
     const feed = assessMarketUniverse(
       refreshedMarkets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS, MAX_ORDER_BOOK_AGE_MS
     );
@@ -2001,9 +2004,13 @@ export class TradingEngine extends DurableObject {
     // The provider lock is retained; this path has no entry or live-order code.
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
-    const markBySymbol = this.buildPositionLockedBidMarks(refreshedMarkets, Date.now());
-    const exits = this.monitorExits(markBySymbol, risk, Date.now());
-    this.portfolio(markBySymbol, risk, Date.now());
+    // Refresh open positions once after external awaits so a concurrent owner close
+    // is respected. Pass the snapshot into both helpers to avoid duplicate SQL reads.
+    const openTrades = this.getOpenTrades();
+    const markBySymbol = this.buildPositionLockedBidMarks(refreshedMarkets, Date.now(), openTrades);
+    const exits = this.monitorExits(markBySymbol, risk, Date.now(), openTrades);
+    // Do not run full-ledger SUM/COUNT risk aggregates on every 10s book refresh.
+    // Portfolio/risk baselines are recomputed on the 90s strategy scan and dashboard.
 
     const telemetry = {
       last_book_refresh_at_ms: Date.now(),
@@ -2028,9 +2035,10 @@ export class TradingEngine extends DurableObject {
       .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
   }
 
-  buildPositionLockedBidMarks(markets, nowMs = Date.now()) {
+  buildPositionLockedBidMarks(markets, nowMs = Date.now(), openTrades = null) {
+    const positions = Array.isArray(openTrades) ? openTrades : this.getOpenTrades();
     const requiredProviders = new Map(
-      this.getOpenTrades().map((trade) => [
+      positions.map((trade) => [
         trade.symbol,
         typeof trade.metadata?.market_data_provider === "string" && trade.metadata.market_data_provider
           ? trade.metadata.market_data_provider
@@ -2137,9 +2145,10 @@ export class TradingEngine extends DurableObject {
     try { return JSON.parse(value || "{}"); } catch { return {}; }
   }
 
-  monitorExits(markBySymbol, risk, nowMs) {
+  monitorExits(markBySymbol, risk, nowMs, openTrades = null) {
     const closed = [];
-    for (const trade of this.getOpenTrades()) {
+    const positions = Array.isArray(openTrades) ? openTrades : this.getOpenTrades();
+    for (const trade of positions) {
       const bid = markBySymbol.get(trade.symbol);
       if (!Number.isFinite(bid) || bid <= 0) continue;
 

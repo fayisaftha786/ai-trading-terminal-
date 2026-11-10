@@ -102,3 +102,25 @@ test("trading health requests can still respond when scheduler alarm setup fails
   assert.ok(engineSource.includes("Trading engine alarm initialization failed"));
   assert.ok(engineSource.includes("try {\n        await this.ensureAlarm();\n      } catch (error)"));
 });
+
+test("research cache loads only the 150 closed candles required by the audit gates", () => {
+  assert.ok(engineSource.includes("ORDER BY candle_open_ms DESC LIMIT 150"));
+  assert.ok(!engineSource.includes("ORDER BY candle_open_ms DESC LIMIT 300"));
+});
+
+test("10-second book refresh reuses loaded markets and avoids full-ledger portfolio aggregation", () => {
+  const start = engineSource.indexOf("async refreshOrderBooksOnly()");
+  const end = engineSource.indexOf("getOpenTrades()", start);
+  const refresh = engineSource.slice(start, end);
+  assert.equal((refresh.match(/this\\.getMarkets\\(\\)/g) || []).length, 1);
+  assert.ok(refresh.includes("const refreshedMarkets = markets"));
+  assert.ok(refresh.includes("this.buildPositionLockedBidMarks(refreshedMarkets, Date.now(), openTrades)"));
+  assert.ok(refresh.includes("this.monitorExits(markBySymbol, risk, Date.now(), openTrades)"));
+  assert.ok(!refresh.includes("this.portfolio("));
+});
+
+test("Durable Object failures return controlled HTTP 503 instead of an unhandled Worker exception", () => {
+  assert.ok(workerSource.includes("Trading engine Durable Object request failed"));
+  assert.ok(workerSource.includes('error: "trading_engine_temporarily_unavailable"'));
+  assert.ok(workerSource.includes("return await stub.fetch(request)"));
+});

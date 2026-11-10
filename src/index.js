@@ -169,7 +169,18 @@ async function routeApi(request, env) {
   }
   const id = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
   const stub = env.TRADING_ENGINE.get(id);
-  return stub.fetch(request);
+  try {
+    return await stub.fetch(request);
+  } catch (error) {
+    // Surface a controlled service-unavailable response instead of an unhandled
+    // Error 1101 page when the Durable Object storage quota or runtime is degraded.
+    console.error("Trading engine Durable Object request failed", {
+      path: url.pathname,
+      name: typeof error?.name === "string" ? error.name : "Error",
+      message: String(error?.message || error).slice(0, 180)
+    });
+    return json({ error: "trading_engine_temporarily_unavailable" }, 503);
+  }
 }
 
 export default {
