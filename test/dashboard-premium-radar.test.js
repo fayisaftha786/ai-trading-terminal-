@@ -44,9 +44,9 @@ test("content security policy permits only the Coinbase and Binance public marke
   assert.match(worker, /frame-ancestors 'none'/);
 });
 
-test("AI Brain uses parallel 25-market batches and visibly reports verified candle-cache use", () => {
+test("AI Brain uses a single 50-market batch and visibly reports verified candle-cache use", () => {
   assert.match(html, /AI Brain · 50-market multi-timeframe engine/);
-  assert.match(html, /index\+=25/);
+  assert.match(html, /index\+=50/);
   assert.match(html, /Promise\.all\(chunks\.map/);
   assert.match(html, /timeframe\(s\) reused/);
   assert.match(html, /new closed bar is due/);
