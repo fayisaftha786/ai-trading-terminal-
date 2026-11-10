@@ -628,6 +628,12 @@ test("preflight enforces the daily cap against completed exchange orders from th
   assert.equal(result.status, 'blocked');
   assert.equal(result.exchange_daily_order_count, 1);
   assert.match(result.exchange_daily_order_start_date, /^\\d{4}-\\d{2}-\\d{2}T00:00:00\\.000Z$/);
+  const dailyCall = fake.calls.find((call) => call.path.includes("start_date="));
+  assert.ok(dailyCall);
+  const dailyQuery = new URL("https://api.coinbase.com" + dailyCall.path).searchParams;
+  assert.equal(dailyQuery.get("product_type"), "SPOT");
+  assert.equal(dailyQuery.get("start_date"), result.exchange_daily_order_start_date);
+  assert.equal(dailyQuery.has("order_status"), false);
   assert.ok(result.blockers.includes('maximum_daily_exchange_orders_reached'));
 });
 
