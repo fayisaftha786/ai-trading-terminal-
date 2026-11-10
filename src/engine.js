@@ -24,6 +24,7 @@ import { analyzeBinanceMultiTimeframeMarket, BINANCE_STRATEGY_BATCH_LIMIT, BINAN
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
+const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
 
 function jsonResponse(data, status = 200) {
@@ -186,6 +187,8 @@ export class TradingEngine extends DurableObject {
         : "binance_ticker_http_" + tickerResponse.status;
       const error = new Error(errorCode);
       error.status = tickerResponse.status;
+      const retryAfter = Number(tickerResponse.headers.get("retry-after"));
+      if (Number.isFinite(retryAfter) && retryAfter >= 0) error.retry_after_seconds = Math.min(86400, retryAfter);
       throw error;
     }
     const tickerPayload = await tickerResponse.json();
@@ -231,7 +234,10 @@ export class TradingEngine extends DurableObject {
         .map((item) => [item.symbol, item])
     );
 
-    const results = await mapWithConcurrency(symbols, 10, async (symbol) => {
+    // Stop fan-out on WAF blocks and IP rate limits. Do not retry alternate
+    // hosts or ignore Retry-After; suppress the remaining markets instead.
+    let providerCircuit = null;
+    const results = await mapWithConcurrency(symbols, 5, async (symbol) => {
       const ticker = tickerBySymbol.get(symbol);
       if (!ticker) {
         return {
@@ -244,16 +250,46 @@ export class TradingEngine extends DurableObject {
           paper_trade: { status: "BLOCKED", requires_owner_confirmation: true, order_created: false }
         };
       }
+      if (providerCircuit) {
+        providerCircuit.suppressed_markets += 1;
+        return {
+          symbol: symbol.slice(0, -4) + "/USDT",
+          binance_symbol: symbol,
+          status: "provider_error",
+          signal: "HOLD",
+          composite_score: 0,
+          risk_check: { passed: false, block_reasons: [providerCircuit.error_code, "provider_circuit_open"] },
+          paper_trade: {
+            status: "BLOCKED", requires_owner_confirmation: true, order_created: false,
+            note: "Provider fan-out stopped after a Binance security or rate-limit response."
+          }
+        };
+      }
 
       try {
         const base = "https://data-api.binance.vision/api/v3/";
         const cacheInfo = { reused_timeframes: [], refreshed_timeframes: [], stale_fallback_timeframes: [] };
         const fetchJson = async (url, label) => {
+          if (providerCircuit) throw new Error(providerCircuit.error_code);
           const response = await fetch(url, {
             headers: { "accept": "application/json" },
             signal: AbortSignal.timeout(12000)
           });
-          if (!response.ok) throw new Error("binance_" + label + "_http_" + response.status);
+          if (!response.ok) {
+            const status = Number(response.status);
+            const circuitCode = status === 403 ? "binance_provider_security_block_403"
+              : status === 418 ? "binance_provider_ip_banned_418"
+                : status === 429 ? "binance_provider_rate_limited_429" : null;
+            if (circuitCode && !providerCircuit) {
+              const retryAfter = Number(response.headers.get("retry-after"));
+              providerCircuit = {
+                error_code: circuitCode, http_status: status, endpoint: label,
+                retry_after_seconds: Number.isFinite(retryAfter) && retryAfter >= 0 ? Math.min(86400, retryAfter) : null,
+                tripped_at_ms: Date.now(), suppressed_markets: 0
+              };
+            }
+            throw new Error(providerCircuit?.error_code || "binance_" + label + "_http_" + status);
+          }
           return response.json();
         };
         const getCandles = async (label, interval, intervalMs) => {
@@ -355,6 +391,17 @@ export class TradingEngine extends DurableObject {
       analyzed_markets: results.filter((item) => item.status === "analyzed").length,
       candidate_count: results.filter((item) => item.signal === "LONG_CANDIDATE").length,
       paper_review_ready_count: results.filter((item) => item.paper_trade?.status === "PAPER_REVIEW_READY").length,
+      provider_diagnostics: {
+        status: providerCircuit ? "circuit_open" : "available",
+        error_code: providerCircuit?.error_code || null,
+        http_status: providerCircuit?.http_status || null,
+        endpoint: providerCircuit?.endpoint || null,
+        retry_after_seconds: providerCircuit?.retry_after_seconds ?? null,
+        suppressed_markets: providerCircuit?.suppressed_markets || 0,
+        note: providerCircuit
+          ? "Additional Binance requests were suppressed after a WAF/rate-limit response. Respect Retry-After and check provider access before retrying."
+          : "No WAF/rate-limit circuit was triggered by this analysis batch."
+      },
       fee_diagnostics: {
         status: verifiedFeeProfiles.size === symbols.length && symbols.length > 0
           ? "verified_for_all_markets" : verifiedFeeProfiles.size > 0 ? "partially_verified" : "configured_fallback",
@@ -454,7 +501,8 @@ export class TradingEngine extends DurableObject {
           ? runtime.last_scheduled_scan_status : "not_run";
         const currentMarkets = this.getMarkets().slice(0, PRODUCTS.length);
         const currentMarketFeed = assessMarketUniverse(
-          currentMarkets, PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
+          currentMarkets, PRODUCTS.map((product) => product.symbol), nowMs,
+          MAX_QUOTE_AGE_MS, MAX_ORDER_BOOK_AGE_MS
         );
         const currentMarketStatus = currentMarketFeed.healthy ? "healthy"
           : currentMarketFeed.healthy_market_count > 0 ? "partial" : "unavailable";
@@ -544,6 +592,14 @@ export class TradingEngine extends DurableObject {
        schedule_seconds: SCAN_INTERVAL_MS / 1000,
           live_trading_enabled: false, binance_testnet_enabled: false,
           market_data_status: currentMarketStatus,
+          market_freshness_policy: {
+            scheduler_interval_ms: SCAN_INTERVAL_MS,
+            quote_max_age_ms: MAX_QUOTE_AGE_MS,
+            order_book_max_age_ms: MAX_ORDER_BOOK_AGE_MS,
+            theoretical_book_fresh_window_ms: MAX_ORDER_BOOK_AGE_MS,
+            theoretical_stale_gap_between_scans_ms: Math.max(0, SCAN_INTERVAL_MS - MAX_ORDER_BOOK_AGE_MS),
+            note: "Order-book snapshots expire after the strict 15-second gate. With a 90-second full-scan cadence, current-feed health is expected to become unavailable between scans; entry gates remain strict."
+          },
           scheduler: {
             status: scheduler.status,
             last_alarm_at_ms: lastAlarmAtMs,
@@ -1681,7 +1737,8 @@ export class TradingEngine extends DurableObject {
       this.saveMarket(market, market.status === "live" ? "live" : "error");
     }
     const marketFeed = assessMarketUniverse(
-      markets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS
+      markets, PRODUCTS.map((product) => product.symbol), Date.now(),
+      MAX_QUOTE_AGE_MS, MAX_ORDER_BOOK_AGE_MS
     );
     const markBySymbol = this.buildPositionLockedBidMarks(markets, Date.now());
 
@@ -2810,7 +2867,8 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const nowMs = Date.now();
     const currentMarketFeed = assessMarketUniverse(
-      markets, PRODUCTS.map((product) => product.symbol), nowMs, MAX_QUOTE_AGE_MS
+      markets, PRODUCTS.map((product) => product.symbol), nowMs,
+      MAX_QUOTE_AGE_MS, MAX_ORDER_BOOK_AGE_MS
     );
     const lastScheduledScanAtMs = Number(runtime.last_scheduled_scan_at_ms);
     const lastScheduledScanAgeMs = Number.isFinite(lastScheduledScanAtMs) && lastScheduledScanAtMs > 0
