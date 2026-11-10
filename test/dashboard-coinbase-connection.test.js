@@ -25,7 +25,8 @@ test("premium Coinbase connection center exposes each independent account readin
     "Transfer disabled",
     "Spot products",
     "Available balances",
-    "Manual execution guard"
+    "Manual execution guard",
+    "Background order & fill sync"
   ]) {
     assert.ok(dashboard.includes(label), "missing connection check: " + label);
   }
