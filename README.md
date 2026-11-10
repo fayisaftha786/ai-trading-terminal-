@@ -4,7 +4,7 @@ Coinbase-only crypto market research and paper-trading platform with a Cloudflar
 
 ## Exchange scope
 
-- Coinbase is the only supported centralized exchange provider. Public ticker, order-book and candle research use Coinbase endpoints.
+- Coinbase is the only supported centralized-exchange account/order connector and the only provider for new live market snapshots and new PAPER entries. A narrow Bitstamp read-only compatibility path may continue marking an already-open legacy PAPER position that was originally opened from Bitstamp data; it cannot create new entries. Bitstamp is also used only for explicitly requested historical research backfill, not for ordinary market scans.
 - Solana token discovery through Jupiter is research and screening only; it does not submit swaps.
 - Coinbase Advanced Trade account connectivity and guarded order workflows remain separate features. They require explicit owner configuration, fresh preflight checks, bounded limits and confirmation.
 
@@ -17,7 +17,7 @@ Coinbase-only crypto market research and paper-trading platform with a Cloudflar
 
 ## Configuration
 
-The Python service defaults to Coinbase USD products (BTC/USD, ETH/USD, SOL/USD). The Cloudflare Worker uses Coinbase public market data and Coinbase Advanced Trade for its separately guarded account connector.
+The Python service defaults to Coinbase USD products (BTC/USD, ETH/USD, SOL/USD). The Cloudflare Worker uses Coinbase public market data and Coinbase Advanced Trade for its separately guarded account connector. A Bitstamp legacy-position exit path remains isolated by the original paper-trade provider tag until those older positions are closed.
 
 ## Validation
 
