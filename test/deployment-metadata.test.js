@@ -103,20 +103,31 @@ test("trading health requests can still respond when scheduler alarm setup fails
   assert.ok(engineSource.includes("try {\n        await this.ensureAlarm();\n      } catch (error)"));
 });
 
-test("research cache loads only the 150 closed candles required by the audit gates", () => {
-  assert.ok(engineSource.includes("ORDER BY candle_open_ms DESC LIMIT 150"));
-  assert.ok(!engineSource.includes("ORDER BY candle_open_ms DESC LIMIT 300"));
+test("research candle cache reads only the 150 closed bars required by audit gates", () => {
+  const cacheStart = engineSource.indexOf("  loadResearchCandleCache(");
+  const cacheEnd = engineSource.indexOf("\\n  }", cacheStart);
+  const cacheMethod = engineSource.slice(cacheStart, cacheEnd);
+  assert.ok(cacheMethod.includes("ORDER BY candle_open_ms DESC LIMIT 150"));
+  assert.ok(!cacheMethod.includes("LIMIT 300"));
 });
 
 test("10-second book refresh reuses loaded markets and avoids full-ledger portfolio aggregation", () => {
   const start = engineSource.indexOf("async refreshOrderBooksOnly()");
-  const end = engineSource.indexOf("getOpenTrades()", start);
+  const end = engineSource.indexOf("\\n  getOpenTrades() {", start);
   const refresh = engineSource.slice(start, end);
-  assert.equal((refresh.match(/this\\.getMarkets\\(\\)/g) || []).length, 1);
+  assert.equal(refresh.split("this.getMarkets()").length - 1, 1);
   assert.ok(refresh.includes("const refreshedMarkets = markets"));
   assert.ok(refresh.includes("this.buildPositionLockedBidMarks(refreshedMarkets, Date.now(), openTrades)"));
   assert.ok(refresh.includes("this.monitorExits(markBySymbol, risk, Date.now(), openTrades)"));
   assert.ok(!refresh.includes("this.portfolio("));
+});
+
+test("authentication limiter does not globally sweep its SQL table on every login", () => {
+  const limiterSource = readFileSync(new URL("../src/auth-rate-limiter.js", import.meta.url), "utf8");
+  assert.ok(limiterSource.includes("const windowMs = 10 * 60 * 1000;"));
+  assert.ok(limiterSource.includes("this.lastMaintenanceAtMs >= 60 * 60 * 1000"));
+  assert.ok(limiterSource.includes("DELETE FROM auth_login_attempts WHERE ip_hash=? AND attempted_at_ms < ?"));
+  assert.ok(limiterSource.includes("attemptLimit = 8"));
 });
 
 test("Durable Object failures return controlled HTTP 503 instead of an unhandled Worker exception", () => {

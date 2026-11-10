@@ -4,6 +4,7 @@ export class AuthRateLimiter extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.sql = ctx.storage.sql;
+    this.lastMaintenanceAtMs = 0;
     this.sql.exec(
       "CREATE TABLE IF NOT EXISTS auth_login_attempts (" +
       "id INTEGER PRIMARY KEY AUTOINCREMENT," +
@@ -46,10 +47,24 @@ export class AuthRateLimiter extends DurableObject {
       const nowMs = Date.now();
       const windowMs = 10 * 60 * 1000;
       const attemptLimit = 8;
+      // Remove expired attempts for this caller using the composite index.
+      // The global age/cap sweep runs at most once per warm DO instance per hour,
+      // not on every login request (which would scan the entire attempt table).
       this.sql.exec(
-        "DELETE FROM auth_login_attempts WHERE attempted_at_ms < ?",
-        nowMs - windowMs
+        "DELETE FROM auth_login_attempts WHERE ip_hash=? AND attempted_at_ms < ?",
+        ipHash, nowMs - windowMs
       );
+      if (nowMs - this.lastMaintenanceAtMs >= 60 * 60 * 1000) {
+        this.sql.exec(
+          "DELETE FROM auth_login_attempts WHERE attempted_at_ms < ?",
+          nowMs - windowMs
+        );
+        this.sql.exec(
+          "DELETE FROM auth_login_attempts WHERE id IN (" +
+          "SELECT id FROM auth_login_attempts ORDER BY attempted_at_ms DESC,id DESC LIMIT -1 OFFSET 10000)"
+        );
+        this.lastMaintenanceAtMs = nowMs;
+      }
 
       if (action === "clear") {
         this.sql.exec("DELETE FROM auth_login_attempts WHERE ip_hash=?", ipHash);
@@ -73,10 +88,6 @@ export class AuthRateLimiter extends DurableObject {
       this.sql.exec(
         "INSERT INTO auth_login_attempts(ip_hash,attempted_at_ms) VALUES(?,?)",
         ipHash, nowMs
-      );
-      this.sql.exec(
-        "DELETE FROM auth_login_attempts WHERE id IN (" +
-        "SELECT id FROM auth_login_attempts ORDER BY attempted_at_ms DESC,id DESC LIMIT -1 OFFSET 10000)"
       );
       return new Response(JSON.stringify({
         allowed: true,
