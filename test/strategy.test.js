@@ -457,7 +457,7 @@ test("market regime classifier fails closed for missing, invalid and discontinuo
 test("BTC-led market context requires fresh breadth and blocks risk-off regimes", () => {
   const now = Date.now();
   const row = (symbol, oneHour, sixHour, age = 1000) => ({
-    symbol, status: "live", ticker_time: new Date(now - age).toISOString(),
+    symbol, status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now - age).toISOString(),
     primary: { regime: oneHour }, higher: { regime: sixHour }
   });
   const riskOn = assessCrossMarketContext([
@@ -503,6 +503,24 @@ test("BTC-led market context requires fresh breadth and blocks risk-off regimes"
   assert.equal(stale.status, "unavailable");
   assert.equal(stale.mode, "BLOCKED");
   assert.equal(stale.allowed_for_long_entries, false);
+});
+
+
+test("legacy Bitstamp exit snapshots cannot influence cross-market entry context", () => {
+  const now = Date.now();
+  const rows = [
+    { symbol: "BTC/USD", status: "live", market_data_provider: "coinbase_exchange",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } },
+    { symbol: "ETH/USD", status: "live", market_data_provider: "coinbase_exchange",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } },
+    { symbol: "SOL/USD", status: "live", market_data_provider: "bitstamp_spot",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } }
+  ];
+  const result = assessCrossMarketContext(rows, now);
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.mode, "BLOCKED");
+  assert.deepEqual(result.missing_symbols, ["SOL/USD"]);
+  assert.equal(result.allowed_for_long_entries, false);
 });
 
 test("production candidate gate enforces BTC-led market context when supplied", () => {
