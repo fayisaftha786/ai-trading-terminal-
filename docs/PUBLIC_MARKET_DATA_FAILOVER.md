@@ -1,6 +1,6 @@
 # Coinbase public-data failover
 
-The Python FastAPI backend continues to prefer the configured CCXT exchange. If CCXT is unavailable, the exchange ID is unsupported, all configured markets fail, or OHLCV retrieval throws, the read-only Coinbase Exchange REST adapter is attempted.
+The Python FastAPI backend now uses Coinbase Exchange public REST directly for ticker, order-book and candle data. There is no alternate centralized-exchange provider.
 
 ## Data path
 
@@ -19,4 +19,4 @@ If any endpoint fails, quote timestamps are missing/stale, candle history is inc
 
 The existing application remains PAPER-only by default. Automatic entries still require a deliberate user opt-in, and the existing risk profile, daily cap, cooldown, position sizing and drawdown controls still apply. The 1h strategy uses 6h confirmation when Coinbase fallback is active; the actual interval is now passed to the candle-freshness gate and shown in scan output.
 
-This does not enable Binance production orders or Binance Spot Testnet. It does not promise profitability. Coinbase USD markets are not the same instrument as USDT markets, so the mapping has a small stablecoin basis risk that is not automatically hedged or converted.
+This does not enable live exchange orders. It does not promise profitability. Coinbase USD markets are not the same instrument as USDT markets, so the mapping has a small stablecoin basis risk that is not automatically hedged or converted.
