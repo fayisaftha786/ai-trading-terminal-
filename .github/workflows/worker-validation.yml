@@ -1,0 +1,35 @@
+name: Worker pull-request validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "test/**"
+      - "public/**"
+      - "scripts/check-dashboard-js.mjs"
+      - "package.json"
+      - "wrangler.jsonc"
+      - "wrangler.toml"
+      - ".github/workflows/worker-validation.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-worker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Validate source and browser JavaScript
+        run: npm run check
+      - name: Run complete unit test suite
+        run: npm test
+      - name: Build Cloudflare Worker dry run
+        run: npm run build
