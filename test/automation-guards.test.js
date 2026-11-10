@@ -442,7 +442,7 @@ test("diagnostic parser handles multiple markets, deduplicates and respects real
 });
 
 
-test("legacy Bitstamp exit snapshots validate exchange-side book timestamp as well as retrieval time", () => {
+test("legacy Bitstamp exit snapshots never satisfy Coinbase market-universe health", () => {
   const market = healthyMarket("SOL/USD");
   market.market_data_provider = "bitstamp_spot";
   market.data_quality = {
@@ -453,14 +453,19 @@ test("legacy Bitstamp exit snapshots validate exchange-side book timestamp as we
   };
   market.book_event_time_ms = NOW - 16000;
   const stale = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.equal(stale.healthy, false);
+  assert.ok(stale.issues[0].reason.includes("coinbase_market_data_required_for_new_entry_universe"));
   assert.ok(stale.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
 
   market.book_event_time_ms = NOW - 1000;
   const fresh = assessMarketUniverse([market], ["SOL/USD"], NOW);
-  assert.equal(fresh.healthy, true);
+  assert.equal(fresh.healthy, false);
+  assert.ok(fresh.issues[0].reason.includes("coinbase_market_data_required_for_new_entry_universe"));
 
   delete market.book_event_time_ms;
   const missing = assessMarketUniverse([market], ["SOL/USD"], NOW);
+  assert.equal(missing.healthy, false);
+  assert.ok(missing.issues[0].reason.includes("coinbase_market_data_required_for_new_entry_universe"));
   assert.ok(missing.issues[0].reason.includes("orderbook_exchange_timestamp_stale_or_missing"));
 });
 
