@@ -461,6 +461,12 @@ test("legacy Bitstamp exit snapshots never satisfy Coinbase market-universe heal
   const fresh = assessMarketUniverse([market], ["SOL/USD"], NOW);
   assert.equal(fresh.healthy, false);
   assert.ok(fresh.issues[0].reason.includes("coinbase_market_data_required_for_new_entry_universe"));
+  assert.equal(hasRecentHealthyScheduledScan({
+    status: "completed", scanAtMs: NOW - 1000,
+    healthyMarketCount: fresh.healthy_market_count,
+    expectedMarketCount: fresh.expected_market_count,
+    nowMs: NOW
+  }), false, "legacy exit data cannot satisfy the PAPER auto-entry enable gate");
 
   delete market.book_event_time_ms;
   const missing = assessMarketUniverse([market], ["SOL/USD"], NOW);
