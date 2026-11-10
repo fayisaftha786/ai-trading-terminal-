@@ -442,7 +442,7 @@ test("diagnostic parser handles multiple markets, deduplicates and respects real
 });
 
 
-test("market-universe gate validates exchange-side Bitstamp book timestamp as well as retrieval time", () => {
+test("legacy Bitstamp exit snapshots validate exchange-side book timestamp as well as retrieval time", () => {
   const market = healthyMarket("SOL/USD");
   market.market_data_provider = "bitstamp_spot";
   market.data_quality = {
@@ -465,7 +465,7 @@ test("market-universe gate validates exchange-side Bitstamp book timestamp as we
 });
 
 
-test("provider diagnostics are derived from current snapshots and preserve future timestamp evidence", () => {
+test("legacy Bitstamp exit diagnostics preserve provider and future timestamp evidence", () => {
   const market = healthyMarket("SOL/USD");
   market.market_data_provider = "bitstamp_spot";
   market.data_quality = {
