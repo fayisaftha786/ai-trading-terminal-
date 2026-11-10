@@ -90,7 +90,7 @@ No backtest or PAPER result authorizes real-money trading. Live execution remain
 
 ## 2026-11-10 deep-hardening update
 
-- L2 book freshness remains strictly limited to 15 seconds. A dedicated 10-second alarm refreshes only the order book from the selected Coinbase or Bitstamp venue; strategy/candle scans remain at 90 seconds. Failed, stale, unsupported or mismatched books fail closed.
+- L2 book freshness remains strictly limited to 15 seconds. A dedicated 10-second alarm refreshes Coinbase books for normal scans; it refreshes Bitstamp only for same-venue marking of pre-existing Bitstamp-entered paper positions. Strategy/candle scans remain at 90 seconds. Failed, stale, unsupported or mismatched books fail closed.
 - The short refresh path never recomputes entry signals and never opens new positions. It can update current PAPER bid marks and run simulated stop/target monitoring against the same selected provider. Refresh age, status, successes, failures and skipped markets are reported separately from full-scan health.
 - New long PAPER candidates require verified BTC-led 1H/6H regime and breadth. Missing/stale context is BLOCKED; BTC risk-off, broad downside or market-wide volatility expansion blocks long entries.
 - ATR expansion is checked against rolling history using the correct timeframe interval for 1m, 5m, 1h and 6h analysis.
