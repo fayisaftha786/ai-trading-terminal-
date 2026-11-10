@@ -63,7 +63,7 @@ The current repo implements a tested paper-first foundation. The following is th
 - Use a separate limited hot wallet with minimal capital and a signer behind a strict policy. Never use the user's main wallet seed phrase.
 - Recheck recent blockhash lifetime/expiry and transaction status before retrying.
 
-**Gate E:** external security review, jurisdiction/provider eligibility review, testnet/sandbox and failure-injection tests, full reconciliation, emergency stop, and a separately approved tiny-capital pilot. Live mode stays disabled until all requirements are satisfied.
+**Gate E:** external security review, jurisdiction/provider eligibility review, sandbox and failure-injection tests, full reconciliation, emergency stop, and a separately approved tiny-capital pilot. Live mode stays disabled until all requirements are satisfied.
 
 ## Phase F — Operations
 
