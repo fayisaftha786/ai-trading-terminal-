@@ -55,12 +55,20 @@ test("Binance signed read-only preflight verifies key permissions then reads spo
       assert.ok(parsed.searchParams.get("timestamp"));
       assert.match(parsed.searchParams.get("signature"), /^[a-f0-9]{64}$/);
       if (parsed.pathname.endsWith("/apiRestrictions")) return jsonResponse(safePermissions);
+      if (parsed.pathname === "/api/v3/account/commission") return jsonResponse({
+        symbol: parsed.searchParams.get("symbol"),
+        standardCommission: { maker: "0.001", taker: "0.001", buyer: "0.001", seller: "0.001" },
+        taxCommission: { maker: "0", taker: "0", buyer: "0", seller: "0" },
+        specialCommission: { maker: "0", taker: "0", buyer: "0", seller: "0" },
+        discount: { enabledForAccount: true, enabledForSymbol: true, discountAsset: "BNB", discount: "0.75" }
+      });
       if (parsed.pathname === "/api/v3/account") {
         return jsonResponse({
           balances: [
             { asset: "BTC", free: "0.01000000", locked: "0.00200000" },
             { asset: "USDT", free: "25.50", locked: "0.00" },
-            { asset: "ETH", free: "0", locked: "0" }
+            { asset: "ETH", free: "0", locked: "0" },
+            { asset: "BNB", free: "0.10", locked: "0" }
           ]
         });
       }
@@ -76,10 +84,20 @@ test("Binance signed read-only preflight verifies key permissions then reads spo
   ]);
   assert.equal(result.order_execution_available, false);
   assert.equal(result.live_trading_enabled, false);
+  assert.equal(result.fees.status, "verified");
+  assert.equal(result.fees.verified_count, 3);
+  assert.equal(result.fees.symbols[0].conservative_maker_bps, 10);
+  assert.equal(result.fees.symbols[0].conservative_taker_bps, 10);
+  assert.equal(result.fees.symbols[0].bnb_discount.potential_taker_bps_with_bnb, 2.5);
   assert.deepEqual(calls.map((call) => call.parsed.pathname), [
     "/sapi/v1/account/apiRestrictions",
-    "/api/v3/account"
+    "/api/v3/account",
+    "/api/v3/account/commission",
+    "/api/v3/account/commission",
+    "/api/v3/account/commission"
   ]);
+  assert.deepEqual(calls.slice(2).map((call) => call.parsed.searchParams.get("symbol")).sort(),
+    ["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
 });
 
 test("Binance connector refuses account sync when Spot trading permission is enabled", async () => {
