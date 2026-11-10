@@ -7,7 +7,7 @@ The project has two distinct PAPER surfaces:
 1. **Android Local PAPER:** Android app, public market data and a local virtual ledger. Manual entry and close require fresh quotes; stale cached prices fail closed.
 2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor. Main configures a 90-second delay between cycles; a cache-busting production probe after PR #66 merge reported `schedule_seconds: 90`, but the first pending alarm was inherited from the prior 15-minute schedule.
 
-The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet execution remain disabled. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
+The Cloudflare Worker is PAPER-only. Live exchange orders; Binance integrations have been removed. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
 
 ## Market-data integrity
 
@@ -34,7 +34,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders and Binance Testnet ex
 - PR #62 (same-provider Bitstamp failover and provider diagnostics) is merged.
 - PR #63 (lock PAPER position valuation and exits to the entry venue) is merged.
 - Their GitHub validation pipelines passed syntax checks, unit tests, Wrangler dry-run and local Durable Object/authentication/kill-switch smoke coverage.
-- Latest inspected production health sample at 2026-11-09 06:34:50 UTC: Worker API `ok`, mode `paper_only`, scheduler healthy, scheduled scan completed, 3/3 markets healthy, zero consecutive unhealthy scheduled scans, live trading OFF, Binance Testnet OFF.
+- Latest inspected production health sample at 2026-11-09 06:34:50 UTC: Worker API `ok`, mode `paper_only`, scheduler healthy, scheduled scan completed, 3/3 markets healthy, zero consecutive unhealthy scheduled scans, live trading OFF.
 - That health response reported Worker version ID `346f39e4-a348-4168-8155-cea45fe53faf`, timestamp `2026-11-09T06:32:23.657091Z`, but `worker_version.tag` was blank. It therefore did not prove which Git commit was deployed after PR #63. The response's provider list was also empty; provider-level health telemetry is being strengthened separately.
 - Android debug APK v0.7.1 is older than current source and is not production-signed. Physical installation on the owner's phone has not been verified.
 
@@ -78,7 +78,7 @@ Before any research hypothesis is promoted, require look-ahead/prefix-invariance
 
 ## Absolute guardrails
 
-- No real-money orders, exchange withdrawal permissions, wallet signing or Binance Testnet execution in this Cloudflare Worker.
+- No real-money orders, exchange withdrawal permissions, wallet signing in this Cloudflare Worker.
 - Never request or store passwords, API tokens, wallet seeds or recovery codes in source files, APKs or chat.
 - Never bypass stale-data, provider-consistency, depth, drawdown, scheduler or kill-switch gates to force automation.
 - Do not claim 100% profit, live execution, physical Android installation or cloud deployment unless that exact behaviour has been verified.
