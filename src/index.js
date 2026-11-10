@@ -177,6 +177,7 @@ export default {
         return addSecurityHeaders(json({
           ...payload,
           deployment_commit_sha: deploymentCommitSha,
+          deployment_provenance_status: deploymentCommitSha ? "verified" : "unverified",
           worker_version: workerVersion
         }));
       }

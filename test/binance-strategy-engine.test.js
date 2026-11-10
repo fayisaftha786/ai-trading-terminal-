@@ -15,6 +15,13 @@ test("Binance strategy uses persistent closed-candle cache and current REST dept
   assert.equal(engine.includes("ticker/24hr?symbols="), false);
   assert.ok(engine.includes("requestedSymbols = new Set"));
   assert.ok(engine.includes("stale_fallback_timeframes"));
+  assert.ok(engine.includes("providerCircuit"));
+  assert.ok(engine.includes('response.headers.get("retry-after")'));
+  assert.ok(engine.includes("mapWithConcurrency(symbols, 5"));
+  assert.ok(engine.includes("provider_diagnostics"));
+  assert.ok(engine.includes("binance_provider_ip_banned_418"));
+  assert.ok(engine.includes("binance_provider_rate_limited_429"));
+  assert.ok(engine.includes("market_freshness_policy"));
 });
 
 test("Binance strategy invalid-batch response matches the 50-symbol API limit", () => {
