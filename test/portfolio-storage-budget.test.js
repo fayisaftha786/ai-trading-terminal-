@@ -52,3 +52,12 @@ test("dashboard refresh does not poll trading mode and paper automation endpoint
   assert.ok(refreshStart >= 0);
   assert.ok(!refresh.includes("loadTradingMode()"));
 });
+
+
+test("equity snapshot retention uses a covering timestamp index and prunes once per ten inserts", () => {
+  assert.ok(engine.includes("CREATE INDEX IF NOT EXISTS idx_equity_snapshots_at_id ON equity_snapshots(at_ms DESC,id DESC)"));
+  assert.ok(engine.includes("VALUES(?,?,?,?,?,?) RETURNING id"));
+  assert.ok(engine.includes("snapshotId % 10 === 0"));
+  assert.ok(engine.includes("DELETE FROM equity_snapshots WHERE id NOT IN (SELECT id FROM equity_snapshots ORDER BY at_ms DESC,id DESC LIMIT 2000)"));
+  assert.ok(!engine.includes("DELETE FROM equity_snapshots WHERE at_ms NOT IN"));
+});

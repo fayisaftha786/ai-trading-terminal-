@@ -70,6 +70,7 @@ export class TradingEngine extends DurableObject {
       "CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_ip_time ON auth_login_attempts(ip_hash,attempted_at_ms)",
       "CREATE TABLE IF NOT EXISTS scan_cycles(cycle_key TEXT PRIMARY KEY,started_at_ms INTEGER NOT NULL)",
       "CREATE TABLE IF NOT EXISTS equity_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT,at_ms INTEGER NOT NULL,equity_usd REAL NOT NULL,realized_pnl_usd REAL NOT NULL,unrealized_pnl_usd REAL NOT NULL,open_positions INTEGER NOT NULL,drawdown_pct REAL NOT NULL)",
+      "CREATE INDEX IF NOT EXISTS idx_equity_snapshots_at_id ON equity_snapshots(at_ms DESC,id DESC)",
       "CREATE TABLE IF NOT EXISTS research_candles(exchange TEXT NOT NULL,product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,candle_open_ms INTEGER NOT NULL,open REAL NOT NULL,high REAL NOT NULL,low REAL NOT NULL,close REAL NOT NULL,volume REAL NOT NULL,received_at_ms INTEGER NOT NULL,schema_version INTEGER NOT NULL DEFAULT 1,PRIMARY KEY(exchange,product,timeframe_seconds,candle_open_ms))",
       "CREATE INDEX IF NOT EXISTS idx_research_candles_product_time ON research_candles(product,timeframe_seconds,candle_open_ms)",
       "CREATE TABLE IF NOT EXISTS research_history_state(product TEXT NOT NULL,timeframe_seconds INTEGER NOT NULL,bars_count INTEGER NOT NULL DEFAULT 0,first_candle_ms INTEGER,last_candle_ms INTEGER,cumulative_missing_intervals INTEGER NOT NULL DEFAULT 0,last_quality_check_at_ms INTEGER,last_ingested_at_ms INTEGER,last_quality_status TEXT NOT NULL DEFAULT 'not_started',PRIMARY KEY(product,timeframe_seconds))",
@@ -1677,12 +1678,17 @@ export class TradingEngine extends DurableObject {
       }
     }
     const updatedPortfolio = this.portfolio(markBySymbol, risk, Date.now());
-    this.sql.exec(
-      "INSERT INTO equity_snapshots(at_ms,equity_usd,realized_pnl_usd,unrealized_pnl_usd,open_positions,drawdown_pct) VALUES(?,?,?,?,?,?)",
+    const snapshotInsert = this.sql.exec(
+      "INSERT INTO equity_snapshots(at_ms,equity_usd,realized_pnl_usd,unrealized_pnl_usd,open_positions,drawdown_pct) VALUES(?,?,?,?,?,?) RETURNING id",
       Date.now(), updatedPortfolio.equity_usd, updatedPortfolio.realized_pnl_usd, updatedPortfolio.unrealized_pnl_usd,
       updatedPortfolio.open_positions, updatedPortfolio.drawdown_pct_from_peak
-    );
-    this.sql.exec("DELETE FROM equity_snapshots WHERE at_ms NOT IN (SELECT at_ms FROM equity_snapshots ORDER BY at_ms DESC LIMIT 2000)");
+    ).toArray();
+    const snapshotId = Number(snapshotInsert[0]?.id);
+    // Keep up to nine extra rows between maintenance passes while avoiding a
+    // 2,000-row retention scan on every 90-second market cycle.
+    if (Number.isSafeInteger(snapshotId) && snapshotId % 10 === 0) {
+      this.sql.exec("DELETE FROM equity_snapshots WHERE id NOT IN (SELECT id FROM equity_snapshots ORDER BY at_ms DESC,id DESC LIMIT 2000)");
+    }
     const runtimeUpdate = {
       next_alarm_at_ms: previousRuntime.next_alarm_at_ms ?? null,
       last_scheduled_alarm_at_ms: previousRuntime.last_scheduled_alarm_at_ms ?? null,
