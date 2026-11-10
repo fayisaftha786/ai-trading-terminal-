@@ -70,21 +70,35 @@ test("production watchdog checks the injected deployment SHA, not optional versi
   assert.match(watchdogWorkflow, /strict 15-second freshness gate/);
 });
 
-test("login rate limiting is independent of scheduler alarm initialization", () => {
-  const fetchStart = engineSource.indexOf("async fetch(request) {");
-  const authRoute = engineSource.indexOf(
-    'if (request.method === "POST" && url.pathname === "/internal/auth/login-attempts")',
-    fetchStart
-  );
-  const alarmInitialization = engineSource.indexOf("await this.ensureAlarm();", fetchStart);
-  assert.ok(fetchStart >= 0, "Durable Object fetch handler must exist");
-  assert.ok(authRoute > fetchStart, "internal login rate-limit route must be inside fetch");
-  assert.ok(alarmInitialization > authRoute, "login rate-limit route must run before scheduler alarm initialization");
+const authLimiterSource = readFileSync(new URL("../src/auth-rate-limiter.js", import.meta.url), "utf8");
+const workerConfigSource = readFileSync(new URL("../wrangler.jsonc", import.meta.url), "utf8");
+
+test("owner login uses a dedicated Durable Object rate limiter, not the trading engine", () => {
+  const loginStart = workerSource.indexOf("async function login(request, env)");
+  const routeStart = workerSource.indexOf("async function routeApi", loginStart);
+  const loginSource = workerSource.slice(loginStart, routeStart);
+  assert.ok(workerSource.includes('import { AuthRateLimiter } from "./auth-rate-limiter.js";'));
+  assert.ok(loginSource.includes("env.AUTH_RATE_LIMITER.idFromName"));
+  assert.ok(loginSource.includes("limiter.fetch("));
+  assert.ok(!loginSource.includes("TRADING_ENGINE") && !loginSource.includes("engine.fetch("));
 });
 
-test("login rate-limit backend failures are logged without exposing internal details to the client", () => {
-  assert.match(workerSource, /console\.error\("Login rate-limit reserve request failed"/);
-  assert.match(workerSource, /console\.error\("Login rate-limit reserve returned a non-success response"/);
-  assert.match(workerSource, /console\.error\("Login rate-limit clear request failed"/);
-  assert.match(workerSource, /error: "login_rate_limit_unavailable"/);
+test("dedicated rate limiter enforces eight attempts per ten-minute window", () => {
+  assert.ok(authLimiterSource.includes("const windowMs = 10 * 60 * 1000;"));
+  assert.ok(authLimiterSource.includes("const attemptLimit = 8;"));
+  assert.ok(authLimiterSource.includes("too_many_login_attempts"));
+  assert.ok(authLimiterSource.includes("rate_limit_storage_unavailable"));
+  assert.ok(authLimiterSource.includes("ip_hash TEXT NOT NULL"));
+  assert.ok(!authLimiterSource.includes("cf-connecting-ip"));
+});
+
+test("Wrangler registers the isolated auth limiter as a new SQLite Durable Object migration", () => {
+  assert.ok(workerConfigSource.includes('"name": "AUTH_RATE_LIMITER", "class_name": "AuthRateLimiter"'));
+  assert.ok(workerConfigSource.includes('"tag": "v1", "new_sqlite_classes": ["TradingEngine"]'));
+  assert.ok(workerConfigSource.includes('"tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"]'));
+});
+
+test("trading health requests can still respond when scheduler alarm setup fails", () => {
+  assert.ok(engineSource.includes("Trading engine alarm initialization failed"));
+  assert.ok(engineSource.includes("try {\n        await this.ensureAlarm();\n      } catch (error)"));
 });

@@ -1,6 +1,7 @@
 import { TradingEngine } from "./engine.js";
+import { AuthRateLimiter } from "./auth-rate-limiter.js";
 
-export { TradingEngine };
+export { TradingEngine, AuthRateLimiter };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -99,12 +100,12 @@ async function login(request, env) {
   if (username.length > 128 || password.length > 256) return json({ error: "invalid_credentials" }, 401);
   const sourceIp = request.headers.get("cf-connecting-ip") || "unknown";
   const ipHash = toBase64Url(await keyedFingerprint(sourceIp, env.SESSION_SECRET));
-  const engineId = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
-  const engine = env.TRADING_ENGINE.get(engineId);
+  const limiterId = env.AUTH_RATE_LIMITER.idFromName("single-owner-auth-rate-limit-v1");
+  const limiter = env.AUTH_RATE_LIMITER.get(limiterId);
   const rateLimitUrl = "https://internal.local/internal/auth/login-attempts";
   let rateLimitResponse;
   try {
-    rateLimitResponse = await engine.fetch(new Request(rateLimitUrl, {
+    rateLimitResponse = await limiter.fetch(new Request(rateLimitUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "reserve", ip_hash: ipHash })
@@ -132,7 +133,7 @@ async function login(request, env) {
   // A correct login resets only this source's failed-attempt history.
   let clearResponse;
   try {
-    clearResponse = await engine.fetch(new Request(rateLimitUrl, {
+    clearResponse = await limiter.fetch(new Request(rateLimitUrl, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "clear", ip_hash: ipHash })

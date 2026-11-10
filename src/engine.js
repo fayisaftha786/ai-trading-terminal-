@@ -145,49 +145,16 @@ export class TradingEngine extends DurableObject {
   async fetch(request) {
     const url = new URL(request.url);
     try {
-      // Internal-only: reached through the Worker's direct Durable Object binding.
-      // Authentication throttling must not depend on scheduler alarm startup.
-      // This keeps owner login available if the market-scan alarm is temporarily unavailable.
-      // Persist a one-way source-IP hash, never the raw address.
-      if (request.method === "POST" && url.pathname === "/internal/auth/login-attempts") {
-        let body;
-        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request" }, 400); }
-        const ipHash = typeof body?.ip_hash === "string" ? body.ip_hash : "";
-        const action = body?.action;
-        if (!/^[A-Za-z0-9_-]{40,64}$/.test(ipHash) ||
-            (action !== "reserve" && action !== "clear")) {
-          return jsonResponse({ error: "invalid_request" }, 400);
-        }
-        const nowMs = Date.now();
-        const windowMs = 10 * 60 * 1000;
-        const attemptLimit = 8;
-        this.sql.exec("DELETE FROM auth_login_attempts WHERE attempted_at_ms < ?", nowMs - windowMs);
-        if (action === "clear") {
-          this.sql.exec("DELETE FROM auth_login_attempts WHERE ip_hash=?", ipHash);
-          return jsonResponse({ cleared: true });
-        }
-        const attempts = Number(this.sql.exec(
-          "SELECT COUNT(*) AS count FROM auth_login_attempts WHERE ip_hash=? AND attempted_at_ms>=?",
-          ipHash, nowMs - windowMs
-        ).toArray()[0]?.count || 0);
-        if (attempts >= attemptLimit) {
-          return jsonResponse({ allowed: false, error: "too_many_login_attempts" }, 429);
-        }
-        this.sql.exec(
-          "INSERT INTO auth_login_attempts(ip_hash,attempted_at_ms) VALUES(?,?)",
-          ipHash, nowMs
-        );
-        // Bound storage when attempts arrive from many different source IPs.
-        this.sql.exec(
-          "DELETE FROM auth_login_attempts WHERE id IN (" +
-          "SELECT id FROM auth_login_attempts ORDER BY attempted_at_ms DESC,id DESC LIMIT -1 OFFSET 10000)"
-        );
-        return jsonResponse({ allowed: true, attempts_remaining: attemptLimit - attempts - 1 });
+      // Alarm setup is best-effort for interactive API requests. Keep health and
+      // owner diagnostics reachable if the scheduler alarm/storage path is degraded.
+      try {
+        await this.ensureAlarm();
+      } catch (error) {
+        console.error("Trading engine alarm initialization failed", {
+          name: typeof error?.name === "string" ? error.name : "Error",
+          message: String(error?.message || error).slice(0, 180)
+        });
       }
-
-      // Scheduler initialization belongs to trading/health requests, not the auth
-      // limiter. Keep it after the isolated internal login-throttle route.
-      await this.ensureAlarm();
 
       if (request.method === "GET" && url.pathname === "/api/health") {
         // Expose only non-sensitive scheduler telemetry publicly so an external
