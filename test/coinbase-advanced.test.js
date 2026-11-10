@@ -96,7 +96,7 @@ async function verifyJwt(token, publicKeyPem) {
   );
   return { header, payload, valid };
 }
-function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, dailyOrders, dailyOrderPages, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, dailyOrders, dailyOrderPages, feeSummary, feeSummaryStatus = 200, feeSummaryError = false, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -111,6 +111,12 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
     calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: options.body ? JSON.parse(options.body) : null });
     if (parsed.pathname.endsWith("/key_permissions")) {
       return Response.json(permissions || { can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "portfolio-test" });
+    }
+    if (parsed.pathname.endsWith("/transaction_summary")) {
+      if (feeSummaryError) return Response.json({ error: "fee_summary_unavailable" }, { status: feeSummaryStatus });
+      return Response.json(feeSummary || {
+        fee_tier: { pricing_tier: "Advanced 1", maker_fee_rate: "0.0009", taker_fee_rate: "0.0010" }
+      });
     }
     if (parsed.pathname.endsWith("/accounts")) {
       return Response.json(accounts || {
@@ -228,7 +234,7 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
 });
 
-test("current Coinbase Ed25519 CDP key completes read-only account preflight", async () => {
+test("current Coinbase Ed25519 CDP key completes read-only preflight and verifies SPOT fee tier", async () => {
   const credentials = makeEd25519Credentials();
   const env = makeEd25519Env(credentials.privateKeyPem, credentials);
   const fake = mockApi(env);
@@ -237,9 +243,68 @@ test("current Coinbase Ed25519 CDP key completes read-only account preflight", a
   assert.equal(result.permissions.can_view, true);
   assert.equal(result.permissions.can_transfer, false);
   assert.deepEqual(result.eligible_products, ["BTC-USD"]);
-  assert.ok(fake.calls.length >= 3);
+  assert.deepEqual(result.fee_summary, {
+    status: "verified",
+    source: "coinbase_advanced_transaction_summary",
+    product_type: "SPOT",
+    pricing_tier: "advanced_1",
+    maker_fee_rate: "0.0009",
+    maker_fee_bps: 9,
+    taker_fee_rate: "0.0010",
+    taker_fee_bps: 10,
+    checked_at_ms: result.fee_summary.checked_at_ms,
+    note: "Account spot tier snapshot only; per-order preview remains authoritative. Not automatically applied to PAPER risk settings."
+  });
+  assert.ok(result.fee_summary.checked_at_ms > 0);
+  const feeCall = fake.calls.find((call) => call.path === "/api/v3/brokerage/transaction_summary?product_type=SPOT");
+  assert.equal(feeCall.method, "GET");
   assert.ok(fake.calls.every((call) => call.path.startsWith("/api/v3/brokerage/")));
+  assert.ok(fake.calls.every((call) => call.method === "GET"), "preflight and fee-tier lookup must remain read-only");
 });
+
+test("SPOT fee-tier lookup failure is visible but never blocks safe account preflight", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, { feeSummaryError: true, feeSummaryStatus: 403 });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "preflight_ready_for_manual_order_preview");
+  assert.deepEqual(result.fee_summary, {
+    status: "unavailable",
+    reason: "coinbase_advanced_auth_or_permission_rejected"
+  });
+  assert.equal(fake.calls.some((call) => call.path.includes("/transaction_summary")), true);
+});
+
+test("malformed or excessive Coinbase fee rates are rejected without making fee lookup a preflight blocker", async () => {
+  const env = makeEnv();
+  const invalidSamples = [
+    { maker_fee_rate: "not-a-rate", taker_fee_rate: "0.001" },
+    { maker_fee_rate: "0.0009", taker_fee_rate: "-0.001" },
+    { maker_fee_rate: "0.0009", taker_fee_rate: "0.5" },
+    { maker_fee_rate: "0.0009" }
+  ];
+  for (const fee_tier of invalidSamples) {
+    const fake = mockApi(env, { feeSummary: { fee_tier } });
+    const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+    assert.equal(result.status, "preflight_ready_for_manual_order_preview");
+    assert.equal(result.fee_summary.status, "unavailable");
+    assert.match(result.fee_summary.reason, /^coinbase_spot_fee_/);
+  }
+});
+
+test("SPOT fee summary is not requested when the CDP key lacks View permission", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, {
+    permissions: { can_view: false, can_trade: false, can_transfer: false }
+  });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "blocked");
+  assert.deepEqual(result.fee_summary, {
+    status: "not_checked",
+    reason: "view_permission_not_verified"
+  });
+  assert.equal(fake.calls.some((call) => call.path.includes("/transaction_summary")), false);
+});
+
 
 test("EdDSA JWT from recommended Coinbase CDP Ed25519 PKCS8 PEM verifies", async () => {
   const credentials = makeEd25519Credentials();

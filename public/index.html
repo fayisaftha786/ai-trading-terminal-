@@ -410,6 +410,8 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
   const balances=result?.balances&&typeof result.balances==="object"?result.balances:{};
   const configured=status?.credentials_configured===true;
   const background=result?.background_reconciliation||status?.background_reconciliation||{};
+  const feeSummary=result?.fee_summary||{status:"not_checked",reason:"view_permission_not_verified"};
+  const feeVerified=feeSummary.status==="verified"&&Number.isFinite(feeSummary.maker_fee_bps)&&Number.isFinite(feeSummary.taker_fee_bps);
   const backgroundStatus=String(background.status||"waiting");
   const backgroundDetail=!background.enabled?"Waiting for Coinbase Worker credentials"
     :backgroundStatus==="healthy"?"Scheduled order/fill sync · "+String(background.checked||0)+" order(s) checked"
@@ -423,6 +425,9 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
     {title:"View permission",detail:hasPreflight?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasPreflight},
     {title:"Trade permission",detail:hasPreflight?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasPreflight},
     {title:"Transfer disabled",detail:hasPreflight?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasPreflight},
+    {title:"SPOT fee tier",detail:feeVerified
+      ?String(feeSummary.pricing_tier||"tier unlabelled")+" · maker "+String(feeSummary.maker_fee_bps)+" bps / taker "+String(feeSummary.taker_fee_bps)+" bps"
+      :String(feeSummary.reason||"Fee tier not checked").replace(/_/g," "),ok:feeVerified,known:hasPreflight&&feeSummary.status!=="not_checked"},
     {title:"Spot products",detail:hasPreflight?(eligible.length?eligible.length+" eligible product(s)":products.length+" checked · none eligible"):"Not verified",ok:ready&&eligible.length>0,known:hasPreflight},
     {title:"Available balances",detail:hasPreflight?(Object.keys(balances).length?Object.keys(balances).length+" currency balance(s) loaded":"No eligible balances returned"):"Not verified",ok:hasPreflight&&Object.keys(balances).length>0,known:hasPreflight},
     {title:"Manual execution guard",detail:result?.order_submission_available===true?"Manual order path passed dynamic preflight":"Locked until Trade permission, Worker switch, allowlist, quote cap and order limits pass",ok:result?.order_submission_available===true,known:hasPreflight},
@@ -504,6 +509,9 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
     caps.push("exchange daily orders "+(hasPreflight?String(result?.exchange_daily_order_count??"unknown"):"not checked")+"/"+String(status?.max_daily_orders??"—"));
     caps.push("daily orders "+String(status?.max_daily_orders??"—"));
     caps.push("execution switch "+(status?.order_execution_configured?"ON":"OFF"));
+    caps.push(feeVerified
+      ?"SPOT fees: maker "+String(feeSummary.maker_fee_bps)+" bps / taker "+String(feeSummary.taker_fee_bps)+" bps · account tier snapshot"
+      :"SPOT fees: "+String(feeSummary.reason||"not checked").replace(/_/g," "));
     limits.textContent=caps.join(" · ");
   }
   const summary=[];
@@ -567,6 +575,7 @@ async function runCoinbasePreflight({silent=false,force=false}={}){
         eligible_products:result.eligible_products||[],
         products:result.products||[],
         balances:result.balances||{},
+        fee_summary:result.fee_summary||{status:"not_checked"},
         blockers:result.blockers||[],
         account_count:result.account_count??null,
         account_pagination_complete:result.account_pagination_complete??null,
