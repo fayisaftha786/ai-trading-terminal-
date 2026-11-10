@@ -1093,13 +1093,14 @@ async function runBinanceStrategy(){
   button.textContent="Analyzing 0/50…";
   $("aiBrainFeed").textContent="ANALYZING";
   $("aiBrainFeed").className="tag";
-  $("aiBrainStatus").textContent="Running two parallel batches of up to 25 Binance Spot markets. Closed 15m/1h/4h candles are cached until the next bar closes; current ticker and order-book depth remain fresh on every scan. No trades are being placed.";
+  $("aiBrainStatus").textContent="Running one 50-market Binance Spot batch with bounded parallel requests. Closed 15m/1h/4h candles are cached until the next bar closes; current ticker and order-book depth remain fresh on every scan. No trades are being placed.";
   binanceStrategyResults=[];
   renderBinanceStrategyRows();
   const chunks=[];
-  for(let index=0;index<symbols.length;index+=25)chunks.push(symbols.slice(index,index+25));
+  for(let index=0;index<symbols.length;index+=50)chunks.push(symbols.slice(index,index+50));
   let completed=0;
   let failures=0;
+  setAiBrainProgress(0,symbols.length,"Running a single request · up to 10 markets analyzed in parallel · candle cache active");
   try{
     await Promise.all(chunks.map(async(chunk)=>{
       try{
