@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 const html = readFileSync(new URL("../public/index.html", import.meta.url), "utf8");
+const engine = readFileSync(new URL("../src/engine.js", import.meta.url), "utf8");
+const marketData = readFileSync(new URL("../src/coinbase.js", import.meta.url), "utf8");
 const readme = readFileSync(new URL("../README.md", import.meta.url), "utf8");
 const cloudflareGuide = readFileSync(new URL("../docs/CLOUDFLARE_FREE_PAPER_AUTOMATION.md", import.meta.url), "utf8");
 
