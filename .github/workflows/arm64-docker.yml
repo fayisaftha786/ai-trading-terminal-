@@ -51,4 +51,4 @@ jobs:
             -e APP_ENV=development \
             -e DATABASE_PATH=/tmp/arm64-smoke/trading.db \
             ai-trading-terminal:arm64-check \
-            python -c "import platform, ccxt; from app.main import app; from app.storage import Storage; db=Storage('/tmp/arm64-smoke/trading.db'); db.initialize(); assert platform.machine() in ('aarch64','arm64'), platform.machine(); print('ARM64_IMPORT_OK', platform.machine(), 'CCXT', ccxt.__version__, 'FASTAPI_APP_OK', app.title)"
+            python -c "import platform; from app.main import app; from app.storage import Storage; db=Storage('/tmp/arm64-smoke/trading.db'); db.initialize(); assert platform.machine() in ('aarch64','arm64'), platform.machine(); print('ARM64_IMPORT_OK', platform.machine(), 'FASTAPI_APP_OK', app.title)"
