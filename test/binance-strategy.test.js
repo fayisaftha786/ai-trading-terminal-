@@ -121,3 +121,20 @@ test("candle cache refreshes for missing, insufficient or gapped history", () =>
   rows.splice(85, 1);
   assert.equal(shouldRefreshBinanceCandleCache(rows, 900_000, nowMs), true);
 });
+
+test("eight specialist votes are explicit and volume confirmation can veto an otherwise bullish setup", () => {
+  const input = validInput();
+  const result = analyzeBinanceMultiTimeframeMarket(input);
+  assert.equal(result.strategy_committee.total_votes, 8);
+  assert.equal(result.strategy_committee.votes.length, 8);
+  assert.equal(result.strategy_committee.mode, "transparent_deterministic_specialist_consensus");
+  assert.equal(result.score_is_probability, false);
+
+  const weakVolume = validInput();
+  for (const row of weakVolume.candlesByInterval["15m"].slice(-20)) row[5] = "400";
+  const blocked = analyzeBinanceMultiTimeframeMarket(weakVolume);
+  const volumeVote = blocked.strategy_committee.votes.find((vote) => vote.id === "volume");
+  assert.equal(volumeVote.approved, false);
+  assert.equal(blocked.signal, "HOLD");
+  assert.ok(blocked.risk_check.block_reasons.includes("trigger_15m_participation"));
+});
