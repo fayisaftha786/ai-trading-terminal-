@@ -994,14 +994,30 @@ export async function fetchProductSnapshot(
       ? "coinbase_unavailable_for_existing_bitstamp_position"
       : "coinbase_snapshot_incomplete_for_existing_bitstamp_position";
     if (snapshotIsEntryReady(backup, Date.now())) return backup;
+    const fallbackNowMs = Date.now();
+    const fallbackQuoteAgeMs = fallbackNowMs - Number(backup.quote_received_at_ms);
+    const fallbackTickerTimeMs = Date.parse(backup.ticker_time || "");
+    const fallbackTickerAgeMs = fallbackNowMs - fallbackTickerTimeMs;
+    const fallbackQuoteUsable = backup.market_data_provider === "bitstamp_spot" &&
+      backup.status === "live" &&
+      [backup.bid, backup.ask, backup.last].every((value) => Number.isFinite(value) && value > 0) &&
+      backup.ask >= backup.bid &&
+      Number.isFinite(fallbackQuoteAgeMs) && fallbackQuoteAgeMs >= -5000 && fallbackQuoteAgeMs <= 120000 &&
+      Number.isFinite(fallbackTickerTimeMs) && fallbackTickerAgeMs >= -5000 && fallbackTickerAgeMs <= 120000 &&
+      backup.data_quality?.ticker_provider === "bitstamp_spot";
+    if (fallbackQuoteUsable) {
+      // Legacy positions may use only their original venue's fresh bid to
+      // preserve exit marking. Incomplete candles/books still fail market health
+      // and cannot be considered for any new entry.
+      backup.data_quality.legacy_exit_quote_only = true;
+      return backup;
+    }
     if (primary) {
-      // Preserve a valid Coinbase quote for any Coinbase-entered position.
-      if (Number.isFinite(primary.bid) && primary.bid > 0 &&
-          Number.isFinite(primary.ask) && primary.ask >= primary.bid) {
-        primary.data_quality.legacy_provider_fallback_attempted = true;
-        primary.data_quality.legacy_provider_fallback_error = "bitstamp_snapshot_incomplete";
-        return primary;
-      }
+      // A Coinbase quote must never be substituted for a Bitstamp-entered
+      // position. Returning it lets the provider lock reject the mark safely.
+      primary.data_quality.legacy_provider_fallback_attempted = true;
+      primary.data_quality.legacy_provider_fallback_error = "bitstamp_snapshot_incomplete_or_stale";
+      return primary;
     }
     return backup;
   } catch (backupError) {
