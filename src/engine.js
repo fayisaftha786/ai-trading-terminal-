@@ -19,6 +19,7 @@ import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakePr
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
+import { binanceReadOnlyStatus, preflightBinanceReadOnly } from "./binance-readonly.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -567,6 +568,12 @@ export class TradingEngine extends DurableObject {
           live_execution_enabled: false,
           real_connection_status: live.credentials_configured ? "credentials_configured_preflight_required" : "not_configured"
         });
+      }
+      if (request.method === "GET" && url.pathname === "/api/binance/status") {
+        return jsonResponse(binanceReadOnlyStatus(this.env));
+      }
+      if (request.method === "POST" && url.pathname === "/api/binance/preflight") {
+        return jsonResponse(await preflightBinanceReadOnly(this.env));
       }
       if (request.method === "GET" && url.pathname === "/api/live/status") {
         return jsonResponse(coinbaseAdvancedStatus(this.env));
