@@ -69,3 +69,22 @@ test("production watchdog checks the injected deployment SHA, not optional versi
   assert.match(watchdogWorkflow, /freshness_state: currentFeed\.freshness_state/);
   assert.match(watchdogWorkflow, /strict 15-second freshness gate/);
 });
+
+test("login rate limiting is independent of scheduler alarm initialization", () => {
+  const fetchStart = engineSource.indexOf("async fetch(request) {");
+  const authRoute = engineSource.indexOf(
+    'if (request.method === "POST" && url.pathname === "/internal/auth/login-attempts")',
+    fetchStart
+  );
+  const alarmInitialization = engineSource.indexOf("await this.ensureAlarm();", fetchStart);
+  assert.ok(fetchStart >= 0, "Durable Object fetch handler must exist");
+  assert.ok(authRoute > fetchStart, "internal login rate-limit route must be inside fetch");
+  assert.ok(alarmInitialization > authRoute, "login rate-limit route must run before scheduler alarm initialization");
+});
+
+test("login rate-limit backend failures are logged without exposing internal details to the client", () => {
+  assert.match(workerSource, /console\.error\("Login rate-limit reserve request failed"/);
+  assert.match(workerSource, /console\.error\("Login rate-limit reserve returned a non-success response"/);
+  assert.match(workerSource, /console\.error\("Login rate-limit clear request failed"/);
+  assert.match(workerSource, /error: "login_rate_limit_unavailable"/);
+});
