@@ -59,7 +59,6 @@ def main() -> int:
     paper_source = (ROOT / "app/services/paper.py").read_text(encoding="utf-8")
     automation_source = (ROOT / "app/services/automation.py").read_text(encoding="utf-8")
     storage_source = (ROOT / "app/storage.py").read_text(encoding="utf-8")
-    testnet_source = (ROOT / "app/services/testnet.py").read_text(encoding="utf-8")
     schema_source = (ROOT / "app/schemas.py").read_text(encoding="utf-8")
     android_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/MainActivity.java").read_text(encoding="utf-8")
     android_manifest = (ROOT / "android/app/src/main/AndroidManifest.xml").read_text(encoding="utf-8")
@@ -133,16 +132,6 @@ def main() -> int:
         "performance_reporting_present": (ROOT / "app/services/performance.py").is_file(),
         "performance_tests_present": (ROOT / "tests/test_performance.py").is_file(),
         "restart_exit_recovery_present": "startup_exit_recovery" in main_source,
-        "testnet_connection_is_sandboxed": "exchange.set_sandbox_mode(True)" in (ROOT / "app/services/testnet.py").read_text(),
-        "testnet_orders_require_explicit_local_gate": "binance_testnet_order_enabled" in (ROOT / "app/services/testnet.py").read_text() and "BINANCE_TESTNET_ORDER_ENABLED=false" in (ROOT / ".env.example").read_text(),
-        "testnet_limit_only_order_path": '"limit", side, amount, price' in (ROOT / "app/services/testnet.py").read_text(),
-        "testnet_idempotency_ledger_present": "idempotency_key TEXT NOT NULL UNIQUE" in storage_source and "client_order_id TEXT NOT NULL UNIQUE" in storage_source,
-        "testnet_unknown_state_blocks_retry": "state {existing['status']}" in (ROOT / "app/services/testnet.py").read_text() and '"UNKNOWN"' in (ROOT / "app/services/testnet.py").read_text(),
-        "testnet_orders_have_refresh_and_cancel_routes": all(route in main_source for route in ('/api/testnet/orders/{client_order_id}/refresh', '/api/testnet/orders/{client_order_id}/cancel')),
-        "testnet_emergency_lock_is_persistent": 'storage.set_setting("testnet_order_halted", True)' in (ROOT / "app/services/testnet.py").read_text() and '/api/testnet/kill-switch/reset' in main_source,
-        "testnet_submit_and_emergency_stop_serialized": "threading.RLock()" in (ROOT / "app/services/testnet.py").read_text() and "with self._order_lock:" in (ROOT / "app/services/testnet.py").read_text(),
-        "testnet_orders_ui_present": 'id="testnetOrderForm"' in (ROOT / "static/index.html").read_text() and "loadtestnet" in frontend_source and 'id="testnetStopBtn"' in (ROOT / "static/index.html").read_text(),
-        "testnet_does_not_enable_live_orders": "live_trading_enabled: bool = False" in (ROOT / "app/settings.py").read_text(),
         "indicator_analyzer_uses_wilder_adx_and_direction": all(token in strategy_source for token in ("Wilder RSI", "_wilder_atr_adx", "plus_di14", "ema20_slope_pct")),
         "raw_candle_integrity_detects_duplicates_and_alignment": all(token in strategy_source for token in ("candle_integrity_report", "duplicate_timestamps", "off_grid_timestamps", "missing_intervals")),
         "market_data_gaps_force_hold": "if not primary_clean or not higher_clean" in market_data_source and 'analysis["regime"] = "DATA_GAP"' in market_data_source,
@@ -156,10 +145,6 @@ def main() -> int:
         "automatic_paper_position_size_includes_observed_spread": "_entry_spread_bps" in automation_source and "extra_round_trip_cost_bps" in risk_source,
         "paper_take_profit_uses_target_reference_price": 'self.close(trade["id"], float(trade["take_profit"]), "take_profit")' in paper_source,
         "corrupt_trade_metadata_cannot_block_exit": "metadata_recovered" in paper_source,
-        "unknown_exchange_order_status_fails_closed": 'get(status, "UNKNOWN")' in testnet_source,
-        "definitive_exchange_rejections_are_classified": 'exc_name in self.DEFINITIVE_REJECTIONS' in testnet_source,
-        "testnet_refresh_cancel_share_order_lock": all("with self._order_lock:" in testnet_source for _ in (0,)) and "def _refresh_order_locked" in testnet_source and "def _cancel_order_locked" in testnet_source,
-        "testnet_emergency_stop_scans_all_active_orders": "list_active_testnet_orders" in testnet_source and "def list_active_testnet_orders" in storage_source,
         "scan_toggle_preserves_open_position_exit_monitor": "exit_monitoring_required" in main_source and "required_for_positions" in main_source,
         "paper_disable_preserves_position_exit_monitor": "if payload.enabled or cex_positions_open" in main_source and "exit_monitoring_required" in main_source,
         "signal_backtest_checks_entry_bar_protective_exits": "entry_hit_stop" in backtest_source and "including the entry candle" in backtest_source,
@@ -176,9 +161,8 @@ def main() -> int:
         "version": VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "PASS" if passed else "FAIL",
-        "mode": "paper_automation_plus_gated_manual_testnet",
+        "mode": "coinbase_only_paper_automation",
         "automatic_strategy_mode": "paper_only",
-        "testnet_manual_orders_enabled_by_default": False,
         "live_trading_enabled": False,
         "android_apk_built": False,
         "android_gradle_source_included": True,
@@ -193,8 +177,7 @@ def main() -> int:
             "Strategy research requires contiguous closed OHLCV. Candle replay cannot reconstruct historical spread, depth, ticker freshness, queue priority, partial fills, latency or market impact.",
             "Walk-forward is limited by fetched history; it is not an untouched final holdout or a statistically powered profitability claim.",
             "No real-money order execution or Solana swap signing.",
-            "Binance Spot Testnet limit-order path is implemented behind a separate local opt-in gate; authenticated end-to-end exchange execution is not verified without user Testnet credentials.",
-            "Strategy-driven automatic exchange execution remains disabled; Testnet order UI is explicit/manual and limit-only.",
+            "Coinbase is the only centralized-exchange connector. Automatic exchange execution remains disabled unless separately authorized through guarded Coinbase Advanced Trade controls.",
             "Paper allocation serialization is process-local and assumes the documented single-worker local backend; multi-worker production deployment is not supported.",
             "Cloud deployment requires a paid always-on service with persistent storage; the Render Blueprint is the lowest configured production-style option and is not free.",
             "Cloud authentication is a single-user password login with short-lived HMAC bearer tokens and process-local login throttling; it is not yet multi-user or an enterprise identity system.",
