@@ -84,6 +84,31 @@ function addSecurityHeaders(response) {
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
+async function checkEdgeLoginRateLimit(env, ipHash) {
+  const ipLimiter = env.LOGIN_EDGE_IP_LIMITER;
+  const globalLimiter = env.LOGIN_EDGE_GLOBAL_LIMITER;
+  if (!ipLimiter || !globalLimiter) {
+    console.error("Cloudflare edge login rate-limit bindings are not configured");
+    return { available: false, allowed: false };
+  }
+  try {
+    const [ipResult, globalResult] = await Promise.all([
+      ipLimiter.limit({ key: "owner-login:ip:" + ipHash }),
+      globalLimiter.limit({ key: "owner-login:global" })
+    ]);
+    return {
+      available: true,
+      allowed: ipResult?.success === true && globalResult?.success === true
+    };
+  } catch (error) {
+    console.error("Cloudflare edge login rate limiter failed", {
+      name: typeof error?.name === "string" ? error.name : "Error",
+      message: String(error?.message || error).slice(0, 180)
+    });
+    return { available: false, allowed: false };
+  }
+}
+
 async function login(request, env) {
   const expectedUsername = env.ADMIN_USERNAME || "admin";
   if (!env.ADMIN_PASSWORD || env.ADMIN_PASSWORD.length < 16 ||
@@ -103,7 +128,10 @@ async function login(request, env) {
   const limiterId = env.AUTH_RATE_LIMITER.idFromName("single-owner-auth-rate-limit-v1");
   const limiter = env.AUTH_RATE_LIMITER.get(limiterId);
   const rateLimitUrl = "https://internal.local/internal/auth/login-attempts";
-  let rateLimitResponse;
+  let strictRateLimitReserved = false;
+  let rateLimitMode = "durable_object_strict";
+  let rateLimitResponse = null;
+
   try {
     rateLimitResponse = await limiter.fetch(new Request(rateLimitUrl, {
       method: "POST",
@@ -111,18 +139,35 @@ async function login(request, env) {
       body: JSON.stringify({ action: "reserve", ip_hash: ipHash })
     }));
   } catch (error) {
-    console.error("Login rate-limit reserve request failed", {
+    console.error("Login Durable Object rate limiter unavailable; trying Cloudflare edge fallback", {
       name: typeof error?.name === "string" ? error.name : "Error",
       message: String(error?.message || error).slice(0, 180)
     });
-    return json({ error: "login_rate_limit_unavailable" }, 503);
   }
-  if (rateLimitResponse.status === 429) return json({ error: "too_many_login_attempts" }, 429);
-  if (!rateLimitResponse.ok) {
-    console.error("Login rate-limit reserve returned a non-success response", {
-      status: rateLimitResponse.status
-    });
-    return json({ error: "login_rate_limit_unavailable" }, 503);
+
+  if (rateLimitResponse?.status === 429) {
+    return json({ error: "too_many_login_attempts" }, 429);
+  }
+  if (rateLimitResponse?.ok === true) {
+    strictRateLimitReserved = true;
+  } else {
+    if (rateLimitResponse) {
+      console.error("Login Durable Object rate limiter returned a non-success response", {
+        status: rateLimitResponse.status
+      });
+    }
+    // Fallback is intentionally approximate and only used while strict DO SQL
+    // is unavailable. It does not read Durable Object storage and has two
+    // independent guards: source-IP hash and a per-location owner-login bucket.
+    const edgeFallback = await checkEdgeLoginRateLimit(env, ipHash);
+    if (!edgeFallback.available) {
+      return json({ error: "login_rate_limit_unavailable" }, 503);
+    }
+    if (!edgeFallback.allowed) {
+      return json({ error: "too_many_login_attempts" }, 429);
+    }
+    rateLimitMode = "cloudflare_edge_fallback";
+    console.warn("Owner login is using approximate Cloudflare edge rate limiting because strict Durable Object SQL is unavailable");
   }
 
   const now = Date.now();
@@ -130,29 +175,35 @@ async function login(request, env) {
   const passwordMatch = equalBytes(await sha256(password), await sha256(env.ADMIN_PASSWORD));
   if (!usernameMatch || !passwordMatch) return json({ error: "invalid_credentials" }, 401);
 
-  // A correct login resets only this source's failed-attempt history.
-  let clearResponse;
-  try {
-    clearResponse = await limiter.fetch(new Request(rateLimitUrl, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action: "clear", ip_hash: ipHash })
-    }));
-  } catch (error) {
-    console.error("Login rate-limit clear request failed", {
-      name: typeof error?.name === "string" ? error.name : "Error",
-      message: String(error?.message || error).slice(0, 180)
-    });
-    return json({ error: "login_rate_limit_unavailable" }, 503);
-  }
-  if (!clearResponse.ok) {
-    console.error("Login rate-limit clear returned a non-success response", {
-      status: clearResponse.status
-    });
-    return json({ error: "login_rate_limit_unavailable" }, 503);
+  // A correct login resets the strict source's failed-attempt history when
+  // storage is available. A reset failure must not reject valid owner credentials:
+  // future requests can use the approximate edge guard until SQL recovers.
+  if (strictRateLimitReserved) {
+    try {
+      const clearResponse = await limiter.fetch(new Request(rateLimitUrl, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "clear", ip_hash: ipHash })
+      }));
+      if (!clearResponse.ok) {
+        console.error("Login rate-limit clear returned a non-success response", {
+          status: clearResponse.status
+        });
+      }
+    } catch (error) {
+      console.error("Login rate-limit clear request failed; successful credentials will still be accepted", {
+        name: typeof error?.name === "string" ? error.name : "Error",
+        message: String(error?.message || error).slice(0, 180)
+      });
+    }
   }
   const token = await sign({ sub: "owner", exp: Math.floor(now / 1000) + (8 * 60 * 60) }, env.SESSION_SECRET);
-  return json({ access_token: token, token_type: "Bearer", expires_in: 28800 });
+  return json({
+    access_token: token,
+    token_type: "Bearer",
+    expires_in: 28800,
+    rate_limit_mode: rateLimitMode
+  });
 }
 
 async function routeApi(request, env) {

@@ -15,6 +15,18 @@
     { "tag": "v1", "new_sqlite_classes": ["TradingEngine"] },
     { "tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"] }
   ],
+  "ratelimits": [
+    {
+      "name": "LOGIN_EDGE_IP_LIMITER",
+      "namespace_id": "28261101",
+      "simple": { "limit": 4, "period": 60 }
+    },
+    {
+      "name": "LOGIN_EDGE_GLOBAL_LIMITER",
+      "namespace_id": "28261102",
+      "simple": { "limit": 8, "period": 60 }
+    }
+  ],
   "assets": {
     "directory": "./public",
     "binding": "ASSETS",

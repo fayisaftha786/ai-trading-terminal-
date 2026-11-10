@@ -159,3 +159,23 @@ test("worker deployment health is independent of Durable Object SQL availability
   assert.ok(workerHealth.includes("live_trading_enabled: false"));
   assert.ok(deploymentWorkflow.includes("/api/worker/health"));
 });
+
+test("login uses strict Durable Object rate limiting first and SQL-independent Cloudflare edge fallback second", () => {
+  const loginStart = workerSource.indexOf("async function login(request, env)");
+  const routeStart = workerSource.indexOf("async function routeApi", loginStart);
+  const loginSource = workerSource.slice(loginStart, routeStart);
+  assert.ok(loginSource.indexOf("limiter.fetch(") < loginSource.indexOf("checkEdgeLoginRateLimit(env, ipHash)"));
+  assert.ok(loginSource.includes("rateLimitResponse?.status === 429"));
+  assert.ok(loginSource.includes('rate_limit_mode: rateLimitMode'));
+  assert.ok(workerSource.includes("ipLimiter.limit({ key: \"owner-login:ip:\" + ipHash })"));
+  assert.ok(workerSource.includes('globalLimiter.limit({ key: "owner-login:global" })'));
+});
+
+test("Wrangler configures separate per-IP and per-location fallback login rate limits", () => {
+  assert.match(workerConfigSource, /"name": "LOGIN_EDGE_IP_LIMITER"/);
+  assert.match(workerConfigSource, /"name": "LOGIN_EDGE_GLOBAL_LIMITER"/);
+  assert.match(workerConfigSource, /"limit": 4, "period": 60/);
+  assert.match(workerConfigSource, /"limit": 8, "period": 60/);
+  assert.match(workerConfigSource, /"namespace_id": "28261101"/);
+  assert.match(workerConfigSource, /"namespace_id": "28261102"/);
+});
