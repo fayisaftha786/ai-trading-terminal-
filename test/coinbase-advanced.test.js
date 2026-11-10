@@ -96,7 +96,7 @@ async function verifyJwt(token, publicKeyPem) {
   );
   return { header, payload, valid };
 }
-function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -126,6 +126,14 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
         quote_min_size: "1.00", quote_max_size: "10000.00",
         quote_increment: "0.01", base_min_size: "0.00001", base_max_size: "100", base_increment: "0.00001", price_increment: "0.01"
       });
+    }
+    if (parsed.pathname.endsWith("/orders/historical/batch")) {
+      const cursor = parsed.searchParams.get("cursor") || "";
+      const pageIndex = cursor ? 1 : 0;
+      if (Array.isArray(openOrderPages)) {
+        return Response.json(openOrderPages[pageIndex] || { orders: [], has_next: false });
+      }
+      return Response.json(openOrders || { orders: [], has_next: false, cursor: "" });
     }
     if (parsed.pathname.endsWith("/orders/preview")) {
       return Response.json(preview || {
@@ -565,4 +573,37 @@ test("account pagination uncertainty and incomplete provider data fail closed", 
   const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
   assert.equal(result.status, "provider_check_failed");
   assert.ok(result.blockers.includes("coinbase_advanced_accounts_pagination_invalid"));
+});
+
+test("preflight blocks new manual orders when the Coinbase Advanced portfolio already has an active SPOT order", async () => {
+  const env = makeEnv({ COINBASE_ADVANCED_ORDER_ENABLED: "true" });
+  const fake = mockApi(env, {
+    openOrders: {
+      orders: [{ order_id: "external-open-order", product_id: "ETH-USD", side: "BUY", status: "OPEN" }],
+      has_next: false
+    }
+  });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "blocked");
+  assert.equal(result.exchange_open_order_count, 1);
+  assert.equal(result.exchange_open_orders[0].order_id, "external-open-order");
+  assert.ok(result.blockers.includes("maximum_open_exchange_orders_reached"));
+  assert.equal(fake.calls.some((call) => call.path.endsWith("/orders/preview")), false);
+});
+
+test("open-order scan fails closed when Coinbase pagination is incomplete or repeats a cursor", async () => {
+  const env = makeEnv();
+  const incomplete = mockApi(env, { openOrders: { orders: [], has_next: true } });
+  const incompleteResult = await preflightCoinbaseAdvanced(env, { fetchImpl: incomplete.fetchImpl });
+  assert.equal(incompleteResult.status, "provider_check_failed");
+  assert.ok(incompleteResult.blockers.includes("coinbase_advanced_open_orders_pagination_invalid"));
+  const repeated = mockApi(env, {
+    openOrderPages: [
+      { orders: [], has_next: true, cursor: "same-cursor" },
+      { orders: [], has_next: true, cursor: "same-cursor" }
+    ]
+  });
+  const repeatedResult = await preflightCoinbaseAdvanced(env, { fetchImpl: repeated.fetchImpl });
+  assert.equal(repeatedResult.status, "provider_check_failed");
+  assert.ok(repeatedResult.blockers.includes("coinbase_advanced_open_orders_pagination_invalid"));
 });

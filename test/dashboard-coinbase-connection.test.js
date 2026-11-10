@@ -69,3 +69,9 @@ test("Coinbase UI exposes background scheduled order and fill synchronization", 
   assert.match(dashboard, /90-second scheduler/);
   assert.match(dashboard, /retries incomplete terminal fill syncs every 5 minutes/);
 });
+
+test("Coinbase connection center shows exchange-side open-order cap diagnostics", () => {
+  assert.match(dashboard, /exchange open orders/);
+  assert.match(dashboard, /exchange_open_order_count/);
+  assert.match(dashboard, /exchange_order_pagination_complete/);
+});
