@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -2085,7 +2085,6 @@ export class TradingEngine extends DurableObject {
                    legacyBitstampExitSymbols.has(product.symbol)) {
           // Transitional read-only mark refresh for a pre-existing Bitstamp paper
           // position. New entries are Coinbase-only and cannot use this branch.
-          const { fetchBitstampOrderBook } = await import("./coinbase.js");
           book = await fetchBitstampOrderBook(market.product, requestState);
         } else {
           skipped += 1;
