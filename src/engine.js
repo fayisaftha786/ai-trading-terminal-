@@ -207,7 +207,7 @@ export class TradingEngine extends DurableObject {
     }
     const uniquePortfolioBlocks = [...new Set(portfolioBlockReasons)];
 
-    const results = await mapWithConcurrency(symbols, 6, async (symbol) => {
+    const results = await mapWithConcurrency(symbols, 10, async (symbol) => {
       const ticker = tickerBySymbol.get(symbol);
       if (!ticker) {
         return {
