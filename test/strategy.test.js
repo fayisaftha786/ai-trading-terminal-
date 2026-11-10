@@ -308,7 +308,7 @@ test("fresh local ticker retrieval remains usable for paper exits when last trad
 test("candidate gate blocks a newly retrieved quote when no recent exchange trade occurred", () => {
   const now = Date.now();
   const market = {
-    status: "live",
+    status: "live", market_data_provider: "coinbase_exchange",
     ticker_time: new Date(now - 5 * 60 * 1000).toISOString(),
     quote_received_at_ms: now - 1000,
     bid: 100, ask: 100.01, last: 100,
