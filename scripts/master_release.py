@@ -54,6 +54,9 @@ def main() -> int:
     storage_source = (ROOT / "app/storage.py").read_text(encoding="utf-8")
     strategy_source = (ROOT / "app/services/strategy.py").read_text(encoding="utf-8")
     market_data_source = (ROOT / "app/services/market_data.py").read_text(encoding="utf-8")
+    worker_coinbase_source = (ROOT / "src/coinbase.js").read_text(encoding="utf-8")
+    worker_engine_source = (ROOT / "src/engine.js").read_text(encoding="utf-8")
+    worker_strategy_source = (ROOT / "src/strategy.js").read_text(encoding="utf-8")
     backtest_source = (ROOT / "app/services/backtest.py").read_text(encoding="utf-8")
     risk_source = (ROOT / "app/services/risk.py").read_text(encoding="utf-8")
     paper_source = (ROOT / "app/services/paper.py").read_text(encoding="utf-8")
@@ -135,6 +138,10 @@ def main() -> int:
         "indicator_analyzer_uses_wilder_adx_and_direction": all(token in strategy_source for token in ("Wilder RSI", "_wilder_atr_adx", "plus_di14", "ema20_slope_pct")),
         "raw_candle_integrity_detects_duplicates_and_alignment": all(token in strategy_source for token in ("candle_integrity_report", "duplicate_timestamps", "off_grid_timestamps", "missing_intervals")),
         "market_data_gaps_force_hold": "if not primary_clean or not higher_clean" in market_data_source and 'item["regime"] = "DATA_GAP"' in market_data_source,
+        "worker_new_paper_entries_require_coinbase": 'market?.market_data_provider !== "coinbase_exchange"' in worker_strategy_source and '"coinbase_market_data_required_for_new_entry"' in worker_strategy_source,
+        "worker_cross_market_context_requires_coinbase": 'market?.market_data_provider !== "coinbase_exchange"' in worker_strategy_source and "cross_market_inputs_missing_or_stale" in worker_strategy_source,
+        "worker_bitstamp_live_fallback_is_legacy_exit_only": "allowBitstampLegacyExit = false" in worker_coinbase_source and "allowBitstampLegacyExit: legacyBitstampExitSymbols.has(product.symbol)" in worker_engine_source and 'trade.metadata?.market_data_provider === "bitstamp_spot"' in worker_engine_source and "legacy_exit_quote_only" in worker_coinbase_source and "legacyBitstampExitSymbols.has(product.symbol)" in worker_engine_source,
+        "bitstamp_research_backfill_removed": "/api/research/backfill" not in worker_engine_source and "backfillBitstampResearchHistory" not in worker_engine_source and "fetchBitstampResearchHistory" not in worker_coinbase_source and "archiveProviderHistoryBackfill" not in worker_engine_source,
         "research_backtests_reject_raw_candle_integrity_failures": "candle_integrity_report" in backtest_source and "duplicate/invalid" in backtest_source,
         "research_backtests_use_same_saved_risk_profile": "current_saved_server_risk_profile" in main_source and 'risk_per_trade_pct=float(risk["risk_per_trade_pct"])' in main_source and 'fee_bps=float(risk["fee_bps_per_side"])' in main_source,
         "risk_profile_checks_net_reward_risk": "minimum_target_pct" in risk_source and "net_reward_risk" in schema_source,

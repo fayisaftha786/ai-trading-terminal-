@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -55,7 +55,6 @@ export class TradingEngine extends DurableObject {
     this.env = env;
     this.sql = ctx.storage.sql;
     this.scanPromise = null;
-    this.researchBackfillPromise = null;
     const schemaStatements = [
       "CREATE TABLE IF NOT EXISTS app_state(key TEXT PRIMARY KEY,value_json TEXT NOT NULL)",
       "CREATE TABLE IF NOT EXISTS market_snapshots(symbol TEXT PRIMARY KEY,status TEXT NOT NULL,observed_at_ms INTEGER NOT NULL,data_json TEXT NOT NULL)",
@@ -743,30 +742,6 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/research/tournament") {
         return jsonResponse(this.researchTournament());
       }
-      if (request.method === "POST" && url.pathname === "/api/research/backfill") {
-        let body;
-        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_request_body" }, 400); }
-        const selected = PRODUCTS.find((item) => item.symbol === body?.symbol);
-        if (!selected) return jsonResponse({ error: "configured_market_symbol_required" }, 400);
-        if (this.scanPromise || this.researchBackfillPromise) {
-          return jsonResponse({ error: "scan_or_research_backfill_in_progress" }, 409);
-        }
-        const task = this.backfillBitstampResearchHistory(selected);
-        this.researchBackfillPromise = task.finally(() => { this.researchBackfillPromise = null; });
-        try {
-          return jsonResponse(await this.researchBackfillPromise);
-        } catch (error) {
-          this.logEvent("research_backfill_error", "Historical research backfill failed", {
-            symbol: selected.symbol,
-            error_code: typeof error?.code === "string" ? error.code.slice(0, 80) : "research_backfill_failed"
-          });
-          return jsonResponse({
-            error: "research_backfill_failed",
-            detail: String(error?.message || error).slice(0, 180),
-            code: typeof error?.code === "string" ? error.code.slice(0, 80) : null
-          }, Number(error?.status) >= 400 && Number(error?.status) < 500 ? Number(error.status) : 502);
-        }
-      }
       if (request.method === "GET" && url.pathname === "/api/events") {
         return jsonResponse({ events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 100").toArray() });
       }
@@ -1073,7 +1048,7 @@ export class TradingEngine extends DurableObject {
       let refreshErrorCode = null;
       try {
         refreshResult = await runAfterActiveScan(
-          () => this.scanPromise || this.researchBackfillPromise,
+          () => this.scanPromise,
           () => this.refreshOrderBooksOnly()
         );
       } catch (error) {
@@ -1210,9 +1185,6 @@ export class TradingEngine extends DurableObject {
   }
 
   async runCycle(source, cycleKey = null) {
-    if (this.researchBackfillPromise) {
-      await this.researchBackfillPromise.catch(() => null);
-    }
     if (this.scanPromise) return this.scanPromise;
     this.scanPromise = this.performCycle(source, cycleKey).finally(() => { this.scanPromise = null; });
     return this.scanPromise;
@@ -1233,6 +1205,11 @@ export class TradingEngine extends DurableObject {
     const nowMs = Date.now();
     const markets = [];
     const candleArchives = [];
+    const legacyBitstampExitSymbols = new Set(
+      this.getOpenTrades()
+        .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
+        .map((trade) => trade.symbol)
+    );
     for (const product of PRODUCTS) {
       try {
         const cachedCandles = {};
@@ -1264,40 +1241,28 @@ export class TradingEngine extends DurableObject {
             });
           }
         }
-        cachedCandles.bitstamp = {};
-        for (const [timeframeSeconds, key, label] of [
-          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
-        ]) {
-          try {
-            cachedCandles.bitstamp[key] = this.loadResearchCandleCache(product.product, timeframeSeconds, "bitstamp_spot");
-          } catch (error) {
-            this.logEvent("research_cache_read_error", "Bitstamp " + label + " fallback cache read failed", {
-              product: product.product, timeframe_seconds: timeframeSeconds,
-              error: String(error?.message || error).slice(0, 160)
-            });
+        if (legacyBitstampExitSymbols.has(product.symbol)) {
+          cachedCandles.bitstamp = {};
+          for (const [timeframeSeconds, key, label] of [
+            [60, "one_minute", "1M"], [300, "five_minute", "5M"],
+            [3600, "one_hour", "1H"], [21600, "six_hour", "6H"]
+          ]) {
+            try {
+              cachedCandles.bitstamp[key] = this.loadResearchCandleCache(
+                product.product, timeframeSeconds, "bitstamp_spot"
+              );
+            } catch (error) {
+              this.logEvent("research_cache_read_error", "Legacy Bitstamp exit cache read failed", {
+                product: product.product, timeframe_seconds: timeframeSeconds,
+                error: String(error?.message || error).slice(0, 160)
+              });
+            }
           }
         }
-        try {
-          cachedCandles.bitstamp.one_hour = this.loadResearchCandleCache(
-            product.product, 3600, "bitstamp_spot"
-          );
-        } catch (error) {
-          this.logEvent("research_cache_read_error", "Bitstamp 1H fallback cache read failed", {
-            product: product.product, timeframe_seconds: 3600,
-            error: String(error?.message || error).slice(0, 160)
-          });
-        }
-        try {
-          cachedCandles.bitstamp.six_hour = this.loadResearchCandleCache(
-            product.product, 21600, "bitstamp_spot"
-          );
-        } catch (error) {
-          this.logEvent("research_cache_read_error", "Bitstamp 6H fallback cache read failed", {
-            product: product.product, timeframe_seconds: 21600,
-            error: String(error?.message || error).slice(0, 160)
-          });
-        }
-        const snapshot = await fetchProductSnapshot(product, Date.now(), cachedCandles);
+        const snapshot = await fetchProductSnapshot(
+          product, Date.now(), cachedCandles, undefined,
+          { allowBitstampLegacyExit: legacyBitstampExitSymbols.has(product.symbol) }
+        );
         candleArchives.push({
           product: product.product,
           exchange: snapshot.market_data_provider || "coinbase_exchange",
@@ -1441,22 +1406,31 @@ export class TradingEngine extends DurableObject {
       }
     }
 
-    // Candle/history requests can age the first market's L2 book while later
-    // markets are scanned. Refresh Coinbase books after all candle work and
-    // immediately before entry gates; never relax the strict 15s freshness rule.
+    // Candle/history requests can age L2 snapshots while later markets are
+    // scanned. Refresh the exact entry venue after all candle work and immediately
+    // before exits/entry gates. Bitstamp is permitted here only for an open
+    // legacy position recorded with that provider; new candidates remain Coinbase-only.
     const finalBookRequestState = createCoinbaseRequestState();
     for (const market of markets) {
-      if (market.status !== "live" || market.market_data_provider !== "coinbase_exchange") continue;
+      if (market.status !== "live") continue;
+      const provider = market.market_data_provider;
+      const legacyBitstampExit = provider === "bitstamp_spot" &&
+        legacyBitstampExitSymbols.has(market.symbol);
+      if (provider !== "coinbase_exchange" && !legacyBitstampExit) continue;
       try {
-        const freshBook = await fetchCoinbaseOrderBook(market.product, finalBookRequestState);
+        const freshBook = provider === "coinbase_exchange"
+          ? await fetchCoinbaseOrderBook(market.product, finalBookRequestState)
+          : await fetchBitstampOrderBook(market.product, finalBookRequestState);
         Object.assign(market, freshBook);
         market.spread_bps = ((freshBook.ask - freshBook.bid) / ((freshBook.ask + freshBook.bid) / 2)) * 10000;
-        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+        market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "available", book_error: null,
-          book_freshness_source: "final_post_candle_local_retrieval_time",
+          book_freshness_source: provider === "coinbase_exchange"
+            ? "final_post_candle_local_retrieval_time"
+            : "final_post_candle_legacy_bitstamp_exchange_timestamp",
           book_sequence_available: freshBook.book_sequence !== null };
       } catch (error) {
-        market.data_quality = { ...(market.data_quality || {}), book_provider: "coinbase_exchange",
+        market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "provider_error",
           book_error: String(error?.code || error?.message || "order_book_refresh_failed").slice(0, 100) };
         market.book_retrieved_at_ms = null; market.book_age_ms = null;
@@ -1829,115 +1803,6 @@ export class TradingEngine extends DurableObject {
     };
   }
 
-  archiveProviderHistoryBackfill(exchange, product, timeframeSeconds, audit, receivedAtMs) {
-    const retentionBars = timeframeSeconds === 3600 ? 4320
-      : timeframeSeconds === 21600 ? 1440 : 0;
-    if (exchange !== "bitstamp_spot" || !retentionBars ||
-        audit?.ok !== true || !Array.isArray(audit.rows) || audit.rows.length < 150) {
-      return { stored: 0, status: "audit_rejected" };
-    }
-
-    const intervalMs = timeframeSeconds * 1000;
-    const rows = audit.rows.slice(-retentionBars);
-    let inserted = 0;
-    // Durable Object SQLite has a conservative bind-variable ceiling. 8 OHLCV
-    // rows x 11 fields stay below 100 variables per statement.
-    const batchSize = 8;
-    for (let offset = 0; offset < rows.length; offset += batchSize) {
-      const batch = rows.slice(offset, offset + batchSize);
-      const valuesSql = batch.map(() => "(?,?,?,?,?,?,?,?,?,?,?)").join(",");
-      const values = batch.flatMap((row) => [
-        exchange, product, timeframeSeconds, row.time,
-        row.open, row.high, row.low, row.close, row.volume, receivedAtMs, 1
-      ]);
-      inserted += this.sql.exec(
-        "INSERT OR IGNORE INTO research_candles(exchange,product,timeframe_seconds,candle_open_ms,open,high,low,close,volume,received_at_ms,schema_version) " +
-        "VALUES " + valuesSql + " RETURNING candle_open_ms",
-        ...values
-      ).toArray().length;
-    }
-
-    const latest = rows.at(-1)?.time;
-    const cutoff = latest - ((retentionBars - 1) * intervalMs);
-    this.sql.exec(
-      "DELETE FROM research_candles WHERE exchange=? AND product=? AND timeframe_seconds=? AND candle_open_ms<?",
-      exchange, product, timeframeSeconds, cutoff
-    );
-    const stats = this.sql.exec(
-      "SELECT COUNT(*) AS bars_count,MIN(candle_open_ms) AS first_candle_ms," +
-      "MAX(candle_open_ms) AS last_candle_ms FROM research_candles " +
-      "WHERE exchange=? AND product=? AND timeframe_seconds=?",
-      exchange, product, timeframeSeconds
-    ).toArray()[0] || {};
-    const barsCount = Math.max(0, Number(stats.bars_count) || 0);
-    const first = stats.first_candle_ms == null ? null : Number(stats.first_candle_ms);
-    const last = stats.last_candle_ms == null ? null : Number(stats.last_candle_ms);
-    const expected = Number.isFinite(first) && Number.isFinite(last) && last >= first
-      ? Math.floor((last - first) / intervalMs) + 1 : 0;
-    const missing = Math.max(0, expected - barsCount);
-    return {
-      stored: inserted,
-      bars_count: barsCount,
-      first_candle_ms: Number.isFinite(first) ? first : null,
-      last_candle_ms: Number.isFinite(last) ? last : null,
-      missing_intervals: missing,
-      status: missing === 0 && barsCount >= rows.length ? "clean" : "archive_integrity_failed"
-    };
-  }
-
-  async backfillBitstampResearchHistory(selectedProduct) {
-    const history = await fetchBitstampResearchHistory({
-      product: selectedProduct.product,
-      nowMs: Date.now(),
-      oneHourBars: 3500,
-      sixHourBars: 600
-    });
-    const receivedAtMs = Date.now();
-    const oneHour = this.archiveProviderHistoryBackfill(
-      history.provider, history.product, 3600, history.one_hour, receivedAtMs
-    );
-    if (oneHour.status !== "clean") {
-      const error = new Error("Bitstamp 1H research archive failed post-insert integrity checks");
-      error.code = "research_backfill_archive_integrity_failed";
-      error.status = 409;
-      throw error;
-    }
-    const sixHour = this.archiveProviderHistoryBackfill(
-      history.provider, history.product, 21600, history.six_hour, receivedAtMs
-    );
-    if (sixHour.status !== "clean") {
-      const error = new Error("Bitstamp 6H research archive failed post-insert integrity checks");
-      error.code = "research_backfill_archive_integrity_failed";
-      error.status = 409;
-      throw error;
-    }
-
-    this.logEvent("research_backfill_completed", "Bitstamp historical candles added to offline research archive", {
-      symbol: selectedProduct.symbol,
-      provider: history.provider,
-      one_hour_bars: oneHour.bars_count,
-      six_hour_bars: sixHour.bars_count,
-      no_trading_side_effects: true
-    });
-    return {
-      mode: "offline_research_only",
-      no_trading_side_effects: true,
-      symbol: selectedProduct.symbol,
-      provider: history.provider,
-      one_hour: {
-        stored: oneHour.stored,
-        bars_count: oneHour.bars_count,
-        missing_intervals: oneHour.missing_intervals
-      },
-      six_hour: {
-        stored: sixHour.stored,
-        bars_count: sixHour.bars_count,
-        missing_intervals: sixHour.missing_intervals
-      },
-      requests: history.requests
-    };
-  }
-
   researchTournament() {
     const settings = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
@@ -2064,7 +1929,12 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
     const coinbaseState = createCoinbaseRequestState();
-    const requestState = { ...coinbaseState, bitstamp: { ...coinbaseState.bitstamp } };
+    const requestState = coinbaseState;
+    const legacyBitstampExitSymbols = new Set(
+      this.getOpenTrades()
+        .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
+        .map((trade) => trade.symbol)
+    );
     const issues = [];
     let refreshed = 0;
     let failed = 0;
@@ -2083,7 +1953,10 @@ export class TradingEngine extends DurableObject {
         let book;
         if (provider === "coinbase_exchange") {
           book = await fetchCoinbaseOrderBook(market.product, requestState);
-        } else if (provider === "bitstamp_spot") {
+        } else if (provider === "bitstamp_spot" &&
+                   legacyBitstampExitSymbols.has(product.symbol)) {
+          // Transitional read-only mark refresh for a pre-existing Bitstamp paper
+          // position. New entries are Coinbase-only and cannot use this branch.
           book = await fetchBitstampOrderBook(market.product, requestState);
         } else {
           skipped += 1;

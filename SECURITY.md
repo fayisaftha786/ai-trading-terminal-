@@ -1,6 +1,6 @@
 # Security and execution controls
 
-- Coinbase is the only supported centralized exchange integration in this release.
+- Coinbase is the only supported centralized-exchange account/order connector and the only provider allowed to generate new PAPER-entry candidates. Bitstamp has no account or order connector; its only live-data compatibility use is read-only marking of a pre-existing paper position whose recorded entry provider was Bitstamp.
 - Public market-data access is read-only. Solana discovery is screening-only.
 - Automatic strategy entries remain paper-only and cannot submit exchange orders.
 - Coinbase Advanced Trade order execution is a separate, explicitly gated workflow. Keep it disabled until account permissions, product allowlists, fee estimates, balances, order limits, reconciliation and emergency controls have been verified.

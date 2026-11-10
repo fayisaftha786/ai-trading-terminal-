@@ -557,121 +557,10 @@ function convertBitstampCandles(payload) {
 }
 
 /**
- * Fetch a bounded historical research window from the explicitly verified
- * Bitstamp USD SPOT market. Uses the documented 1,000-candle maximum and pages
- * backwards with the `end` timestamp. This function is research-only: it does
- * not supply the live ticker, order book, or PAPER entry/exit path.
+ * Read-only same-venue market snapshot used only to maintain an already-open
+ * legacy PAPER position whose stored entry provider is Bitstamp. This path is
+ * never used for ordinary scans or new PAPER entries.
  */
-export async function fetchBitstampResearchHistory({
-  product,
-  nowMs = Date.now(),
-  oneHourBars = 3500,
-  sixHourBars = 600,
-  requestState = DEFAULT_REQUEST_STATE
-} = {}) {
-  const pair = BITSTAMP_PAIRS[product];
-  if (!pair || !Number.isFinite(nowMs) || nowMs <= 0 ||
-      !Number.isSafeInteger(oneHourBars) || oneHourBars < 150 || oneHourBars > 4320 ||
-      !Number.isSafeInteger(sixHourBars) || sixHourBars < 150 || sixHourBars > 1440) {
-    const error = new Error("invalid Bitstamp research backfill request");
-    error.code = "invalid_research_backfill_request";
-    error.status = 400;
-    throw error;
-  }
-
-  const state = bitstampRequestState(requestState);
-  const markets = await getBitstampJson("/markets/", state);
-  const market = Array.isArray(markets)
-    ? markets.find((row) => String(row?.market_symbol || "").toLowerCase() === pair)
-    : null;
-  const expectedPair = product.toUpperCase().replace("-", "/");
-  if (!market || String(market.market_type || "").toUpperCase() !== "SPOT" ||
-      String(market.counter_currency || "").toUpperCase() !== "USD" ||
-      String(market.trading || "").toLowerCase() !== "enabled") {
-    const error = new Error("Bitstamp historical market is not an enabled USD SPOT pair");
-    error.code = "research_backfill_market_not_enabled_spot";
-    error.status = 409;
-    throw error;
-  }
-
-  async function fetchHistory(timeframeSeconds, targetBars) {
-    const intervalMs = timeframeSeconds * 1000;
-    const collected = new Map();
-    let endSeconds = Math.floor(nowMs / 1000);
-    let requests = 0;
-    const maximumRequests = Math.ceil(targetBars / 1000) + 2;
-
-    while (collected.size < targetBars && requests < maximumRequests) {
-      const pageLimit = Math.min(1000, targetBars - collected.size);
-      const payload = await getBitstampJson(
-        "/ohlc/" + pair + "/?step=" + timeframeSeconds +
-          "&limit=" + pageLimit + "&end=" + endSeconds +
-          "&exclude_current_candle=true",
-        state
-      );
-      requests += 1;
-      const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\\s+/g, "");
-      if (responsePair !== expectedPair) {
-        const error = new Error("Bitstamp historical OHLC response pair mismatch");
-        error.code = "research_backfill_pair_mismatch";
-        error.status = 502;
-        throw error;
-      }
-
-      const rows = convertBitstampCandles(payload);
-      if (!rows.length) break;
-      let oldestSeconds = Number.POSITIVE_INFINITY;
-      for (const row of rows) {
-        if (!Number.isFinite(row.time) || row.time + intervalMs > nowMs) continue;
-        const timestampSeconds = Math.floor(row.time / 1000);
-        oldestSeconds = Math.min(oldestSeconds, timestampSeconds);
-        if (!collected.has(row.time)) collected.set(row.time, row);
-      }
-      if (!Number.isFinite(oldestSeconds)) break;
-      if (oldestSeconds >= endSeconds) {
-        const error = new Error("Bitstamp historical OHLC pagination did not move backwards");
-        error.code = "research_backfill_pagination_stalled";
-        error.status = 502;
-        throw error;
-      }
-      endSeconds = oldestSeconds - 1;
-    }
-
-    const orderedRows = [...collected.values()].sort((a, b) => a.time - b.time);
-    const audit = auditCandles(orderedRows, intervalMs, nowMs, targetBars);
-    if (!audit.ok || audit.valid_closed_bars < targetBars) {
-      const error = new Error(
-        "Bitstamp historical " + timeframeSeconds + "s candle history failed integrity or sample-size checks"
-      );
-      error.code = "research_backfill_candle_integrity_failed";
-      error.status = 422;
-      error.issues = audit.issues;
-      error.valid_closed_bars = audit.valid_closed_bars;
-      error.expected_bars = targetBars;
-      throw error;
-    }
-    return { audit, requests };
-  }
-
-  const oneHour = await fetchHistory(3600, oneHourBars);
-  const sixHour = await fetchHistory(21600, sixHourBars);
-  return {
-    product,
-    symbol: product.replace("-", "/"),
-    provider: "bitstamp_spot",
-    market_type: "SPOT",
-    quote_currency: "USD",
-    fetched_at_ms: Date.now(),
-    one_hour: oneHour.audit,
-    six_hour: sixHour.audit,
-    requests: {
-      markets: 1,
-      one_hour: oneHour.requests,
-      six_hour: sixHour.requests
-    }
-  };
-}
-
 async function loadBitstampCandleHistory({
   symbol,
   pair,
@@ -688,7 +577,7 @@ async function loadBitstampCandleHistory({
   if (useCache) {
     return {
       audit: cachedAudit,
-      source: "bitstamp_durable_object_archive",
+      source: "bitstamp_legacy_exit_archive",
       refresh_status: "cache_reused",
       refresh_error: null
     };
@@ -712,7 +601,7 @@ async function loadBitstampCandleHistory({
     if (audit.ok) {
       return {
         audit,
-        source: "bitstamp_spot_rest",
+        source: "bitstamp_spot_rest_legacy_exit",
         refresh_status: "refreshed",
         refresh_error: null
       };
@@ -721,14 +610,14 @@ async function loadBitstampCandleHistory({
     if (auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs)) {
       return {
         audit: cachedAudit,
-        source: "bitstamp_durable_object_archive_fallback",
+        source: "bitstamp_legacy_exit_archive_fallback",
         refresh_status: "invalid_refresh_cache_fallback",
         refresh_error: "candle_integrity_failed"
       };
     }
     return {
       audit,
-      source: "bitstamp_spot_rest",
+      source: "bitstamp_spot_rest_legacy_exit",
       refresh_status: "refresh_rejected",
       refresh_error: "candle_integrity_failed"
     };
@@ -737,7 +626,7 @@ async function loadBitstampCandleHistory({
       auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs);
     return {
       audit: cachedAudit || auditCandles([], intervalMs, nowMs, 150),
-      source: canUseCache ? "bitstamp_durable_object_archive_fallback" : "bitstamp_durable_object_archive_stale",
+      source: canUseCache ? "bitstamp_legacy_exit_archive_fallback" : "bitstamp_legacy_exit_archive_stale",
       refresh_status: canUseCache ? "provider_error_cache_fallback" : "provider_error_no_fresh_cache",
       refresh_error: providerErrorCode(error)
     };
@@ -941,25 +830,44 @@ function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
 }
 
 /**
- * Coinbase is the primary USD spot feed. If any required snapshot component is
- * unavailable or fails integrity checks, retry the whole market using Bitstamp
- * USD spot data so ticker, L2 book and both candle frames stay same-venue.
- * Never mix a Coinbase quote with Bitstamp candles (or vice versa).
+ * Coinbase Exchange is the only source for ordinary live scans and all new
+ * PAPER-entry candidates. Bitstamp public data is requested only when the
+ * caller explicitly identifies an already-open legacy PAPER position whose
+ * recorded entry provider is Bitstamp. That compatibility read preserves
+ * same-venue exit marking; incomplete book/candle data remains entry-ineligible.
+ * Historical research uses the Coinbase archive; Bitstamp backfill is not exposed.
  */
 export async function fetchProductSnapshot(
   productRef,
   nowMs = Date.now(),
   cachedCandles = {},
-  requestState = DEFAULT_REQUEST_STATE
+  requestState = DEFAULT_REQUEST_STATE,
+  { allowBitstampLegacyExit = false } = {}
 ) {
   let primary = null;
   let primaryError = null;
 
   try {
     primary = await fetchCoinbaseProductSnapshot(productRef, nowMs, cachedCandles, requestState);
-    if (snapshotIsEntryReady(primary, Date.now())) return primary;
+    if (snapshotIsEntryReady(primary, Date.now()) && allowBitstampLegacyExit !== true) return primary;
   } catch (error) {
     primaryError = error;
+  }
+
+  // New PAPER entries and all ordinary market monitoring are Coinbase-only.
+  // Bitstamp may be queried only to continue marking an already-open legacy
+  // PAPER position whose entry record explicitly names Bitstamp.
+  if (allowBitstampLegacyExit !== true) {
+    if (primary) {
+      primary.data_quality.legacy_provider_fallback_skipped = true;
+      primary.data_quality.entry_blocked_by_provider_policy =
+        primary.market_data_provider !== "coinbase_exchange" ||
+        primary.data_quality.book_status !== "available" ||
+        primary.one_hour_audit?.ok !== true ||
+        primary.six_hour_audit?.ok !== true;
+      return primary;
+    }
+    throw primaryError || new Error("coinbase_market_data_unavailable");
   }
 
   try {
@@ -972,34 +880,48 @@ export async function fetchProductSnapshot(
         primary?.data_quality?.one_hour_refresh_error ||
         primary?.data_quality?.six_hour_refresh_error ||
         "primary_snapshot_incomplete");
-    backup.data_quality.failover_used = true;
+    backup.data_quality.legacy_exit_compatibility = true;
     backup.data_quality.failover_reason = primaryError
-      ? "primary_provider_request_failed"
-      : "primary_snapshot_incomplete";
+      ? "coinbase_unavailable_for_existing_bitstamp_position"
+      : "coinbase_snapshot_incomplete_for_existing_bitstamp_position";
     if (snapshotIsEntryReady(backup, Date.now())) return backup;
-    if (!primary) return backup;
-    // If the backup is also incomplete, retain the better fresh primary quote
-    // for exit monitoring; entry readiness remains blocked by missing checks.
-    if (Number.isFinite(primary.bid) && primary.bid > 0 &&
-        Number.isFinite(primary.ask) && primary.ask >= primary.bid) {
-      primary.data_quality.failover_attempted = true;
-      primary.data_quality.failover_error = "backup_snapshot_incomplete";
-      primary.data_quality.backup_provider = "bitstamp_spot";
+    const fallbackNowMs = Date.now();
+    const fallbackQuoteAgeMs = fallbackNowMs - Number(backup.quote_received_at_ms);
+    const fallbackTickerTimeMs = Date.parse(backup.ticker_time || "");
+    const fallbackTickerAgeMs = fallbackNowMs - fallbackTickerTimeMs;
+    const fallbackQuoteUsable = backup.market_data_provider === "bitstamp_spot" &&
+      backup.status === "live" &&
+      [backup.bid, backup.ask, backup.last].every((value) => Number.isFinite(value) && value > 0) &&
+      backup.ask >= backup.bid &&
+      Number.isFinite(fallbackQuoteAgeMs) && fallbackQuoteAgeMs >= -5000 && fallbackQuoteAgeMs <= 120000 &&
+      Number.isFinite(fallbackTickerTimeMs) && fallbackTickerAgeMs >= -5000 && fallbackTickerAgeMs <= 120000 &&
+      backup.data_quality?.ticker_provider === "bitstamp_spot";
+    if (fallbackQuoteUsable) {
+      // Legacy positions may use only their original venue's fresh bid to
+      // preserve exit marking. Incomplete candles/books still fail market health
+      // and cannot be considered for any new entry.
+      backup.data_quality.legacy_exit_quote_only = true;
+      return backup;
+    }
+    if (primary) {
+      // A Coinbase quote must never be substituted for a Bitstamp-entered
+      // position. Returning it lets the provider lock reject the mark safely.
+      primary.data_quality.legacy_provider_fallback_attempted = true;
+      primary.data_quality.legacy_provider_fallback_error = "bitstamp_snapshot_incomplete_or_stale";
       return primary;
     }
     return backup;
   } catch (backupError) {
     if (primary) {
-      primary.data_quality.failover_attempted = true;
-      primary.data_quality.failover_error = providerErrorCode(backupError);
-      primary.data_quality.backup_provider = "bitstamp_spot";
+      primary.data_quality.legacy_provider_fallback_attempted = true;
+      primary.data_quality.legacy_provider_fallback_error = providerErrorCode(backupError);
       return primary;
     }
     const combined = new Error(
-      "Primary Coinbase and secondary Bitstamp market-data requests failed"
+      "Coinbase market data is unavailable and legacy Bitstamp exit data could not be refreshed"
     );
-    combined.code = "all_market_data_providers_unavailable";
-    combined.primary_error_code = primaryError ? providerErrorCode(primaryError) : "primary_snapshot_incomplete";
+    combined.code = "legacy_exit_market_data_unavailable";
+    combined.primary_error_code = primaryError ? providerErrorCode(primaryError) : "coinbase_snapshot_incomplete";
     combined.backup_error_code = providerErrorCode(backupError);
     combined.status = Number(backupError?.status) || Number(primaryError?.status) || 503;
     throw combined;

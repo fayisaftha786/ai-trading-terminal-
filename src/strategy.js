@@ -615,7 +615,8 @@ export function assessCrossMarketContext(
     const market = bySymbol.get(symbol);
     const oneHour = market?.primary?.regime;
     const sixHour = market?.higher?.regime;
-    if (!isFreshTickerEvent(market, nowMs, 120000) || !supported.has(oneHour) || !supported.has(sixHour)) {
+    if (market?.market_data_provider !== "coinbase_exchange" ||
+        !isFreshTickerEvent(market, nowMs, 120000) || !supported.has(oneHour) || !supported.has(sixHour)) {
       missing.push(symbol);
       continue;
     }
@@ -681,6 +682,7 @@ export function assessCrossMarketContext(
 export function assessCandidate({ market, primary, higher, nowMs, costs, marketContext }) {
   const reject = (reason) => ({ eligible: false, reason, ...(marketContext ? { market_context_mode: marketContext.mode || "BLOCKED" } : {}) });
   if (market?.status !== "live") return reject("market_data_unavailable");
+  if (market?.market_data_provider !== "coinbase_exchange") return reject("coinbase_market_data_required_for_new_entry");
   if (!Number.isFinite(nowMs)) return reject("invalid_evaluation_time");
   if (!primary || typeof primary !== "object" || !higher || typeof higher !== "object") {
     return reject("timeframe_analysis_unavailable");

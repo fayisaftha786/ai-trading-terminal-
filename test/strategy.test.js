@@ -55,9 +55,32 @@ test("analysis returns HOLD when candle integrity is not clean", () => {
   assert.equal(result.score, 0);
 });
 
+
+test("new PAPER candidates are Coinbase-only even while legacy Bitstamp exits remain supported", () => {
+  const now = Date.now();
+  const market = {
+    status: "live", market_data_provider: "bitstamp_spot",
+    ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
+    bid: 100, ask: 100.01, last: 100, quote_volume_usd: 5000000,
+    bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000
+  };
+  const primary = {
+    signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000, atr_pct: 2, rsi14: 55,
+    adx14: 30, plus_di14: 40, minus_di14: 10
+  };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const result = assessCandidate({
+    market, primary, higher, nowMs: now,
+    costs: { feeBpsPerSide: 15, slippageBps: 10 }
+  });
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, "coinbase_market_data_required_for_new_entry");
+});
+
 test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   const now = Date.now();
-  const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
+  const market = { status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
     last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
@@ -75,7 +98,7 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
 
 test("candidate gate rejects stale timeframe candles and invalid execution assumptions", () => {
   const now = Date.now();
-  const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
+  const market = { status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
     last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000,
     book_retrieved_at_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
@@ -111,7 +134,7 @@ test("candidate gate rejects stale timeframe candles and invalid execution assum
 
 test("candidate gate blocks signals without higher-timeframe agreement", () => {
   const now = Date.now();
-  const market = { status: "live", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
+  const market = { status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
     last: 100, quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000 };
   const primary = { signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND", last_closed_candle_ms: now - 3600000,
     atr_pct: 2, rsi14: 55, adx14: 30, plus_di14: 40, minus_di14: 10 };
@@ -285,7 +308,7 @@ test("fresh local ticker retrieval remains usable for paper exits when last trad
 test("candidate gate blocks a newly retrieved quote when no recent exchange trade occurred", () => {
   const now = Date.now();
   const market = {
-    status: "live",
+    status: "live", market_data_provider: "coinbase_exchange",
     ticker_time: new Date(now - 5 * 60 * 1000).toISOString(),
     quote_received_at_ms: now - 1000,
     bid: 100, ask: 100.01, last: 100,
@@ -434,7 +457,7 @@ test("market regime classifier fails closed for missing, invalid and discontinuo
 test("BTC-led market context requires fresh breadth and blocks risk-off regimes", () => {
   const now = Date.now();
   const row = (symbol, oneHour, sixHour, age = 1000) => ({
-    symbol, status: "live", ticker_time: new Date(now - age).toISOString(),
+    symbol, status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now - age).toISOString(),
     primary: { regime: oneHour }, higher: { regime: sixHour }
   });
   const riskOn = assessCrossMarketContext([
@@ -482,10 +505,28 @@ test("BTC-led market context requires fresh breadth and blocks risk-off regimes"
   assert.equal(stale.allowed_for_long_entries, false);
 });
 
+
+test("legacy Bitstamp exit snapshots cannot influence cross-market entry context", () => {
+  const now = Date.now();
+  const rows = [
+    { symbol: "BTC/USD", status: "live", market_data_provider: "coinbase_exchange",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } },
+    { symbol: "ETH/USD", status: "live", market_data_provider: "coinbase_exchange",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } },
+    { symbol: "SOL/USD", status: "live", market_data_provider: "bitstamp_spot",
+      ticker_time: new Date(now - 1000).toISOString(), primary: { regime: "UPTREND" }, higher: { regime: "UPTREND" } }
+  ];
+  const result = assessCrossMarketContext(rows, now);
+  assert.equal(result.status, "unavailable");
+  assert.equal(result.mode, "BLOCKED");
+  assert.deepEqual(result.missing_symbols, ["SOL/USD"]);
+  assert.equal(result.allowed_for_long_entries, false);
+});
+
 test("production candidate gate enforces BTC-led market context when supplied", () => {
   const now = Date.now();
   const market = {
-    status: "live", ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
+    status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
     bid: 100, ask: 100.01, last: 100, quote_volume_usd: 5000000,
     bid_depth_quote: 10000, ask_depth_quote: 10000, book_retrieved_at_ms: now - 1000
   };

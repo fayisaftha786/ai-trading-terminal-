@@ -12,12 +12,12 @@ The Cloudflare Worker is PAPER-only. Live exchange orders remain disabled. The o
 ## Market-data integrity
 
 - Coinbase USD spot REST is the primary feed for BTC/USD, ETH/USD and SOL/USD.
-- Bitstamp USD spot REST is the secondary provider for the same markets. A fallback uses the full same-provider ticker, order book, native 1H candles and native 6H candles.
-- Ticker, book and both candle frames must all identify the same provider. No Coinbase quote is joined to Bitstamp candles, or vice versa.
-- Bitstamp ticker must explicitly identify a SPOT market. Its order-book response must have a fresh exchange timestamp as well as a fresh local retrieval time. Coinbase REST book snapshots have no reliable exchange event timestamp, so only local retrieval age can be required there.
+- Coinbase is the only live market source for new entries. Bitstamp's live data is limited to same-provider exit marking of positions opened before this change.
+- Ticker, book and both candle frames must all identify the same provider. No provider-mixing is allowed; any legacy Bitstamp exit snapshot is never considered for a new entry.
+- Coinbase REST book snapshots use local retrieval-age validation. The Bitstamp exit-only compatibility path additionally requires a fresh exchange timestamp and local retrieval time.
 - Entry universe gates require fresh ticker observation/event time, a recent order-book retrieval (maximum 15 seconds), minimum top-10 depth of USD 5,000 on each side, valid spread, and at least 150 closed, contiguous and fresh candles on 1H and 6H for each configured market.
-- If both providers fail or the secondary snapshot is incomplete, no new entries are allowed. Fresh bid marks may still be retained for PAPER exits when safe. Never use the secondary price to mark or close a position opened on the primary venue.
-- Bitstamp candle archive rows have a separate provider key and are inserted incrementally. Offline strategy tournament continues using Coinbase-only archive data to avoid silent cross-venue blending.
+- If Coinbase data is incomplete, new entries are blocked. Only a pre-existing Bitstamp-entered position may request Bitstamp read-only data for its exit mark; if that same-venue quote is unavailable, it remains unmarked. No cross-provider quote substitution is allowed.
+- The research archive and offline strategy tournament use Coinbase-only historical candles; Bitstamp backfill is not exposed.
 
 ## PAPER ledger, exits and risk
 
@@ -31,7 +31,7 @@ The Cloudflare Worker is PAPER-only. Live exchange orders remain disabled. The o
 ## Current source and validation state
 
 - Main Git commit at the 2026-11-09 audit: `ec1b48ec28205df092e8dc2a4ef9a39f28ca5ee4`.
-- PR #62 (same-provider Bitstamp failover and provider diagnostics) is merged.
+- PR #62 (same-provider Bitstamp failover and provider diagnostics) is retained only as a compatibility path for legacy paper exits; new entries require Coinbase.
 - PR #63 (lock PAPER position valuation and exits to the entry venue) is merged.
 - Their GitHub validation pipelines passed syntax checks, unit tests, Wrangler dry-run and local Durable Object/authentication/kill-switch smoke coverage.
 - Latest inspected production health sample at 2026-11-09 06:34:50 UTC: Worker API `ok`, mode `paper_only`, scheduler healthy, scheduled scan completed, 3/3 markets healthy, zero consecutive unhealthy scheduled scans, live trading OFF.

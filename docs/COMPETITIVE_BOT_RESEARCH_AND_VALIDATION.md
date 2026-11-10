@@ -22,7 +22,7 @@ Sources are listed at the end. Vendor feature descriptions are not evidence of p
 
 ### Market data and recovery
 
-- Coinbase USD spot remains primary; Bitstamp is a complete same-venue secondary snapshot.
+- Coinbase USD spot is the sole live market source for new paper entries. Bitstamp is isolated to legacy same-venue exit marking and explicit historical research backfill.
 - A market snapshot may not blend ticker, order book, 1H candles or 6H candles across providers.
 - PAPER positions remain locked to their entry provider for valuation, simulated exits and manual close.
 - Health distinguishes scheduler heartbeat, last completed scan and current snapshot freshness.
