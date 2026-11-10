@@ -561,6 +561,78 @@ function convertBitstampCandles(payload) {
  * legacy PAPER position whose stored entry provider is Bitstamp. This path is
  * never used for ordinary scans or new PAPER entries.
  */
+async function loadBitstampCandleHistory({
+  symbol,
+  pair,
+  timeframeSeconds,
+  intervalMs,
+  cachedRows,
+  cachedAudit,
+  requestState,
+  nowMs,
+  maxStaleMs
+}) {
+  const useCache = cachedAudit?.ok === true &&
+    !shouldRefreshCandleHistory(cachedRows, intervalMs, nowMs, 150);
+  if (useCache) {
+    return {
+      audit: cachedAudit,
+      source: "bitstamp_legacy_exit_archive",
+      refresh_status: "cache_reused",
+      refresh_error: null
+    };
+  }
+
+  try {
+    const payload = await getBitstampJson(
+      "/ohlc/" + pair + "/?step=" + timeframeSeconds + "&limit=200&exclude_current_candle=true",
+      requestState
+    );
+    const responsePair = String(payload?.data?.pair || "").toUpperCase().replace(/\s+/g, "");
+    const expectedPair = symbol.toUpperCase().replace(/\s+/g, "");
+    if (responsePair !== expectedPair) {
+      const error = new Error("Bitstamp OHLC response pair mismatch");
+      error.status = 502;
+      throw error;
+    }
+
+    const rows = convertBitstampCandles(payload);
+    const audit = auditCandles(rows, intervalMs, nowMs, 150);
+    if (audit.ok) {
+      return {
+        audit,
+        source: "bitstamp_spot_rest_legacy_exit",
+        refresh_status: "refreshed",
+        refresh_error: null
+      };
+    }
+
+    if (auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs)) {
+      return {
+        audit: cachedAudit,
+        source: "bitstamp_legacy_exit_archive_fallback",
+        refresh_status: "invalid_refresh_cache_fallback",
+        refresh_error: "candle_integrity_failed"
+      };
+    }
+    return {
+      audit,
+      source: "bitstamp_spot_rest_legacy_exit",
+      refresh_status: "refresh_rejected",
+      refresh_error: "candle_integrity_failed"
+    };
+  } catch (error) {
+    const canUseCache = cachedAudit?.ok === true &&
+      auditIsFresh(cachedAudit, intervalMs, nowMs, maxStaleMs);
+    return {
+      audit: cachedAudit || auditCandles([], intervalMs, nowMs, 150),
+      source: canUseCache ? "bitstamp_legacy_exit_archive_fallback" : "bitstamp_legacy_exit_archive_stale",
+      refresh_status: canUseCache ? "provider_error_cache_fallback" : "provider_error_no_fresh_cache",
+      refresh_error: providerErrorCode(error)
+    };
+  }
+}
+
 async function fetchBitstampProductSnapshot(
   { symbol, product },
   nowMs,
