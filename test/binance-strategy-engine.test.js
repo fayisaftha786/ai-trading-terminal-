@@ -6,33 +6,33 @@ const engine = readFileSync(new URL("../src/engine.js", import.meta.url), "utf8"
 const strategy = readFileSync(new URL("../src/binance-strategy.js", import.meta.url), "utf8");
 
 test("Binance strategy uses persistent closed-candle cache and current REST depth", () => {
-  assert.match(engine, /CREATE TABLE IF NOT EXISTS binance_strategy_candle_cache/);
-  assert.match(engine, /loadBinanceStrategyCandleCache/);
-  assert.match(engine, /saveBinanceStrategyCandleCache/);
-  assert.match(engine, /depth\\?symbol=/);
+  assert.ok(engine.includes("CREATE TABLE IF NOT EXISTS binance_strategy_candle_cache"));
+  assert.ok(engine.includes("loadBinanceStrategyCandleCache"));
+  assert.ok(engine.includes("saveBinanceStrategyCandleCache"));
+  assert.ok(engine.includes("depth?symbol="));
   assert.ok(engine.includes('const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr";'));
   assert.ok(engine.includes('const base = "https://data-api.binance.vision/api/v3/";'));
-  assert.doesNotMatch(engine, /ticker\\/24hr\\?symbols=/);
-  assert.match(engine, /requestedSymbols = new Set/);
-  assert.match(engine, /stale_fallback_timeframes/);
+  assert.equal(engine.includes("ticker/24hr?symbols="), false);
+  assert.ok(engine.includes("requestedSymbols = new Set"));
+  assert.ok(engine.includes("stale_fallback_timeframes"));
 });
 
 test("Binance strategy invalid-batch response matches the 50-symbol API limit", () => {
-  assert.match(engine, /maximum_symbols_per_batch: BINANCE_STRATEGY_BATCH_LIMIT/);
-  assert.match(engine, /expected: "one to fifty comma-separated Binance USDT Spot symbols"/);
+  assert.ok(engine.includes("maximum_symbols_per_batch: BINANCE_STRATEGY_BATCH_LIMIT"));
+  assert.ok(engine.includes('expected: "one to fifty comma-separated Binance USDT Spot symbols"'));
 });
 
 test("Binance strategy is public-read-only and never enables an exchange order", () => {
-  assert.match(engine, /paper_orders_created: 0/);
-  assert.match(engine, /live_trading_enabled: false/);
-  assert.match(engine, /live_execution_locked: true/);
-  assert.match(strategy, /order_created: false/);
-  assert.match(strategy, /auto_entry_enabled_by_this_engine: false/);
-  assert.doesNotMatch(engine, /submitBinance|cancelBinance|withdrawBinance/);
+  assert.ok(engine.includes("paper_orders_created: 0"));
+  assert.ok(engine.includes("live_trading_enabled: false"));
+  assert.ok(engine.includes("live_execution_locked: true"));
+  assert.ok(strategy.includes("order_created: false"));
+  assert.ok(strategy.includes("auto_entry_enabled_by_this_engine: false"));
+  assert.equal(/submitBinance|cancelBinance|withdrawBinance/.test(engine), false);
 });
 
 test("Binance strategy filters thin ticker snapshots using 24h trade count", () => {
-  assert.match(strategy, /active_24h_trade_count/);
-  assert.match(strategy, /ticker\\?\\.count/);
-  assert.doesNotMatch(strategy, /recent_last_trade|tickerTime/);
+  assert.ok(strategy.includes("active_24h_trade_count"));
+  assert.ok(strategy.includes("ticker?.count"));
+  assert.equal(/recent_last_trade|tickerTime/.test(strategy), false);
 });
