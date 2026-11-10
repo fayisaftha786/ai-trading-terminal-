@@ -16,7 +16,7 @@ test("Coinbase is the only exchange account and order connector in the dashboard
 
 test("release documentation keeps automatic live entries disabled and manual Coinbase orders guarded", () => {
   assert.match(readme, /Coinbase is the only supported centralized exchange provider/);
-  assert.match(readme, /Automatic strategy execution remains \*\*paper-only\*\*/);
+  assert.ok(readme.includes("Automatic strategy execution remains PAPER-only"));
   assert.match(cloudflareGuide, /manually previewed and separately owner-confirmed orders/);
   assert.match(cloudflareGuide, /automatic live entries are not implemented/);
 });
