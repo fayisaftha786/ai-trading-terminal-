@@ -49,6 +49,6 @@ test("AI Brain uses a single 50-market batch and visibly reports verified candle
   assert.match(html, /index\+=50/);
   assert.match(html, /Promise\.all\(chunks\.map/);
   assert.match(html, /timeframe\(s\) reused/);
-  assert.match(html, /new closed bar is due/);
+  assert.match(html, /cached until the next bar closes/);
   assert.match(radar, /window\.binanceRadarSymbols = markets\.map/);
 });
