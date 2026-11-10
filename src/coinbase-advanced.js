@@ -171,6 +171,15 @@ export async function createCoinbaseAdvancedJwt({
   return signingInput + "." + base64Url(new Uint8Array(signature));
 }
 
+function credentialKeyFormatHint(value) {
+  const secret = String(value || "").trim();
+  if (!secret) return "missing";
+  if (secret.startsWith("-----BEGIN EC PRIVATE KEY-----")) return "ecdsa_p256_sec1_pem";
+  if (secret.startsWith("-----BEGIN PRIVATE KEY-----")) return "pkcs8_ed25519_or_ecdsa_pem";
+  if (/^[A-Za-z0-9+/=\\s]+$/.test(secret)) return "ed25519_base64_candidate";
+  return "unknown_format";
+}
+
 function configuration(env = {}) {
   const apiKey = String(env.COINBASE_ADVANCED_API_KEY || "").trim();
   const privateKeyPem = String(env.COINBASE_ADVANCED_API_SECRET || "").replace(/\\n/g, "\n");
@@ -184,6 +193,7 @@ function configuration(env = {}) {
   return {
     apiKey,
     privateKeyPem,
+    privateKeyFormatHint: credentialKeyFormatHint(privateKeyPem),
     allowedProducts: allowedProducts.slice(0, MAX_ALLOWED_PRODUCTS),
     allowedProductsValid: allowedProducts.length > 0 && allowedProducts.length <= MAX_ALLOWED_PRODUCTS,
     maxOrderQuote,
@@ -205,6 +215,8 @@ export function coinbaseAdvancedStatus(env = {}) {
     provider: "coinbase_advanced_trade",
     mode: "live_setup_locked",
     credentials_configured: config.credentialsConfigured,
+    credential_key_format_hint: config.privateKeyFormatHint,
+    supported_private_key_formats: ["Ed25519 Base64 (32/64 bytes)", "Ed25519 PKCS#8 PEM", "ECDSA P-256 EC PRIVATE KEY PEM"],
     allowed_products_configured: config.allowedProductsValid,
     allowed_products: config.allowedProducts,
     max_order_quote_configured: config.maxOrderQuoteValid,
