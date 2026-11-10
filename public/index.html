@@ -1123,7 +1123,7 @@ function renderBinanceStrategyRows(){
       '<td><span class="ai-status '+(committee.unanimous?"good":"pending")+'">'+voteCount+'/'+voteTotal+'</span><small class="ai-reasons">specialist votes</small></td>'+
       '<td class="tf-cell">'+tf("15m")+'</td><td class="tf-cell">'+tf("1h")+'</td><td class="tf-cell">'+tf("4h")+'</td>'+
       '<td>'+ (Number.isFinite(quality.spread_bps)?Number(quality.spread_bps).toFixed(2)+" bps":"—")+'</td>'+
-      '<td>'+ (Number.isFinite(cost.round_trip_cost_bps)?Number(cost.round_trip_cost_bps).toFixed(1)+" bps":"—")+'</td>'+
+      '<td>'+ (Number.isFinite(cost.round_trip_cost_bps)?Number(cost.round_trip_cost_bps).toFixed(1)+" bps":"—")+'<small class="ai-reasons">'+(cost.fee_source==="binance_account_commission"?"ACCOUNT TAKER FEE · VERIFIED":"CONFIGURED FEE FALLBACK")+'</small></td>'+
       '<td>'+ (Number.isFinite(cost.estimated_net_edge_bps)?(cost.estimated_net_edge_bps>=0?"+":"")+Number(cost.estimated_net_edge_bps).toFixed(1)+" bps":"—")+'</td>'+
       '<td><span class="ai-status '+(riskPassed?"good":"bad")+'">'+(riskPassed?"PASS":"BLOCKED")+'</span><small class="ai-reasons">'+esc(reasons||"All strategy and risk checks passed")+'</small></td>'+
       '<td><span class="ai-status '+(ready?"good":signalTone)+'">'+(ready?"PAPER REVIEW READY":"HOLD / NO TRADE")+'</span></td></tr>';
@@ -1182,6 +1182,7 @@ async function runBinanceStrategy(){
     const analyzed=binanceStrategyResults.filter((item)=>item.status==="analyzed").length;
     const candidates=binanceStrategyResults.filter((item)=>item.signal==="LONG_CANDIDATE").length;
     const ready=binanceStrategyResults.filter((item)=>item.paper_trade?.status==="PAPER_REVIEW_READY").length;
+    const feeVerified=binanceStrategyResults.filter((item)=>item.cost_model?.fee_source==="binance_account_commission").length;
     const cache=binanceStrategyResults.reduce((total,item)=>{
       const stats=item.candle_cache||{};
       total.reused+=Array.isArray(stats.reused_timeframes)?stats.reused_timeframes.length:0;
@@ -1192,7 +1193,7 @@ async function runBinanceStrategy(){
     $("aiBrainFeed").textContent=failures?"PARTIAL · "+analyzed+"/"+symbols.length:"LIVE DATA · "+analyzed+"/"+symbols.length;
     $("aiBrainFeed").className="tag "+(failures?"bad":"good");
     $("aiBrainUpdated").textContent="Updated "+new Date(binanceStrategyLastRunAt).toLocaleTimeString();
-    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
+    $("aiBrainStatus").textContent="Completed using Binance public Spot REST data. "+candidates+" long candidate(s); "+ready+" passed all current data, liquidity, spread, net-edge and portfolio checks. Account taker fee verified for "+feeVerified+"/"+symbols.length+" markets; other markets use the configured paper-fee fallback. Candle cache: "+cache.reused+" timeframe(s) reused, "+cache.refreshed+" refreshed, "+cache.fallback+" stale fallback(s). A paper-review status does not create a ledger position; no paper or live order was submitted.";
     setAiBrainProgress(symbols.length,symbols.length,"Completed "+symbols.length+" markets · "+analyzed+" valid analyses · "+failures+" failures");
   }catch(error){
     $("aiBrainFeed").textContent="SCAN ERROR";
