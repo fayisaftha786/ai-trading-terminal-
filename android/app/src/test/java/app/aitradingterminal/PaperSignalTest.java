@@ -14,7 +14,7 @@ public final class PaperSignalTest {
     }
     private PaperSignal.Analysis higher() {
         return new PaperSignal.Analysis("HOLD","UPTREND","test",70,100,
-                55,1.0,24,28,20,1.1,NOW-6*60*60_000L,4*60*60_000L);
+                55,1.0,24,28,20,1.1,NOW-6*60*60_000L,6*60*60_000L);
     }
     private PaperSignal.Quote quote() {
         return new PaperSignal.Quote(100.05,100.0,100.1,50_000,50_000,2_000_000,
@@ -61,14 +61,14 @@ public final class PaperSignalTest {
 
     @Test public void staleHigherTimeframeFailsClosed() {
         PaperSignal.Analysis stale=new PaperSignal.Analysis("HOLD","UPTREND","test",75,100,
-                55,1,23,28,19,1.1,NOW-10*60*60_000L,4*60*60_000L);
+                55,1,23,28,19,1.1,NOW-14*60*60_000L,6*60*60_000L);
         assertEquals("higher_timeframe_closed_candle_stale",
                 PaperSignal.assess(primary(),stale,quote(),NOW).reason);
     }
 
     @Test public void mixedTrendFailsClosed() {
         PaperSignal.Analysis down=new PaperSignal.Analysis("HOLD","DOWNTREND","test",30,100,
-                40,1,25,10,30,1.0,NOW-6*60*60_000L,4*60*60_000L);
+                40,1,25,10,30,1.0,NOW-6*60*60_000L,6*60*60_000L);
         assertEquals("higher_timeframe_not_uptrend",PaperSignal.assess(primary(),down,quote(),NOW).reason);
     }
 
