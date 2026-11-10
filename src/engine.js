@@ -143,10 +143,11 @@ export class TradingEngine extends DurableObject {
 
 
   async fetch(request) {
-    await this.ensureAlarm();
     const url = new URL(request.url);
     try {
       // Internal-only: reached through the Worker's direct Durable Object binding.
+      // Authentication throttling must not depend on scheduler alarm startup.
+      // This keeps owner login available if the market-scan alarm is temporarily unavailable.
       // Persist a one-way source-IP hash, never the raw address.
       if (request.method === "POST" && url.pathname === "/internal/auth/login-attempts") {
         let body;
@@ -183,6 +184,11 @@ export class TradingEngine extends DurableObject {
         );
         return jsonResponse({ allowed: true, attempts_remaining: attemptLimit - attempts - 1 });
       }
+
+      // Scheduler initialization belongs to trading/health requests, not the auth
+      // limiter. Keep it after the isolated internal login-throttle route.
+      await this.ensureAlarm();
+
       if (request.method === "GET" && url.pathname === "/api/health") {
         // Expose only non-sensitive scheduler telemetry publicly so an external
         // watchdog can distinguish a live Worker from a stalled Durable Object alarm.
