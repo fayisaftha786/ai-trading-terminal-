@@ -206,6 +206,20 @@ export class TradingEngine extends DurableObject {
       portfolioBlockReasons.push("max_exposure");
     }
     const uniquePortfolioBlocks = [...new Set(portfolioBlockReasons)];
+    let binanceFeePreflight = null;
+    try {
+      binanceFeePreflight = await preflightBinanceReadOnly(this.env, { feeSymbols: symbols });
+    } catch {
+      // Fee verification is diagnostic only; strategy analysis keeps its
+      // configured conservative paper assumption when account fees cannot be read.
+    }
+    const verifiedFeeProfiles = new Map(
+      (binanceFeePreflight?.connected === true && Array.isArray(binanceFeePreflight.fees?.symbols)
+        ? binanceFeePreflight.fees.symbols : [])
+        .filter((item) => item.status === "verified" &&
+          Number.isFinite(item.conservative_taker_bps) && item.conservative_taker_bps >= 0)
+        .map((item) => [item.symbol, item])
+    );
 
     const results = await mapWithConcurrency(symbols, 10, async (symbol) => {
       const ticker = tickerBySymbol.get(symbol);
@@ -287,7 +301,12 @@ export class TradingEngine extends DurableObject {
           },
           nowMs: Date.now(),
           costs: {
-            feeBpsPerSide: risk.fee_bps_per_side,
+            feeBpsPerSide: verifiedFeeProfiles.has(symbol)
+              ? verifiedFeeProfiles.get(symbol).conservative_taker_bps
+              : risk.fee_bps_per_side,
+            feeSource: verifiedFeeProfiles.has(symbol)
+              ? "binance_account_commission" : "configured_paper_assumption",
+            feeRateStatus: verifiedFeeProfiles.has(symbol) ? "verified" : "fallback",
             slippageBps: risk.slippage_bps
           },
           portfolioBlockReasons: uniquePortfolioBlocks,
@@ -326,6 +345,15 @@ export class TradingEngine extends DurableObject {
       analyzed_markets: results.filter((item) => item.status === "analyzed").length,
       candidate_count: results.filter((item) => item.signal === "LONG_CANDIDATE").length,
       paper_review_ready_count: results.filter((item) => item.paper_trade?.status === "PAPER_REVIEW_READY").length,
+      fee_diagnostics: {
+        status: verifiedFeeProfiles.size === symbols.length && symbols.length > 0
+          ? "verified_for_all_markets" : verifiedFeeProfiles.size > 0 ? "partially_verified" : "configured_fallback",
+        verified_pairs: verifiedFeeProfiles.size,
+        fallback_pairs: Math.max(0, symbols.length - verifiedFeeProfiles.size),
+        requested_pairs: symbols.length,
+        source: binanceFeePreflight?.fees?.source || null,
+        note: "Verified account taker commissions include standard, tax and special components. Unverified pairs use the configured paper fee assumption; BNB discounts are not applied to the strategy."
+      },
       candle_cache_summary: {
         reused_timeframes: allCacheStates.reduce((sum, item) => sum + item.reused_timeframes.length, 0),
         refreshed_timeframes: allCacheStates.reduce((sum, item) => sum + item.refreshed_timeframes.length, 0),

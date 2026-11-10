@@ -281,6 +281,9 @@ export function analyzeBinanceMultiTimeframeMarket({
     },
     cost_model: {
       fee_bps_per_side: feeBpsPerSide,
+      fee_source: costs.feeSource === "binance_account_commission"
+        ? "binance_account_commission" : "configured_paper_assumption",
+      fee_rate_status: costs.feeRateStatus === "verified" ? "verified" : "fallback",
       slippage_bps_per_side: slippageBpsPerSide,
       spread_bps: spreadBps,
       round_trip_cost_bps: roundTripCostBps,
