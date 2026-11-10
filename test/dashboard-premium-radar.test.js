@@ -8,7 +8,7 @@ const worker = readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
 
 test("premium terminal navigation links to the main operating surfaces", () => {
   for (const id of [
-    "modePanel", "liveMarketPanel", "binanceRadarPanel", "marketIntelligencePanel",
+    "modePanel", "liveMarketPanel", "binanceRadarPanel", "binanceStrategyPanel", "marketIntelligencePanel",
     "exchangeConnections", "automationPanel", "researchArchivePanel",
     "performancePanel", "paperLedgerPanel"
   ]) assert.ok(html.includes('href="#' + id + '"') || html.includes('id="' + id + '"'), "missing navigation target " + id);
@@ -42,4 +42,20 @@ test("content security policy permits only the Coinbase and Binance public marke
   assert.match(worker, /https:\/\/data-api\.binance\.vision/);
   assert.match(worker, /wss:\/\/data-stream\.binance\.vision/);
   assert.match(worker, /frame-ancestors 'none'/);
+});
+
+test("AI Brain uses a single 50-market batch and visibly reports verified candle-cache use", () => {
+  assert.match(html, /AI Brain · 50-market multi-timeframe engine/);
+  assert.match(html, /index\+=50/);
+  assert.match(html, /Promise\.all\(chunks\.map/);
+  assert.match(html, /timeframe\(s\) reused/);
+  assert.match(html, /cached until the next bar closes/);
+  assert.match(radar, /window\.binanceRadarSymbols = markets\.map/);
+});
+
+test("AI Brain displays specialist committee votes instead of presenting its score as a probability", () => {
+  assert.match(html, /<th>VOTES<\/th>/);
+  assert.match(html, /committee\.passed_votes/);
+  assert.match(html, /eight transparent specialist votes/);
+  assert.match(html, /not a forecast, probability/);
 });
