@@ -193,8 +193,8 @@ export function analyzeBinanceMultiTimeframeMarket({
       quote_volume_24h_usdt: quoteVolume,
       bid_depth_top20_usdt: bidDepthQuote,
       ask_depth_top20_usdt: askDepthQuote,
-      last_trade_at_ms: tickerTime,
-      quote_observed_at_ms: nowMs
+      trade_count_24h: Number.isFinite(Number(ticker?.count)) ? Number(ticker.count) : null,
+      quote_snapshot_evaluated_at_ms: nowMs
     },
     market_regime_4h: regime4h,
     cost_model: {
