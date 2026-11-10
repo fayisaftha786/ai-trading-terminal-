@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -56,7 +58,7 @@ class SignalBacktestRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     candles: list[list[float]] = Field(min_length=200, max_length=5000)
     higher_timeframe_candles: list[list[float]] = Field(min_length=150, max_length=1000)
-    higher_timeframe_interval_ms: Literal[14_400_000, 21_600_000] = 14_400_000
+    higher_timeframe_interval_ms: Literal[21_600_000] = 21_600_000
     timeframe: Literal["1h"] = "1h"
 
 
