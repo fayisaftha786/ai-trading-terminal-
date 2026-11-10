@@ -104,7 +104,7 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
     assert.match(auth, /^Bearer [A-Za-z0-9_.-]+$/);
     const token = auth.slice("Bearer ".length);
     const checked = await verifyJwt(token, publicKeyPem);
-    assert.equal(checked.valid, true, "request JWT must be a valid ES256 signature");
+    assert.equal(checked.valid, true, "request JWT must be a valid CDP signature");
     assert.equal(checked.header.alg, env._testJwtAlgorithm || "ES256");
     assert.equal(checked.header.kid, env.COINBASE_ADVANCED_API_KEY);
     assert.equal(checked.payload.uri, options.method + " api.coinbase.com" + parsed.pathname + parsed.search);
@@ -166,6 +166,8 @@ test("live readiness status defaults closed and exposes no API secret", () => {
   assert.equal(status.automatic_live_entries_enabled, false);
   assert.ok(status.blockers.includes("coinbase_advanced_credentials_not_configured"));
   assert.equal(JSON.stringify(status).includes("PRIVATE KEY"), false);
+  assert.equal(status.credential_key_format_hint, "missing");
+  assert.ok(status.supported_private_key_formats.includes("Ed25519 Base64 (32/64 bytes)"));
 });
 
 test("guarded order switch remains closed by default and requires strict daily/open-order caps", () => {
@@ -208,6 +210,19 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.nbf, 1800000000);
   assert.equal(verified.payload.exp - verified.payload.nbf, 90);
   assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
+});
+
+test("current Coinbase Ed25519 CDP key completes read-only account preflight", async () => {
+  const credentials = makeEd25519Credentials();
+  const env = makeEd25519Env(credentials.privateKeyPem, credentials);
+  const fake = mockApi(env);
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "preflight_ready_for_manual_order_preview");
+  assert.equal(result.permissions.can_view, true);
+  assert.equal(result.permissions.can_transfer, false);
+  assert.deepEqual(result.eligible_products, ["BTC-USD"]);
+  assert.ok(fake.calls.length >= 3);
+  assert.ok(fake.calls.every((call) => call.path.startsWith("/api/v3/brokerage/")));
 });
 
 test("EdDSA JWT from recommended Coinbase CDP Ed25519 PKCS8 PEM verifies", async () => {
