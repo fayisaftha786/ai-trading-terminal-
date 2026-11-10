@@ -167,8 +167,8 @@ test("login uses strict Durable Object rate limiting first and SQL-independent C
   assert.ok(loginSource.indexOf("limiter.fetch(") < loginSource.indexOf("checkEdgeLoginRateLimit(env, ipHash)"));
   assert.ok(loginSource.includes("rateLimitResponse?.status === 429"));
   assert.ok(loginSource.includes('rate_limit_mode: rateLimitMode'));
-  assert.ok(workerSource.includes("ipLimiter.limit({ key: \"owner-login:ip:\" + ipHash })"));
-  assert.ok(workerSource.includes('globalLimiter.limit({ key: "owner-login:global" })'));
+  assert.ok(workerSource.includes('import { checkEdgeLoginRateLimit } from "./edge-login-rate-limit.js";'));
+  assert.ok(loginSource.includes("checkEdgeLoginRateLimit(env, ipHash)"));
 });
 
 test("Wrangler configures separate per-IP and per-location fallback login rate limits", () => {

@@ -1,5 +1,6 @@
 import { TradingEngine } from "./engine.js";
 import { AuthRateLimiter } from "./auth-rate-limiter.js";
+import { checkEdgeLoginRateLimit } from "./edge-login-rate-limit.js";
 
 export { TradingEngine, AuthRateLimiter };
 
@@ -82,31 +83,6 @@ function addSecurityHeaders(response) {
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
   headers.set("content-security-policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
-}
-
-async function checkEdgeLoginRateLimit(env, ipHash) {
-  const ipLimiter = env.LOGIN_EDGE_IP_LIMITER;
-  const globalLimiter = env.LOGIN_EDGE_GLOBAL_LIMITER;
-  if (!ipLimiter || !globalLimiter) {
-    console.error("Cloudflare edge login rate-limit bindings are not configured");
-    return { available: false, allowed: false };
-  }
-  try {
-    const [ipResult, globalResult] = await Promise.all([
-      ipLimiter.limit({ key: "owner-login:ip:" + ipHash }),
-      globalLimiter.limit({ key: "owner-login:global" })
-    ]);
-    return {
-      available: true,
-      allowed: ipResult?.success === true && globalResult?.success === true
-    };
-  } catch (error) {
-    console.error("Cloudflare edge login rate limiter failed", {
-      name: typeof error?.name === "string" ? error.name : "Error",
-      message: String(error?.message || error).slice(0, 180)
-    });
-    return { available: false, allowed: false };
-  }
 }
 
 async function login(request, env) {
