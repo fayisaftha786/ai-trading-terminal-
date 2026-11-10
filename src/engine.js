@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -1233,6 +1233,11 @@ export class TradingEngine extends DurableObject {
     const nowMs = Date.now();
     const markets = [];
     const candleArchives = [];
+    const legacyBitstampExitSymbols = new Set(
+      this.getOpenTrades()
+        .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
+        .map((trade) => trade.symbol)
+    );
     for (const product of PRODUCTS) {
       try {
         const cachedCandles = {};
@@ -1264,40 +1269,28 @@ export class TradingEngine extends DurableObject {
             });
           }
         }
-        cachedCandles.bitstamp = {};
-        for (const [timeframeSeconds, key, label] of [
-          [60, "one_minute", "1M"], [300, "five_minute", "5M"]
-        ]) {
-          try {
-            cachedCandles.bitstamp[key] = this.loadResearchCandleCache(product.product, timeframeSeconds, "bitstamp_spot");
-          } catch (error) {
-            this.logEvent("research_cache_read_error", "Bitstamp " + label + " fallback cache read failed", {
-              product: product.product, timeframe_seconds: timeframeSeconds,
-              error: String(error?.message || error).slice(0, 160)
-            });
+        if (legacyBitstampExitSymbols.has(product.symbol)) {
+          cachedCandles.bitstamp = {};
+          for (const [timeframeSeconds, key, label] of [
+            [60, "one_minute", "1M"], [300, "five_minute", "5M"],
+            [3600, "one_hour", "1H"], [21600, "six_hour", "6H"]
+          ]) {
+            try {
+              cachedCandles.bitstamp[key] = this.loadResearchCandleCache(
+                product.product, timeframeSeconds, "bitstamp_spot"
+              );
+            } catch (error) {
+              this.logEvent("research_cache_read_error", "Legacy Bitstamp exit cache read failed", {
+                product: product.product, timeframe_seconds: timeframeSeconds,
+                error: String(error?.message || error).slice(0, 160)
+              });
+            }
           }
         }
-        try {
-          cachedCandles.bitstamp.one_hour = this.loadResearchCandleCache(
-            product.product, 3600, "bitstamp_spot"
-          );
-        } catch (error) {
-          this.logEvent("research_cache_read_error", "Bitstamp 1H fallback cache read failed", {
-            product: product.product, timeframe_seconds: 3600,
-            error: String(error?.message || error).slice(0, 160)
-          });
-        }
-        try {
-          cachedCandles.bitstamp.six_hour = this.loadResearchCandleCache(
-            product.product, 21600, "bitstamp_spot"
-          );
-        } catch (error) {
-          this.logEvent("research_cache_read_error", "Bitstamp 6H fallback cache read failed", {
-            product: product.product, timeframe_seconds: 21600,
-            error: String(error?.message || error).slice(0, 160)
-          });
-        }
-        const snapshot = await fetchProductSnapshot(product, Date.now(), cachedCandles);
+        const snapshot = await fetchProductSnapshot(
+          product, Date.now(), cachedCandles, undefined,
+          { allowBitstampLegacyExit: legacyBitstampExitSymbols.has(product.symbol) }
+        );
         candleArchives.push({
           product: product.product,
           exchange: snapshot.market_data_provider || "coinbase_exchange",
@@ -2064,7 +2057,12 @@ export class TradingEngine extends DurableObject {
     const markets = this.getMarkets();
     const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
     const coinbaseState = createCoinbaseRequestState();
-    const requestState = { ...coinbaseState, bitstamp: { ...coinbaseState.bitstamp } };
+    const requestState = coinbaseState;
+    const legacyBitstampExitSymbols = new Set(
+      this.getOpenTrades()
+        .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
+        .map((trade) => trade.symbol)
+    );
     const issues = [];
     let refreshed = 0;
     let failed = 0;
@@ -2083,7 +2081,11 @@ export class TradingEngine extends DurableObject {
         let book;
         if (provider === "coinbase_exchange") {
           book = await fetchCoinbaseOrderBook(market.product, requestState);
-        } else if (provider === "bitstamp_spot") {
+        } else if (provider === "bitstamp_spot" &&
+                   legacyBitstampExitSymbols.has(product.symbol)) {
+          // Transitional read-only mark refresh for a pre-existing Bitstamp paper
+          // position. New entries are Coinbase-only and cannot use this branch.
+          const { fetchBitstampOrderBook } = await import("./coinbase.js");
           book = await fetchBitstampOrderBook(market.product, requestState);
         } else {
           skipped += 1;
