@@ -801,11 +801,17 @@ export class TradingEngine extends DurableObject {
         return jsonResponse(await preflightBinanceReadOnly(this.env));
       }
       if (request.method === "GET" && url.pathname === "/api/live/status") {
-        return jsonResponse(coinbaseAdvancedStatus(this.env));
+        return jsonResponse({
+          ...coinbaseAdvancedStatus(this.env),
+          background_reconciliation: this.coinbaseBackgroundReconciliationStatus()
+        });
       }
       if (request.method === "POST" && url.pathname === "/api/live/preflight") {
         const result = await preflightCoinbaseAdvanced(this.env);
-        return jsonResponse(result);
+        return jsonResponse({
+          ...result,
+          background_reconciliation: this.coinbaseBackgroundReconciliationStatus()
+        });
       }
       if (request.method === "POST" && url.pathname === "/api/live/order-preview") {
         let rawBody;
@@ -1164,16 +1170,60 @@ export class TradingEngine extends DurableObject {
     return { ...result, client_order_id: record.client_order_id, fill_sync: fillSync };
   }
 
+  coinbaseBackgroundReconciliationStatus() {
+    const configured = coinbaseAdvancedStatus(this.env).credentials_configured === true;
+    const runtime = this.getState("runtime") || {};
+    const lastRunAt = Number(runtime.last_live_reconcile_at_ms);
+    const checked = Math.max(0, Number(runtime.last_live_reconcile_checked) || 0);
+    const failed = Math.max(0, Number(runtime.last_live_reconcile_failed) || 0);
+    const candidateCount = Math.max(0, Number(runtime.last_live_reconcile_candidate_count) || 0);
+    const ageMs = Number.isFinite(lastRunAt) && lastRunAt > 0
+      ? Math.max(0, Date.now() - lastRunAt) : null;
+    const status = !configured ? "not_configured"
+      : ageMs === null ? "waiting_for_first_scheduler_cycle"
+        : failed > 0 ? "partial"
+          : candidateCount === 0 ? "no_active_orders"
+            : ageMs > SCAN_INTERVAL_MS * 5 ? "stale" : "healthy";
+    return {
+      enabled: configured,
+      mode: "scheduled_read_only_order_and_fill_reconciliation",
+      status,
+      last_run_at_ms: Number.isFinite(lastRunAt) && lastRunAt > 0 ? lastRunAt : null,
+      age_ms: ageMs,
+      candidates: candidateCount,
+      checked,
+      failed,
+      interval_ms: SCAN_INTERVAL_MS,
+      live_order_submission_by_scheduler: false
+    };
+  }
+
   async reconcileOpenCoinbaseLiveOrders(source = "scheduled") {
     if (!coinbaseAdvancedStatus(this.env).credentials_configured) {
       return { status: "skipped", reason: "coinbase_credentials_not_configured", checked: 0 };
     }
     const records = this.getState("coinbase_live_orders") || [];
+    const nowMs = Date.now();
     const activeStatuses = new Set([
       "SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED",
       "PARTIALLY_FILLED", "CANCEL_QUEUED"
     ]);
-    const active = records.filter((item) => activeStatuses.has(String(item?.status || "").toUpperCase())).slice(0, 3);
+    const terminalStatuses = new Set([
+      "FILLED", "CANCELLED", "CANCELED", "EXPIRED", "FAILED"
+    ]);
+    const lastAttemptAt = (item) => {
+      const value = Number(item?.last_reconciled_at_ms || item?.updated_at_ms || item?.created_at_ms || 0);
+      return Number.isFinite(value) ? value : 0;
+    };
+    const active = records.filter((item) => {
+      const status = String(item?.status || "").toUpperCase();
+      if (activeStatuses.has(status)) return true;
+      if (!terminalStatuses.has(status) || !item?.exchange_order_id) return false;
+      const fillStatus = String(item?.fill_sync?.status || "").toLowerCase();
+      if (fillStatus === "complete" || fillStatus === "proof_required") return false;
+      const lastAttempt = lastAttemptAt(item);
+      return !lastAttempt || nowMs - lastAttempt >= 5 * 60 * 1000;
+    }).sort((left, right) => lastAttemptAt(left) - lastAttemptAt(right)).slice(0, 3);
     let checked = 0;
     let failed = 0;
     for (const record of active) {
@@ -1201,6 +1251,7 @@ export class TradingEngine extends DurableObject {
     runtime.last_live_reconcile_at_ms = Date.now();
     runtime.last_live_reconcile_checked = checked;
     runtime.last_live_reconcile_failed = failed;
+    runtime.last_live_reconcile_candidate_count = active.length;
     this.setState("runtime", runtime);
     return { status: failed ? "partial" : "completed", checked, failed };
   }
