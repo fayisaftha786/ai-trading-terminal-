@@ -515,7 +515,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
           :backgroundStatus==="stale"?"Scheduled read-only sync is stale · next alarm check required"
             :"Waiting for first scheduled read-only reconciliation";
   const checks=[
-    {title:"Worker credentials",detail:configured?"CDP key and private key are present in Worker Secrets":"Add CDP credentials only in Cloudflare Worker Secrets",ok:configured,known:true},
+    {title:"Worker credentials",detail:configured?"CDP key present · "+String(status?.credential_key_format_hint||"private-key format unverified"):"Add CDP credentials only in Cloudflare Worker Secrets",ok:configured&&status?.credential_key_format_hint!=="unknown_format",known:true},
     {title:"API authentication",detail:hasPreflight?"Coinbase key authenticated successfully":configured?"Authenticated preflight not completed":"Waiting for secure credentials",ok:hasPreflight,known:configured},
     {title:"View permission",detail:hasPreflight?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasPreflight},
     {title:"Trade permission",detail:hasPreflight?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasPreflight},
