@@ -37,23 +37,31 @@ function der(tag, content) {
   return concatBytes(Uint8Array.of(tag), derLength(content.length), content);
 }
 
-function parsePem(pem) {
-  if (typeof pem !== "string" || pem.length > 12000) throw new Error("coinbase_private_key_missing_or_invalid");
-  const match = pem.trim().match(/^-----BEGIN (EC PRIVATE KEY|PRIVATE KEY)-----([\s\S]+?)-----END \1-----$/);
-  if (!match) throw new Error("coinbase_private_key_pem_format_invalid");
-  const encoded = match[2].replace(/\s+/g, "");
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new Error("coinbase_private_key_pem_base64_invalid");
+function decodeBase64(value, errorCode) {
+  const encoded = String(value || "").replace(/\s+/g, "");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) {
+    throw new Error(errorCode);
+  }
+  const padded = encoded + "=".repeat((4 - (encoded.length % 4)) % 4);
   let binary;
-  try { binary = atob(encoded); } catch { throw new Error("coinbase_private_key_pem_base64_invalid"); }
+  try { binary = atob(padded); } catch { throw new Error(errorCode); }
+  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+}
+
+function parsePem(pem) {
+  if (typeof pem !== "string" || pem.length > 12000) {
+    throw new Error("coinbase_private_key_missing_or_invalid");
+  }
+  const match = pem.trim().match(/^-----BEGIN (EC PRIVATE KEY|PRIVATE KEY)-----([\s\S]+?)-----END \1-----$/);
+  if (!match) return null;
   return {
     label: match[1],
-    derBytes: Uint8Array.from(binary, (char) => char.charCodeAt(0))
+    derBytes: decodeBase64(match[2], "coinbase_private_key_pem_base64_invalid")
   };
 }
 
 function sec1ToPkcs8(sec1Bytes) {
   // PKCS#8 PrivateKeyInfo wrapper for id-ecPublicKey / prime256v1 (P-256).
-  // Coinbase Advanced Trade CDP keys use ECDSA P-256 / ES256.
   const ecPublicKeyOid = Uint8Array.of(0x06, 0x07, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01);
   const prime256v1Oid = Uint8Array.of(0x06, 0x08, 0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07);
   const algorithm = der(0x30, concatBytes(ecPublicKeyOid, prime256v1Oid));
@@ -62,17 +70,65 @@ function sec1ToPkcs8(sec1Bytes) {
   return der(0x30, concatBytes(version, algorithm, privateKey));
 }
 
-async function importPrivateKey(pem) {
-  const parsed = parsePem(pem);
-  const pkcs8 = parsed.label === "EC PRIVATE KEY"
-    ? sec1ToPkcs8(parsed.derBytes)
-    : parsed.derBytes;
-  try {
-    return await crypto.subtle.importKey(
-      "pkcs8", pkcs8, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+function ed25519SeedToPkcs8(seed) {
+  if (!(seed instanceof Uint8Array) || seed.length !== 32) {
+    throw new Error("coinbase_ed25519_seed_length_invalid");
+  }
+  // RFC 8410 PrivateKeyInfo: id-Ed25519 OID + nested 32-byte private seed.
+  const ed25519Oid = Uint8Array.of(0x06, 0x03, 0x2b, 0x65, 0x70);
+  const algorithm = der(0x30, ed25519Oid);
+  const version = der(0x02, Uint8Array.of(0x00));
+  const privateKey = der(0x04, der(0x04, seed));
+  return der(0x30, concatBytes(version, algorithm, privateKey));
+}
+
+async function importPrivateKey(secret) {
+  if (typeof secret !== "string" || !secret.trim() || secret.length > 12000) {
+    throw new Error("coinbase_private_key_missing_or_invalid");
+  }
+  const value = secret.trim();
+  const parsed = parsePem(value);
+
+  if (!parsed) {
+    // Current CDP keys may be downloaded as raw Base64 Ed25519 seed or
+    // seed||public-key (32 or 64 bytes). Match Coinbase's official SDK.
+    const raw = decodeBase64(value, "coinbase_private_key_base64_invalid");
+    if (raw.length !== 32 && raw.length !== 64) {
+      throw new Error("coinbase_ed25519_raw_key_length_invalid");
+    }
+    const key = await crypto.subtle.importKey(
+      "pkcs8", ed25519SeedToPkcs8(raw.subarray(0, 32)), { name: "Ed25519" }, false, ["sign"]
     );
+    return { key, jwtAlgorithm: "EdDSA", signAlgorithm: { name: "Ed25519" }, keyFormat: "ed25519_base64" };
+  }
+
+  if (parsed.label === "EC PRIVATE KEY") {
+    try {
+      const key = await crypto.subtle.importKey(
+        "pkcs8", sec1ToPkcs8(parsed.derBytes), { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+      );
+      return { key, jwtAlgorithm: "ES256", signAlgorithm: { name: "ECDSA", hash: "SHA-256" }, keyFormat: "ecdsa_sec1_pem" };
+    } catch {
+      throw new Error("coinbase_private_key_import_failed_check_ecdsa_p256_key");
+    }
+  }
+
+  // PKCS#8 PEM is used by both Ed25519 and ECDSA CDP credentials.
+  // Try the recommended Ed25519 type first, then retain P-256 compatibility.
+  try {
+    const key = await crypto.subtle.importKey(
+      "pkcs8", parsed.derBytes, { name: "Ed25519" }, false, ["sign"]
+    );
+    return { key, jwtAlgorithm: "EdDSA", signAlgorithm: { name: "Ed25519" }, keyFormat: "ed25519_pkcs8_pem" };
   } catch {
-    throw new Error("coinbase_private_key_import_failed_check_ecdsa_p256_key");
+    try {
+      const key = await crypto.subtle.importKey(
+        "pkcs8", parsed.derBytes, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+      );
+      return { key, jwtAlgorithm: "ES256", signAlgorithm: { name: "ECDSA", hash: "SHA-256" }, keyFormat: "ecdsa_pkcs8_pem" };
+    } catch {
+      throw new Error("coinbase_private_key_import_failed_check_ed25519_or_ecdsa_p256");
+    }
   }
 }
 
@@ -94,9 +150,9 @@ export async function createCoinbaseAdvancedJwt({
       !Number.isSafeInteger(nowSeconds)) {
     throw new Error("coinbase_jwt_request_invalid");
   }
-  const key = await importPrivateKey(privateKeyPem);
+  const imported = await importPrivateKey(privateKeyPem);
   const uri = String(method).toUpperCase() + " " + API_HOST + path;
-  const header = { alg: "ES256", kid: apiKey, nonce: nonce(), typ: "JWT" };
+  const header = { alg: imported.jwtAlgorithm, kid: apiKey, nonce: nonce(), typ: "JWT" };
   const payload = {
     iss: "cdp",
     sub: apiKey,
@@ -108,11 +164,20 @@ export async function createCoinbaseAdvancedJwt({
   const encodedPayload = base64Url(new TextEncoder().encode(JSON.stringify(payload)));
   const signingInput = encodedHeader + "." + encodedPayload;
   const signature = await crypto.subtle.sign(
-    { name: "ECDSA", hash: "SHA-256" },
-    key,
+    imported.signAlgorithm,
+    imported.key,
     new TextEncoder().encode(signingInput)
   );
   return signingInput + "." + base64Url(new Uint8Array(signature));
+}
+
+function credentialKeyFormatHint(value) {
+  const secret = String(value || "").trim();
+  if (!secret) return "missing";
+  if (secret.startsWith("-----BEGIN EC PRIVATE KEY-----")) return "ecdsa_p256_sec1_pem";
+  if (secret.startsWith("-----BEGIN PRIVATE KEY-----")) return "pkcs8_ed25519_or_ecdsa_pem";
+  if (/^[A-Za-z0-9+/=\\s]+$/.test(secret)) return "ed25519_base64_candidate";
+  return "unknown_format";
 }
 
 function configuration(env = {}) {
@@ -128,6 +193,7 @@ function configuration(env = {}) {
   return {
     apiKey,
     privateKeyPem,
+    privateKeyFormatHint: credentialKeyFormatHint(privateKeyPem),
     allowedProducts: allowedProducts.slice(0, MAX_ALLOWED_PRODUCTS),
     allowedProductsValid: allowedProducts.length > 0 && allowedProducts.length <= MAX_ALLOWED_PRODUCTS,
     maxOrderQuote,
@@ -149,6 +215,8 @@ export function coinbaseAdvancedStatus(env = {}) {
     provider: "coinbase_advanced_trade",
     mode: "live_setup_locked",
     credentials_configured: config.credentialsConfigured,
+    credential_key_format_hint: config.privateKeyFormatHint,
+    supported_private_key_formats: ["Ed25519 Base64 (32/64 bytes)", "Ed25519 PKCS#8 PEM", "ECDSA P-256 SEC1 PEM"],
     allowed_products_configured: config.allowedProductsValid,
     allowed_products: config.allowedProducts,
     max_order_quote_configured: config.maxOrderQuoteValid,
