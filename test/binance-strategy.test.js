@@ -68,15 +68,34 @@ test("missing Binance fee or slippage values use conservative fallbacks instead 
   const input = validInput();
   input.costs = { feeBpsPerSide: null, slippageBps: "" };
   const result = analyzeBinanceMultiTimeframeMarket(input);
-  assert.equal(result.cost_model.fee_bps_per_side, 10);
-  assert.equal(result.cost_model.slippage_bps_per_side, 5);
+  assert.equal(result.cost_model.fee_bps_per_side, 60);
+  assert.equal(result.cost_model.slippage_bps_per_side, 10);
   assert.equal(result.cost_model.fee_rate_status, "fallback");
+  assert.equal(result.cost_model.fee_source, "configured_paper_assumption");
+
+  const incorrectlyVerified = validInput();
+  incorrectlyVerified.costs = {
+    feeBpsPerSide: null,
+    slippageBps: null,
+    feeSource: "binance_account_commission",
+    feeRateStatus: "verified"
+  };
+  const guarded = analyzeBinanceMultiTimeframeMarket(incorrectlyVerified);
+  assert.equal(guarded.cost_model.fee_bps_per_side, 60);
+  assert.equal(guarded.cost_model.slippage_bps_per_side, 10);
+  assert.equal(guarded.cost_model.fee_rate_status, "fallback");
+  assert.equal(guarded.cost_model.fee_source, "configured_paper_assumption");
 
   const explicitZero = validInput();
-  explicitZero.costs = { feeBpsPerSide: 0, slippageBps: 0 };
+  explicitZero.costs = {
+    feeBpsPerSide: 0, slippageBps: 0,
+    feeSource: "binance_account_commission", feeRateStatus: "verified"
+  };
   const zeroResult = analyzeBinanceMultiTimeframeMarket(explicitZero);
   assert.equal(zeroResult.cost_model.fee_bps_per_side, 0);
   assert.equal(zeroResult.cost_model.slippage_bps_per_side, 0);
+  assert.equal(zeroResult.cost_model.fee_rate_status, "verified");
+  assert.equal(zeroResult.cost_model.fee_source, "binance_account_commission");
 });
 
 test("requires valid closed history, quotes and liquidity for a candidate", () => {
