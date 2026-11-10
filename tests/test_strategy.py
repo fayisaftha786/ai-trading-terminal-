@@ -134,50 +134,33 @@ def test_candle_integrity_accepts_clean_hourly_history():
     assert result["valid_unique_candles"] == 160
 
 
-def test_market_data_marks_duplicate_candle_history_as_data_gap(monkeypatch):
-    import sys
-    import types
+def test_coinbase_market_data_marks_duplicate_candle_history_as_data_gap(monkeypatch):
+    import asyncio
     import time
-
+    import app.services.market_data as market_data_module
     from app.services.market_data import MarketDataService
     from app.settings import Settings
 
     now_ms = int(time.time() * 1000)
     hour = 3_600_000
-    four_hours = 4 * hour
+    six_hours = 6 * hour
     primary_start = (now_ms // hour) * hour - 170 * hour
-    higher_start = (now_ms // four_hours) * four_hours - 170 * four_hours
-    primary = [[primary_start + i * hour, 100 + i * 0.02, 101 + i * 0.02,
-                99 + i * 0.02, 100.5 + i * 0.02, 1000] for i in range(170)]
-    higher = [[higher_start + i * four_hours, 100 + i * 0.05, 102 + i * 0.05,
-               98 + i * 0.05, 101 + i * 0.05, 4000] for i in range(170)]
+    higher_start = (now_ms // six_hours) * six_hours - 170 * six_hours
+    primary = [[primary_start + i * hour, 100 + i * .02, 101 + i * .02,
+                99 + i * .02, 100.5 + i * .02, 1000] for i in range(170)]
+    higher = [[higher_start + i * six_hours, 100 + i * .05, 102 + i * .05,
+               98 + i * .05, 101 + i * .05, 4000] for i in range(170)]
     primary[100] = primary[99].copy()
 
-    class FakeExchange:
-        markets = {"BTC/USDT": {}}
+    class FakeCoinbaseAdapter:
+        async def __aenter__(self): return self
+        async def __aexit__(self, exc_type, exc, traceback): return None
+        async def fetch_candles(self, _symbol, granularity_seconds):
+            return primary if granularity_seconds == 3600 else higher
 
-        def __init__(self, _options):
-            pass
-
-        async def load_markets(self):
-            return self.markets
-
-        async def fetch_ohlcv(self, _symbol, timeframe, limit):
-            return primary if timeframe == "1h" else higher
-
-        async def close(self):
-            return None
-
-    ccxt_pkg = types.ModuleType("ccxt")
-    ccxt_pkg.__path__ = []
-    ccxt_async = types.ModuleType("ccxt.async_support")
-    ccxt_async.binance = FakeExchange
-    ccxt_pkg.async_support = ccxt_async
-    monkeypatch.setitem(sys.modules, "ccxt", ccxt_pkg)
-    monkeypatch.setitem(sys.modules, "ccxt.async_support", ccxt_async)
-
+    monkeypatch.setattr(market_data_module, "CoinbasePublicAdapter", FakeCoinbaseAdapter)
     service = MarketDataService(Settings())
-    result = __import__("asyncio").run(service.cex_strategy_data("BTC/USDT", limit=300))
+    result = asyncio.run(service.cex_strategy_data("BTC/USD", limit=300))
     assert result["status"] == "live"
     assert result["data_quality"]["primary_integrity"]["duplicate_timestamps"] == 1
     assert result["data_quality"]["contiguous_closed_candles"] is False
