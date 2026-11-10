@@ -82,8 +82,15 @@ export class TradingEngine extends DurableObject {
       JSON.stringify({ initial_capital_usd: 10, trading_mode: "demo", risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
     const currentSettings = this.getState("settings");
-    const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
-    const migratedSettings = migratePaperAutomationSettings(currentSettings, historicalTradeCount);
+    // The profile migration only needs to know whether any historical trade exists.
+    // Avoid a full-ledger COUNT scan every time the Durable Object is instantiated.
+    let migratedSettings = currentSettings;
+    if (Number(currentSettings?.paper_automation_profile_version || 0) < PAPER_AUTOMATION_PROFILE.version) {
+      const hasHistoricalTrades = this.sql.exec(
+        "SELECT 1 AS has_trades FROM trades LIMIT 1"
+      ).toArray().length > 0;
+      migratedSettings = migratePaperAutomationSettings(currentSettings, hasHistoricalTrades ? 1 : 0);
+    }
     if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
       this.setState("settings", migratedSettings);
     }
