@@ -49,7 +49,14 @@ export function assessMarketUniverse(
       marketIssues.push("market_data_provider_missing");
     } else if (!["coinbase_exchange", "bitstamp_spot"].includes(selectedProvider)) {
       marketIssues.push("market_data_provider_unsupported");
-    } else if (declaredProviders.some((provider) => provider !== selectedProvider)) {
+    } else if (selectedProvider !== "coinbase_exchange") {
+      // Bitstamp remains available only to mark/exit an already-open legacy
+      // PAPER position. It must never make the complete new-entry universe
+      // look healthy, enable automation, or count as scheduled-scan success.
+      marketIssues.push("coinbase_market_data_required_for_new_entry_universe");
+    }
+    if (typeof selectedProvider === "string" && selectedProvider &&
+        declaredProviders.some((provider) => provider !== selectedProvider)) {
       marketIssues.push("market_data_provider_mismatch");
     }
 
