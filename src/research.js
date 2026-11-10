@@ -1,3 +1,35 @@
+/**
+ * Normalize a compact candle cache window before it can feed strategy analysis.
+ * Rows must be chronological, finite OHLCV records with internally valid ranges.
+ */
+export function normalizeResearchCandleWindow(rows) {
+  if (!Array.isArray(rows) || rows.length > 150) return null;
+  const normalized = [];
+  let previousTime = Number.NEGATIVE_INFINITY;
+  for (const row of rows) {
+    const candle = {
+      time: Number(row?.time),
+      open: Number(row?.open),
+      high: Number(row?.high),
+      low: Number(row?.low),
+      close: Number(row?.close),
+      volume: Number(row?.volume)
+    };
+    if (![candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume]
+      .every(Number.isFinite) ||
+        candle.time <= previousTime ||
+        candle.open <= 0 || candle.high <= 0 || candle.low <= 0 ||
+        candle.close <= 0 || candle.volume < 0 ||
+        candle.high < Math.max(candle.open, candle.close, candle.low) ||
+        candle.low > Math.min(candle.open, candle.close, candle.high)) {
+      return null;
+    }
+    previousTime = candle.time;
+    normalized.push(candle);
+  }
+  return normalized;
+}
+
 export function selectNewClosedCandles(rows, latestStoredMs, intervalMs, nowMs = Date.now()) {
   if (!Array.isArray(rows) || !Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(nowMs)) return [];
   const latest = Number.isFinite(latestStoredMs) ? latestStoredMs : Number.NEGATIVE_INFINITY;

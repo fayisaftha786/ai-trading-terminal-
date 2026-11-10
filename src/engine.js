@@ -13,7 +13,7 @@ import {
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, shouldRunScheduledMarketScan, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
-import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
+import { buildResearchHistorySummary, countMissingArchiveBars, normalizeResearchCandleWindow, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
@@ -176,8 +176,31 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)");
   }
 
+  cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs) {
+    if (!audit?.ok || !Array.isArray(audit.rows)) return false;
+    const rows = normalizeResearchCandleWindow(audit.rows.slice(-150));
+    if (!rows) return false;
+    const key = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds;
+    this.setState(key, {
+      version: 1,
+      updated_at_ms: Number.isFinite(receivedAtMs) ? receivedAtMs : Date.now(),
+      last_candle_ms: rows.at(-1)?.time ?? null,
+      rows
+    });
+    return true;
+  }
+
   loadResearchCandleCache(product, timeframeSeconds, exchange = "coinbase_exchange") {
-    return this.sql.exec(
+    const cacheKey = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds;
+    const cached = this.getState(cacheKey);
+    if (cached && cached.version === 1 && Array.isArray(cached.rows)) {
+      const rows = normalizeResearchCandleWindow(cached.rows);
+      if (rows && cached.rows.length <= 150) return rows;
+    }
+
+    // Backfill a missing/invalid JSON window once from the durable candle archive.
+    // The archive remains authoritative; strategy history is not truncated.
+    const rows = this.sql.exec(
       "SELECT candle_open_ms AS time,open,high,low,close,volume FROM research_candles " +
       "WHERE exchange=? AND product=? AND timeframe_seconds=? " +
       "ORDER BY candle_open_ms DESC LIMIT 150",
@@ -190,6 +213,17 @@ export class TradingEngine extends DurableObject {
       close: Number(row.close),
       volume: Number(row.volume)
     }));
+    const normalized = normalizeResearchCandleWindow(rows);
+    if (normalized) {
+      this.setState(cacheKey, {
+        version: 1,
+        updated_at_ms: Date.now(),
+        last_candle_ms: normalized.at(-1)?.time ?? null,
+        rows: normalized
+      });
+      return normalized;
+    }
+    return rows;
   }
 
   async ensureAlarm() {
@@ -1781,6 +1815,7 @@ export class TradingEngine extends DurableObject {
       product, timeframeSeconds, barsCount, retainedFirst, latest,
       cumulativeGaps, receivedAtMs, inserted > 0 ? receivedAtMs : null
     );
+    this.cacheResearchCandleWindow("coinbase_exchange", product, timeframeSeconds, audit, receivedAtMs);
     return { stored: inserted, bars_count: barsCount, cumulative_missing_intervals: cumulativeGaps, status: "clean" };
   }
 
@@ -1836,6 +1871,7 @@ export class TradingEngine extends DurableObject {
         exchange, product, timeframeSeconds, cutoff
       );
     }
+    this.cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs);
     return {
       stored: inserted,
       bars_count: Math.min(retentionBars, rows.length),
