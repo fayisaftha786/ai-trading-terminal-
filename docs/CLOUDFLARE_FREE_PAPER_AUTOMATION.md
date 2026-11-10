@@ -4,7 +4,7 @@
 
 This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and a 90-second strategy/candle scan and a separate 10-second L2-only refresh alarm. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 forces legacy v1 auto-entry settings OFF during migration. A new/empty ledger targets USD 10 virtual capital. If a legacy ledger has trades and a different starting balance, it stays locked until the owner reviews it; the review can preserve the existing starting balance and all history, requires all open positions to be closed, and keeps auto-entry OFF.
 
-This is not unattended real-money trading. Production/live exchange orders are not implemented here. Binance Testnet order execution is not part of this Worker. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
+This is not unattended real-money trading: automatic live entries are not implemented. The Worker contains an optional Coinbase Advanced SPOT LIMIT GTC post-only path for manually previewed and separately owner-confirmed orders, but it remains locked until account preflight, product eligibility, permissions, limits and the execution secret are verified. Binance Testnet order execution is not part of this Worker, and Binance is not used as an account or execution connector in the dashboard. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
 
 ## Architecture
 
