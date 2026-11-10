@@ -163,6 +163,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
       return {
         ...staticStatus,
         status: "blocked",
+        authenticated: true,
         connected: false,
         permissions,
         balances: [],
