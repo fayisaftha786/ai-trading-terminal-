@@ -657,13 +657,12 @@ test("Bitstamp fallback rejects non-SPOT ticker responses", async () => {
         Date.now(), {}, createCoinbaseRequestState(),
         { allowBitstampLegacyExit: true }
       ),
-      (error) => error.code === "all_market_data_providers_unavailable"
+      (error) => error.code === "legacy_exit_market_data_unavailable"
     );
   } finally {
     globalThis.fetch = originalFetch;
   }
 });
-
 test("Bitstamp fallback rejects a stale exchange-side order-book timestamp", async () => {
   const originalFetch = globalThis.fetch;
   const now = Date.now();
