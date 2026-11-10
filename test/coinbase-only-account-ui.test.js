@@ -9,7 +9,7 @@ const cloudflareGuide = readFileSync(new URL("../docs/CLOUDFLARE_FREE_PAPER_AUTO
 test("Coinbase is the only visible exchange account and order connector", () => {
   assert.match(html, /REAL MODE · Coinbase Advanced account connection/);
   assert.match(html, /id="realModePanel"/);
-  assert.match(html, /id="binanceReadonlyPanel"[^>]*class="panel hidden"/);
+  assert.match(html, /<section class="panel hidden" id="binanceReadonlyPanel"/);
   assert.match(html, /COINBASE-ONLY ACCOUNT MODE/);
   assert.match(html, /no Binance account connection or Binance order execution is used/i);
 });
