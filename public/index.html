@@ -276,7 +276,7 @@ section[id]{scroll-margin-top:82px}
 <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Manual execution guard</strong><small>Locked until every check passes</small></div></div>
 </div>
 <div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE EXCHANGE BALANCES</div><div id="coinbaseBalances" class="balance-grid"><span class="muted">Run account preflight to retrieve spendable balances.</span></div></div><div class="connection-data-card"><div class="label">APPROVED SPOT PRODUCTS</div><div id="coinbaseProducts" class="product-list">Products appear after successful account and market checks.</div><div class="muted" id="coinbaseLimits">Order cap and daily/open-order limits are not verified.</div></div></div>
-<p class="connection-footnote">Account and balance status refresh automatically every 5 minutes while REAL mode is selected and the dashboard is open. This is read-only synchronization: it never places, changes or cancels an order. API keys stay in Cloudflare Worker Secrets; this page never asks for your private key.</p>
+<p class="connection-footnote">Account and balance status refresh automatically every 5 minutes while you are signed in and the dashboard is open, in both DEMO and REAL modes. This is read-only synchronization: it never places, changes or cancels an order. API keys stay in Cloudflare Worker Secrets; this page never asks for your private key.</p>
 </div>
 <div class="controls"><button id="livePreflight" type="button">Verify / refresh Coinbase account</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
 <div class="controls"><label>SPOT product<br><select class="live-input" id="liveProduct"><option value="">Run account preflight first</option></select></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
@@ -635,7 +635,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
 
 async function runCoinbasePreflight({silent=false,force=false}={}){
   if(coinbasePreflightInFlight)return coinbasePreflightInFlight;
-  if(!token||currentTradingMode!=="real")return null;
+  if(!token)return null;
   if(!force&&coinbasePreflightResult&&Date.now()-coinbasePreflightAtMs<COINBASE_ACCOUNT_SYNC_INTERVAL_MS)return coinbasePreflightResult;
   coinbasePreflightInFlight=(async()=>{
     if(!silent){
@@ -686,6 +686,15 @@ async function loadLiveStatus(){
     renderCoinbaseConnection(status,coinbasePreflightResult,coinbasePreflightAtMs);
     $("liveSubmit").disabled=true;
     livePreviewResult=null;
+    // Read-only account connection is mode-independent. DEMO/REAL changes
+    // execution policy only; it must not disable owner account visibility.
+    if(status?.credentials_configured===true){
+      runCoinbasePreflight({silent:true}).catch((error)=>{
+        $("coinbaseSyncState").textContent="SYNC FAILED";
+        $("coinbaseSyncState").className="feed-pill offline";
+        $("coinbaseLastSync").textContent="Initial account check failed · "+error.message;
+      });
+    }
   }catch(error){
     coinbaseStaticStatus=null;
     $("liveState").textContent="CONNECTION STATUS UNAVAILABLE";
@@ -1197,7 +1206,7 @@ async function runTournament(){
 $("runTournament").addEventListener("click",runTournament);
 async function boot(){try{const healthResponse=await fetch("/api/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Backend health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
 setInterval(()=>{
-  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true){
+  if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true){
     runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
       $("coinbaseSyncState").textContent="SYNC FAILED";
       $("coinbaseSyncState").className="feed-pill offline";
@@ -1214,7 +1223,7 @@ setInterval(()=>{
   }
 },BINANCE_ACCOUNT_SYNC_INTERVAL_MS);
 document.addEventListener("visibilitychange",()=>{
-  if(!document.hidden&&token&&currentTradingMode==="real"&&coinbaseStaticStatus?.credentials_configured===true&&
+  if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true&&
      (!coinbasePreflightAtMs||Date.now()-coinbasePreflightAtMs>=COINBASE_ACCOUNT_SYNC_INTERVAL_MS)){
     runCoinbasePreflight({silent:true}).catch(()=>{});
   }
