@@ -105,7 +105,7 @@ test("trading health requests can still respond when scheduler alarm setup fails
 
 test("research candle cache reads only the 150 closed bars required by audit gates", () => {
   const cacheStart = engineSource.indexOf("  loadResearchCandleCache(");
-  const cacheEnd = engineSource.indexOf("\\n  }", cacheStart);
+  const cacheEnd = engineSource.indexOf("  async ensureAlarm()", cacheStart);
   const cacheMethod = engineSource.slice(cacheStart, cacheEnd);
   assert.ok(cacheMethod.includes("ORDER BY candle_open_ms DESC LIMIT 150"));
   assert.ok(!cacheMethod.includes("LIMIT 300"));
@@ -113,7 +113,7 @@ test("research candle cache reads only the 150 closed bars required by audit gat
 
 test("10-second book refresh reuses loaded markets and avoids full-ledger portfolio aggregation", () => {
   const start = engineSource.indexOf("async refreshOrderBooksOnly()");
-  const end = engineSource.indexOf("\\n  getOpenTrades() {", start);
+  const end = engineSource.indexOf("  getOpenTrades() {", start);
   const refresh = engineSource.slice(start, end);
   assert.equal(refresh.split("this.getMarkets()").length - 1, 1);
   assert.ok(refresh.includes("const refreshedMarkets = markets"));
