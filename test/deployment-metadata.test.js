@@ -12,6 +12,7 @@ test("Worker health binds only a validated deployment Git SHA", () => {
   assert.match(workerSource, /typeof env\.DEPLOY_COMMIT_SHA === "string"/);
   assert.match(workerSource, /\/\^\[a-f0-9\]\{40\}\$\/i\.test\(env\.DEPLOY_COMMIT_SHA\)/);
   assert.match(workerSource, /deployment_commit_sha: deploymentCommitSha/);
+  assert.ok(workerSource.includes('deployment_provenance_status: deploymentCommitSha ? "verified" : "unverified"'));
   assert.match(workerSource, /env\.DEPLOY_COMMIT_SHA\.toLowerCase\(\)/);
   assert.match(workerSource, /worker_version: workerVersion/);
 });
@@ -22,6 +23,9 @@ test("production deploy injects and verifies the exact GitHub commit", () => {
   assert.match(deploymentWorkflow, /deploymentCommitMatches: health\.deployment_commit_sha === process\.env\.EXPECTED_DEPLOY_COMMIT_SHA/);
   assert.match(deploymentWorkflow, /liveTradingDisabled: health\.live_trading_enabled === false/);
   assert.match(deploymentWorkflow, /paperOnly: health\.mode === "paper_only"/);
+  assert.ok(deploymentWorkflow.includes("Verify production revision remains stable after Cloudflare build hooks"));
+  assert.ok(deploymentWorkflow.includes("sleep 120"));
+  assert.ok(deploymentWorkflow.includes('provenanceVerified: health.deployment_provenance_status === "verified"'));
 });
 
 test("production deployment runs automatically on main pushes", () => {
@@ -55,6 +59,7 @@ const watchdogWorkflow = readFileSync(
 test("deployment verification bypasses cached health responses and reports provenance", () => {
   assert.match(deploymentWorkflow, /deploy_verify=\$\{GITHUB_SHA\}-\$\{attempt\}/);
   assert.match(deploymentWorkflow, /deployment_commit_sha: health\.deployment_commit_sha/);
+  assert.ok(deploymentWorkflow.includes("deployment_provenance_status: health.deployment_provenance_status"));
   assert.match(deploymentWorkflow, /deploymentCommitMatches: health\.deployment_commit_sha === process\.env\.EXPECTED_DEPLOY_COMMIT_SHA/);
 });
 
