@@ -15,7 +15,7 @@ test("scheduled Coinbase reconciliation includes open orders and retries incompl
   assert.match(engine, /"SUBMITTING", "UNKNOWN", "PENDING", "OPEN", "QUEUED"/);
   assert.match(engine, /"FILLED", "CANCELLED", "CANCELED", "EXPIRED", "FAILED"/);
   assert.match(engine, /fillStatus === "complete" \|\| fillStatus === "proof_required"/);
-  assert.match(engine, /nowMs - lastAttemptAt >= 5 \* 60 \* 1000/);
+  assert.match(engine, /nowMs - lastAttempt >= 5 \* 60 \* 1000/);
   assert.match(engine, /await this\.reconcileAndSyncLiveOrder\(record\)/);
 });
 
