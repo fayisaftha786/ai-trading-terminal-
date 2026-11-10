@@ -1,5 +1,6 @@
 const API_BASE = "https://api.binance.com";
 const encoder = new TextEncoder();
+const DEFAULT_FEE_SYMBOLS = ["BTCUSDT", "ETHUSDT", "SOLUSDT"];
 const READ_ONLY_DISABLED_FLAGS = [
   "enableWithdrawals",
   "enableInternalTransfer",
@@ -12,11 +13,18 @@ const READ_ONLY_DISABLED_FLAGS = [
   "enablePortfolioMarginTrading"
 ];
 
+function parseFeeSymbols(value) {
+  const raw = String(value || DEFAULT_FEE_SYMBOLS.join(","));
+  return [...new Set(raw.split(",").map((item) => item.trim().toUpperCase())
+    .filter((item) => /^[A-Z0-9]{2,18}USDT$/.test(item)))].slice(0, 10);
+}
+
 function configuration(env = {}) {
   return {
     enabled: String(env.BINANCE_READONLY_ENABLED || "").trim().toLowerCase() === "true",
     apiKey: String(env.BINANCE_READONLY_API_KEY || "").trim(),
-    apiSecret: String(env.BINANCE_READONLY_API_SECRET || "").trim()
+    apiSecret: String(env.BINANCE_READONLY_API_SECRET || "").trim(),
+    feeSymbols: parseFeeSymbols(env.BINANCE_READONLY_FEE_SYMBOLS)
   };
 }
 
@@ -36,7 +44,8 @@ export function binanceReadOnlyStatus(env = {}) {
     order_execution_available: false,
     live_trading_enabled: false,
     withdrawals_enabled_by_app: false,
-    allowed_operations: ["verify_api_key_permissions", "read_spot_account_balances"],
+    fee_symbols: config.feeSymbols,
+    allowed_operations: ["verify_api_key_permissions", "read_spot_account_balances", "read_pair_commission_rates"],
     blockers
   };
 }
@@ -53,11 +62,13 @@ async function signQuery(query, secret) {
   return toHex(new Uint8Array(signature));
 }
 
-async function signedGet(path, config, fetchImpl) {
-  const params = new URLSearchParams({
-    recvWindow: "5000",
-    timestamp: String(Date.now())
-  });
+async function signedGet(path, config, fetchImpl, queryParams = {}) {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(queryParams)) {
+    if (value !== undefined && value !== null) params.set(key, String(value));
+  }
+  params.set("recvWindow", "5000");
+  params.set("timestamp", String(Date.now()));
   const query = params.toString();
   const signature = await signQuery(query, config.apiSecret);
   const url = API_BASE + path + "?" + query + "&signature=" + signature;
@@ -136,6 +147,98 @@ function safeBalances(account) {
     }));
 }
 
+function commissionRate(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const rate = Number(value);
+  return Number.isFinite(rate) && rate >= 0 && rate <= 1 ? rate : null;
+}
+
+function summarizeCommission(payload, symbol, balances) {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload) ||
+      String(payload.symbol || "").toUpperCase() !== symbol) return null;
+  const groups = ["standardCommission", "taxCommission", "specialCommission"];
+  const components = {};
+  for (const group of groups) {
+    const source = payload[group];
+    if (!source || typeof source !== "object" || Array.isArray(source)) return null;
+    const maker = commissionRate(source.maker);
+    const taker = commissionRate(source.taker);
+    if (maker === null || taker === null) return null;
+    components[group] = { maker_bps: maker * 10_000, taker_bps: taker * 10_000 };
+  }
+
+  const makerBps = components.standardCommission.maker_bps +
+    components.taxCommission.maker_bps + components.specialCommission.maker_bps;
+  const takerBps = components.standardCommission.taker_bps +
+    components.taxCommission.taker_bps + components.specialCommission.taker_bps;
+  const discount = payload.discount;
+  const discountRate = commissionRate(discount?.discount);
+  const discountFlagsEnabled = discount?.enabledForAccount === true &&
+    discount?.enabledForSymbol === true;
+  const bnbBalance = (balances || []).find((row) => row.asset === "BNB");
+  const bnbTotal = bnbBalance ? Number(bnbBalance.total) : 0;
+  const bnbScenarioAvailable = discountFlagsEnabled && discountRate !== null &&
+    discountRate > 0 && Number.isFinite(bnbTotal) && bnbTotal > 0;
+  const discountedMakerBps = bnbScenarioAvailable
+    ? (components.standardCommission.maker_bps * (1 - discountRate)) +
+      components.taxCommission.maker_bps + components.specialCommission.maker_bps
+    : null;
+  const discountedTakerBps = bnbScenarioAvailable
+    ? (components.standardCommission.taker_bps * (1 - discountRate)) +
+      components.taxCommission.taker_bps + components.specialCommission.taker_bps
+    : null;
+
+  return {
+    symbol,
+    conservative_maker_bps: Number(makerBps.toFixed(6)),
+    conservative_taker_bps: Number(takerBps.toFixed(6)),
+    components_bps: components,
+    bnb_discount: {
+      discount_asset: typeof discount?.discountAsset === "string" ? discount.discountAsset : null,
+      enabled_for_account: discount?.enabledForAccount === true,
+      enabled_for_symbol: discount?.enabledForSymbol === true,
+      discount_fraction: discountRate,
+      balance_total: Number.isFinite(bnbTotal) ? bnbTotal : 0,
+      potential_maker_bps_with_bnb: Number.isFinite(discountedMakerBps)
+        ? Number(discountedMakerBps.toFixed(6)) : null,
+      potential_taker_bps_with_bnb: Number.isFinite(discountedTakerBps)
+        ? Number(discountedTakerBps.toFixed(6)) : null,
+      note: bnbScenarioAvailable
+        ? "Potential rate only; BNB must remain sufficient at each fill."
+        : "BNB discount is not counted in the conservative rate."
+    }
+  };
+}
+
+async function readPairCommissions(config, balances, fetchImpl) {
+  const retrievedAt = Date.now();
+  const symbols = await Promise.all(config.feeSymbols.map(async (symbol) => {
+    try {
+      const payload = await signedGet("/api/v3/account/commission", config, fetchImpl, { symbol });
+      const summary = summarizeCommission(payload, symbol, balances);
+      return summary
+        ? { ...summary, status: "verified" }
+        : { symbol, status: "invalid_response", error_code: "binance_commission_response_invalid" };
+    } catch (error) {
+      return {
+        symbol,
+        status: "unavailable",
+        error_code: typeof error?.code === "string" ? error.code : "binance_commission_check_failed"
+      };
+    }
+  }));
+  const verifiedCount = symbols.filter((item) => item.status === "verified").length;
+  return {
+    status: verifiedCount === symbols.length && symbols.length > 0
+      ? "verified" : verifiedCount > 0 ? "partial" : "unavailable",
+    source: "GET /api/v3/account/commission",
+    retrieved_at_ms: retrievedAt,
+    verified_count: verifiedCount,
+    requested_count: symbols.length,
+    symbols
+  };
+}
+
 export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } = {}) {
   const staticStatus = binanceReadOnlyStatus(env);
   const config = configuration(env);
@@ -146,6 +249,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
       status: "blocked",
       permissions: null,
       balances: [],
+      fees: { status: "not_checked", symbols: [] },
       blockers: staticStatus.blockers
     };
   }
@@ -167,6 +271,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
         connected: false,
         permissions,
         balances: [],
+        fees: { status: "not_checked", symbols: [] },
         blockers,
         account_read_skipped: true,
         order_execution_available: false,
@@ -181,6 +286,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
         code: "binance_account_response_invalid", status: 502
       });
     }
+    const fees = await readPairCommissions(config, balances, fetchImpl);
     return {
       ...staticStatus,
       status: "connected_read_only",
@@ -188,6 +294,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
       permissions,
       balances,
       balance_count: balances.length,
+      fees,
       account_retrieved_at_ms: Date.now(),
       blockers: [],
       order_execution_available: false,
@@ -201,6 +308,7 @@ export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } =
       connected: false,
       permissions: null,
       balances: [],
+      fees: { status: "unavailable", symbols: [], error_code: code },
       blockers: [code],
       error_code: code,
       order_execution_available: false,
