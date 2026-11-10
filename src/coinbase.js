@@ -941,10 +941,12 @@ function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
 }
 
 /**
- * Coinbase is the primary USD spot feed. If any required snapshot component is
- * unavailable or fails integrity checks, retry the whole market using Bitstamp
- * USD spot data so ticker, L2 book and both candle frames stay same-venue.
- * Never mix a Coinbase quote with Bitstamp candles (or vice versa).
+ * Coinbase Exchange is the only source for ordinary live scans and all new
+ * PAPER-entry candidates. Bitstamp public data is requested only when the
+ * caller explicitly identifies an already-open legacy PAPER position whose
+ * recorded entry provider is Bitstamp. That compatibility read preserves
+ * same-venue exit marking; incomplete book/candle data remains entry-ineligible.
+ * Historical Bitstamp OHLC backfill is a separate manual research operation.
  */
 export async function fetchProductSnapshot(
   productRef,
