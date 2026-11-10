@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  runStrategyTournament, runWalkForwardResearch, resolveLongBarExit,
+  runStrategyTournament, runWalkForwardResearch, evaluateWalkForwardEvidence, resolveLongBarExit,
   runTradeOrderMonteCarlo, runRecursiveWarmupAnalysis
 } from "../src/strategy-tournament.js";
 
@@ -256,4 +256,50 @@ test("dashboard walk-forward requirement matches the strict research implementat
   assert.match(dashboard, /four non-overlapping 28-day test folds/i);
   assert.match(dashboard, /separate final holdout/i);
   assert.doesNotMatch(dashboard, /requires at least 500 one-hour and 50 six-hour candles/i);
+});
+
+
+test("walk-forward evidence requires broad out-of-sample consistency and stressed costs", () => {
+  const fold = (net, profitFactor = 1.4, drawdown = 3, trades = 10) => ({
+    ok: true,
+    results: {
+      trend_continuation: {
+        trade_count: trades,
+        net_return_pct: net,
+        profit_factor: profitFactor,
+        max_drawdown_pct: drawdown,
+        expectancy_per_trade: 0.2
+      }
+    }
+  });
+  const folds = [fold(1.2), fold(0.8), fold(1.1), fold(0.6)];
+  const costStress = [
+    { cost_multiplier: 1, result: { ok: true, strategies: { trend_continuation: { net_return_pct: 3 } } } },
+    { cost_multiplier: 1.5, result: { ok: true, strategies: { trend_continuation: { net_return_pct: 0.5 } } } },
+    { cost_multiplier: 2, result: { ok: true, strategies: { trend_continuation: { net_return_pct: -0.2 } } } }
+  ];
+  const result = evaluateWalkForwardEvidence({ folds, costStress, strategyNames: ["trend_continuation"] });
+  const candidate = result.strategies.trend_continuation;
+  assert.equal(result.status, "evaluated");
+  assert.equal(candidate.eligible_for_shadow_paper_review, true);
+  assert.equal(candidate.status, "evidence_positive_shadow_review_only");
+  assert.equal(candidate.execution_authorized, false);
+  assert.equal(candidate.paper_auto_entry_eligible, false);
+  assert.equal(candidate.live_trading_enabled, false);
+
+  const failedStress = evaluateWalkForwardEvidence({
+    folds,
+    costStress: [{ cost_multiplier: 1.5, result: { ok: true, strategies: { trend_continuation: { net_return_pct: -1 } } } }],
+    strategyNames: ["trend_continuation"]
+  });
+  assert.equal(failedStress.strategies.trend_continuation.eligible_for_shadow_paper_review, false);
+  assert.ok(failedStress.strategies.trend_continuation.failed_gates.includes("positive_after_1_5x_fee_and_slippage_stress"));
+
+  const weakHoldout = evaluateWalkForwardEvidence({
+    folds: [fold(1.2), fold(0.8), fold(1.1), fold(-0.5)],
+    costStress,
+    strategyNames: ["trend_continuation"]
+  });
+  assert.equal(weakHoldout.strategies.trend_continuation.eligible_for_shadow_paper_review, false);
+  assert.ok(weakHoldout.strategies.trend_continuation.failed_gates.includes("untouched_holdout_positive"));
 });

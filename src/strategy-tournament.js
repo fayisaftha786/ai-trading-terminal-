@@ -651,6 +651,107 @@ export function runStrategyTournament({
   };
 }
 
+/**
+ * Convert walk-forward results into explicit evidence gates.
+ * A pass only qualifies a hypothesis for a separate shadow-PAPER review;
+ * it never authorizes production PAPER auto-entry or live execution.
+ */
+export function evaluateWalkForwardEvidence({
+  folds = [],
+  costStress = [],
+  strategyNames = ["trend_continuation", "range_mean_reversion", "breakout_continuation"],
+  minimumOosTrades = 30,
+  minimumProfitableFolds = 3,
+  minimumHoldoutProfitFactor = 1.1,
+  maximumHoldoutDrawdownPct = 8
+} = {}) {
+  const validConfiguration = Number.isSafeInteger(minimumOosTrades) && minimumOosTrades > 0 &&
+    Number.isSafeInteger(minimumProfitableFolds) && minimumProfitableFolds >= 1 &&
+    minimumProfitableFolds <= 4 && Number.isFinite(minimumHoldoutProfitFactor) &&
+    minimumHoldoutProfitFactor > 0 && Number.isFinite(maximumHoldoutDrawdownPct) &&
+    maximumHoldoutDrawdownPct > 0;
+  if (!validConfiguration) {
+    return { status: "blocked", reason: "invalid_promotion_evidence_configuration", strategies: {} };
+  }
+  const completeFolds = Array.isArray(folds) && folds.length === 4 && folds.every((fold) =>
+    fold?.ok === true && fold.results && typeof fold.results === "object"
+  );
+  const stress15 = Array.isArray(costStress)
+    ? costStress.find((item) => item.cost_multiplier === 1.5)?.result : null;
+  const completeStress = stress15?.ok === true && stress15.strategies &&
+    typeof stress15.strategies === "object";
+  const evaluations = Object.fromEntries(strategyNames.map((name) => {
+    const foldMetrics = completeFolds
+      ? folds.map((fold) => fold.results[name]).filter((result) => result && typeof result === "object")
+      : [];
+    const tradeCount = foldMetrics.reduce((sum, result) =>
+      sum + Math.max(0, Number(result.trade_count) || 0), 0);
+    const profitableFolds = foldMetrics.filter((result) =>
+      Number.isFinite(result.net_return_pct) && result.net_return_pct > 0
+    ).length;
+    const holdout = completeFolds ? folds[3].results[name] || null : null;
+    const stress = completeStress ? stress15.strategies[name] || null : null;
+    const holdoutTrades = Number(holdout?.trade_count || 0);
+    const holdoutNetPositive = Number.isFinite(holdout?.net_return_pct) && holdout.net_return_pct > 0;
+    const holdoutProfitFactor = holdout?.profit_factor;
+    const profitFactorPass = Number.isFinite(holdoutProfitFactor)
+      ? holdoutProfitFactor >= minimumHoldoutProfitFactor
+      : holdoutTrades >= 5 && holdoutNetPositive && holdoutProfitFactor === null;
+    const drawdownPass = Number.isFinite(holdout?.max_drawdown_pct) &&
+      holdout.max_drawdown_pct <= maximumHoldoutDrawdownPct;
+    const stressPass = Number.isFinite(stress?.net_return_pct) && stress.net_return_pct > 0;
+    const gates = {
+      complete_four_folds: completeFolds && foldMetrics.length === 4,
+      minimum_out_of_sample_trade_count: tradeCount >= minimumOosTrades,
+      minimum_profitable_folds: profitableFolds >= minimumProfitableFolds,
+      untouched_holdout_positive: holdoutNetPositive,
+      untouched_holdout_profit_factor: profitFactorPass,
+      untouched_holdout_drawdown_guard: drawdownPass,
+      positive_after_1_5x_fee_and_slippage_stress: stressPass
+    };
+    const eligible = Object.values(gates).every(Boolean);
+    const reasons = Object.entries(gates).filter(([, passed]) => !passed).map(([name]) => name);
+    return [name, {
+      status: eligible ? "evidence_positive_shadow_review_only" : "insufficient_edge_evidence",
+      eligible_for_shadow_paper_review: eligible,
+      execution_authorized: false,
+      paper_auto_entry_eligible: false,
+      live_trading_enabled: false,
+      out_of_sample_trade_count: tradeCount,
+      profitable_folds: profitableFolds,
+      total_folds: 4,
+      untouched_holdout: holdout ? {
+        trade_count: holdoutTrades,
+        net_return_pct: Number.isFinite(holdout.net_return_pct) ? holdout.net_return_pct : null,
+        profit_factor: Number.isFinite(holdoutProfitFactor) ? holdoutProfitFactor : null,
+        max_drawdown_pct: Number.isFinite(holdout.max_drawdown_pct) ? holdout.max_drawdown_pct : null,
+        expectancy_per_trade: Number.isFinite(holdout.expectancy_per_trade) ? holdout.expectancy_per_trade : null
+      } : null,
+      cost_stress_1_5x_net_return_pct: Number.isFinite(stress?.net_return_pct) ? stress.net_return_pct : null,
+      gates,
+      failed_gates: reasons
+    }];
+  }));
+  const qualified = Object.entries(evaluations).filter(([, item]) => item.eligible_for_shadow_paper_review)
+    .map(([name]) => name);
+  return {
+    status: completeFolds && completeStress ? "evaluated" : "incomplete",
+    method: "four_chronological_oos_folds_untouched_holdout_and_1_5x_cost_stress_v1",
+    minimums: {
+      out_of_sample_trades: minimumOosTrades,
+      profitable_folds: minimumProfitableFolds,
+      untouched_holdout_profit_factor: minimumHoldoutProfitFactor,
+      untouched_holdout_drawdown_pct_max: maximumHoldoutDrawdownPct
+    },
+    qualified_for_shadow_paper_review: qualified,
+    strategies: evaluations,
+    execution_authorized: false,
+    paper_auto_entry_eligible: false,
+    live_trading_enabled: false,
+    warning: "Passing this screen qualifies a research hypothesis for a separately reviewed shadow-PAPER trial only. It does not prove future profitability or authorize any order."
+  };
+}
+
 export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
   const oneHourInput = normalizeBars(candles1h, HOUR_MS);
   const sixHourInput = normalizeBars(candles6h, SIX_HOUR_MS);
@@ -738,8 +839,10 @@ export function runWalkForwardResearch({ candles1h, candles6h, options = {} }) {
       }];
     })
   );
+  const promotionEvidence = evaluateWalkForwardEvidence({ folds, costStress: stress });
   return {
     ok: folds.every((fold) => fold.ok) && stress.every((item) => item.result.ok),
+    promotion_evidence: promotionEvidence,
     mode: "offline_research_only",
     validation: "chronological_non_overlapping_folds_no_random_shuffle",
     warmup_bars: firstEvaluation,

@@ -2,7 +2,7 @@
 
 ## Purpose and safety boundary
 
-This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and an alarm that the current hardening branch tightens to every 90 seconds. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 forces legacy v1 auto-entry settings OFF during migration. A new/empty ledger targets USD 10 virtual capital. If a legacy ledger has trades and a different starting balance, it stays locked until the owner reviews it; the review can preserve the existing starting balance and all history, requires all open positions to be closed, and keeps auto-entry OFF.
+This package is an alternative cloud runtime for the AI Trading Terminal. It uses a single SQLite-backed Cloudflare Durable Object for persistent paper positions and a 90-second strategy/candle scan and a separate 10-second L2-only refresh alarm. The account owner must explicitly enable automatic PAPER entries in the dashboard; the initial state is OFF. Profile v2 forces legacy v1 auto-entry settings OFF during migration. A new/empty ledger targets USD 10 virtual capital. If a legacy ledger has trades and a different starting balance, it stays locked until the owner reviews it; the review can preserve the existing starting balance and all history, requires all open positions to be closed, and keeps auto-entry OFF.
 
 This is not unattended real-money trading. Production/live exchange orders are not implemented here. Binance Testnet order execution is not part of this Worker. Solana token discovery and wallet signing are not part of this Worker. No exchange API key is required.
 
@@ -10,7 +10,7 @@ This is not unattended real-money trading. Production/live exchange orders are n
 
 - Cloudflare Worker: same-origin API gateway, password login, signed short-lived session token and static dashboard.
 - Durable Object TradingEngine: serialized single-owner paper ledger in SQLite, risk gates, market snapshots, events and emergency stop state.
-- Durable Object alarm: the current hardening branch runs the public market scan and simulated stop/target monitor every 90 seconds. This is still a scheduled simulation, not a real-time exchange stop.
+- Durable Object alarm: a 10-second alarm refreshes only L2 books from each market's already-selected venue; full strategy/candle scans remain at 90 seconds. The short path may check existing PAPER exits but never generates an entry. This is still a scheduled simulation, not a real-time exchange stop.
 - Coinbase is the primary USD spot market-data provider. Bitstamp's public USD spot API is a secondary whole-market fallback for BTC/USD, ETH/USD and SOL/USD: ticker, grouped order-book snapshot, native 1H candles (`step=3600`) and native 6H candles (`step=21600`). If the primary snapshot is unavailable or incomplete, the Worker retries that symbol as a complete Bitstamp snapshot; it never combines a Coinbase ticker/book with Bitstamp candles. Each selected market records `market_data_provider` and the provider for ticker, book, 1H and 6H so source mixing fails the market-universe gate.
 - No D1 database, KV namespace, paid container, load balancer, VPS or paid service is required by this design.
 
@@ -28,7 +28,7 @@ The Durable Object alarm is initialized on the first /api/health or authenticate
 - Strategy signal is a deterministic, uncalibrated rule score, not an ML model or probability.
 - Paper fills approximate an ask-plus-slippage entry and bid-minus-slippage exit. They do not model queue position, partial fills, exchange fees actually charged to your account, outages, market impact or latency.
 - A PAPER position records the exact USD spot provider used at entry. Open-position marks, simulated stops/targets and manual closes accept quotes only from that same provider; if a market switches between Coinbase and Bitstamp, that position is temporarily unmarked until its entry provider returns. Legacy positions opened before provider provenance was recorded are treated as Coinbase entries. This prevents simulated P&L from silently switching venues mid-trade.
-- The 90-second scheduler still can miss a fast price gap. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
+- The 10-second L2 refresh reduces the stale-book window but can still miss a fast price gap or provider outage. A simulated stop is not an exchange-native stop and cannot guarantee an exit price. Cloudflare Durable Object alarms are at-least-once with retry/backoff; this worker uses durable cycle keys to avoid replaying the same scheduled entry decision.
 - No profit is promised. Paper results are not proof of live profitability.
 
 ## Authentication abuse protection
@@ -87,7 +87,7 @@ This is the recommended route for a phone-only setup. Cloudflare Workers Builds 
    Save/deploy the Worker after adding both secrets. Do not reuse your GitHub or email password, and never send either value here. `ADMIN_USERNAME` defaults to `admin`; it can be overridden as a non-secret variable.
 7. Open the Worker URL ending in `.workers.dev`. Check `/api/health` returns `status: ok`, `mode: paper_only`, `live_trading_enabled: false`, and `binance_testnet_enabled: false`. It also returns `deployment_commit_sha`, `worker_version.id`, `worker_version.tag`, and a version timestamp. Both `deployment_commit_sha` and `worker_version.tag` must match the exact current repository `main` SHA before treating the deployment as current.
 8. Sign into the dashboard. Press **Scan now**. Wait for all 3 market rows to show `live`; verify both 1h and 6h have at least 150 valid closed candles, no gaps, fresh quotes, local order-book response retrieval age under 15 seconds and adequate top-10 depth. If any item is unavailable or stale, leave automatic PAPER entries OFF.
-9. Confirm the scan timestamp advances after the first alarm and again roughly every 90 seconds. Refresh the page and confirm the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
+9. Confirm the L2 refresh timestamp advances roughly every 10 seconds with 3/3 successes, while the full strategy scan advances roughly every 90 seconds. Confirm the 15-second order-book gate remains in force, then refresh the page and verify that the virtual ledger, events and stop state persist. Do not enable PAPER auto-entry before this check.
 10. Only after the above checks, use the dashboard's **Enable paper auto-entry** button. This authorizes virtual PAPER trades only. Real-money order submission is disabled in this build; Coinbase account preflight and order preview do not place an order. Binance Testnet remains disabled.
 11. The Android APK/WebView can be pointed to the Worker HTTPS URL only after the browser dashboard and its authenticated APIs have passed these checks.
 
@@ -146,3 +146,12 @@ The research dashboard compares three exploratory strategy families. A single ba
 The current research history archive retains up to 4,320 1H bars and 1,440 6H bars per asset/provider. The new walk-forward gate therefore needs roughly 125 days of clean 6H/1H history to become available. It will correctly report insufficient history until the archive has accumulated enough data. This does not delay ordinary 1H/6H signal monitoring; it delays only the stronger research-validation claim.
 
 External research references: [Freqtrade look-ahead analysis](https://www.freqtrade.io/en/stable/lookahead-analysis/), [Freqtrade recursive indicator analysis](https://www.freqtrade.io/en/stable/recursive-analysis/), [Hummingbot V2 architecture](https://hummingbot.org/strategies/v2-strategies/), [Jesse optimization and held-out testing](https://docs.jesse.trade/docs/research/optimize), and [Probability of Backtest Overfitting (Bailey et al.)](https://doi.org/10.21314/jcf.2016.322).
+
+
+## Two-cadence scheduler and BTC-context hardening (2026-11-10)
+
+- **10 seconds:** refresh the order book only, using the exact provider selected for the symbol (Coinbase or Bitstamp). Update L2 telemetry and check existing PAPER exits. This path does not calculate new entry signals and cannot open positions.
+- **90 seconds:** refresh closed-candle research, recalculate the 1H/6H strategy and cross-market context, assess all entry gates, and run the scheduled PAPER cycle.
+- **15 seconds:** hard maximum age for an order-book snapshot. If a refresh is missed, fails validation, receives stale Bitstamp exchange time, or returns low/invalid depth, the current feed is unavailable and new entries remain blocked. Do not raise this limit to make the dashboard appear healthy.
+
+The strategy uses a BTC-led 1H/6H market regime and breadth gate plus rolling ATR-expansion checks. Walk-forward evidence is research-only and can qualify a candidate for a separately reviewed shadow-PAPER trial; it cannot switch on auto-entry or authorize live orders.

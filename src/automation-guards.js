@@ -172,6 +172,22 @@ export function shouldHaltPaperAutomation({
 }
 
 
+/**
+ * The short alarm cadence refreshes only L2 books. Full strategy/candle scans
+ * remain on their own bounded interval, independent of book-refresh alarms.
+ */
+export function shouldRunScheduledMarketScan(
+  lastScheduledScanAtMs,
+  nowMs = Date.now(),
+  intervalMs = 90_000
+) {
+  const last = Number(lastScheduledScanAtMs);
+  if (!Number.isFinite(nowMs) || nowMs <= 0 ||
+      !Number.isFinite(intervalMs) || intervalMs <= 0) return true;
+  if (!Number.isFinite(last) || last <= 0 || last > nowMs + 5000) return true;
+  return nowMs - last >= intervalMs;
+}
+
 export function deriveSchedulerStatus({
   lastScheduledAlarmAtMs,
   lastScheduledScanStatus,

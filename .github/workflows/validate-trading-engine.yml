@@ -1,0 +1,42 @@
+name: Validate Trading Engine
+
+on:
+  push:
+    branches:
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-trading-engine-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Tests, syntax, Worker build and local safety smoke test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+
+      - name: Validate source syntax
+        run: npm run check
+
+      - name: Run complete unit test suite
+        run: npm test
+
+      - name: Build Cloudflare Worker without deploying
+        run: npm run build
+
+      - name: Local Durable Object, authentication and kill-switch smoke test
+        run: npm run smoke

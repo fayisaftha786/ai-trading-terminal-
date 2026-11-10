@@ -14,7 +14,7 @@ The objective is not to maximize trade count. It is to determine whether a strat
 - Candidate gates: fresh two-sided ticker; spread no wider than 25 bps; at least USD 5,000 top-10 depth on both sides; order-book response retrieved within 15 seconds; estimated 24-hour quote volume at least USD 1 million; fresh closed candles; primary score at least 75; both timeframes in uptrend; volatility/momentum guards; and expected range above a conservative multiple of estimated round-trip costs.
 - Risk baseline: 0.25% risk budget per entry, 20% max exposure, 3 max open positions, 3 entries per UTC day, 4-hour per-symbol cooldown, 1% stop, 3% target, estimated 15 bps fee and 10 bps slippage per side assumptions, plus daily/weekly/total drawdown controls.
 - Persistence: one current market snapshot per symbol, bounded event and cycle logs, an equity snapshot history capped at 2,000 rows, and the durable trade ledger.
-- Scheduler: Durable Object alarm targets approximately 15-minute scans. It is at-least-once/best-effort monitoring, not an exchange-native stop or a guaranteed 24/7 service.
+- Scheduler: a 90-second strategy/candle scan is separated from a 10-second L2-only refresh. The short path refreshes only the already-selected provider order book and checks PAPER exits; it never opens entries or recalculates signals. Durable Object alarms are at-least-once/best-effort, not an exchange-native stop or a guaranteed 24/7 service.
 
 ## Immediate improvement delivered in this branch
 
@@ -86,3 +86,12 @@ Coverage is not immediately a 180-day backtest: on the initial deployment it beg
 No new strategy becomes the automatic PAPER default unless: all data gates are clean; at least three chronological test folds and an untouched holdout have been evaluated; results remain acceptable under 1.5x and 2x costs; no single asset/regime explains the entire result; and the forward PAPER sample shows no duplicate entries, stale-price fills, ledger drift or risk-limit bypass.
 
 No backtest or PAPER result authorizes real-money trading. Live execution remains a separate project requiring an independent security, provider, jurisdiction and reconciliation review.
+
+
+## 2026-11-10 deep-hardening update
+
+- L2 book freshness remains strictly limited to 15 seconds. A dedicated 10-second alarm refreshes only the order book from the selected Coinbase or Bitstamp venue; strategy/candle scans remain at 90 seconds. Failed, stale, unsupported or mismatched books fail closed.
+- The short refresh path never recomputes entry signals and never opens new positions. It can update current PAPER bid marks and run simulated stop/target monitoring against the same selected provider. Refresh age, status, successes, failures and skipped markets are reported separately from full-scan health.
+- New long PAPER candidates require verified BTC-led 1H/6H regime and breadth. Missing/stale context is BLOCKED; BTC risk-off, broad downside or market-wide volatility expansion blocks long entries.
+- ATR expansion is checked against rolling history using the correct timeframe interval for 1m, 5m, 1h and 6h analysis.
+- Walk-forward evidence requires four chronological folds, at least 30 OOS trades, at least three profitable folds, a positive untouched holdout with PF at least 1.1 and drawdown at most 8%, plus positive 1.5x cost stress. A pass is shadow-review eligibility only, not production promotion or execution authorization.
