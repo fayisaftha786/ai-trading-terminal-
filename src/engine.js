@@ -23,6 +23,7 @@ import { createServerLivePreview, consumeServerLivePreview } from "./live-order-
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
 const DASHBOARD_ANALYTICS_SAMPLE_LIMIT = 250; // Independent L2-only refresh cadence.
+const TRADE_ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_QUOTE_AGE_MS = 120000;
 const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
@@ -2066,6 +2067,19 @@ export class TradingEngine extends DurableObject {
   }
 
   tradeAnalytics() {
+    const nowMs = Date.now();
+    const cached = this.getState("trade_analytics_cache");
+    if (cached && cached.value && Number.isFinite(Number(cached.calculated_at_ms)) &&
+        nowMs - Number(cached.calculated_at_ms) >= 0 &&
+        nowMs - Number(cached.calculated_at_ms) < TRADE_ANALYTICS_CACHE_TTL_MS) {
+      return { ...cached.value, analytics_calculated_at_ms: Number(cached.calculated_at_ms) };
+    }
+    const value = this.computeTradeAnalytics();
+    this.setState("trade_analytics_cache", { calculated_at_ms: nowMs, value });
+    return { ...value, analytics_calculated_at_ms: nowMs };
+  }
+
+  computeTradeAnalytics() {
     const totals = this.sql.exec(
       "SELECT COUNT(*) AS total_trades, " +
       "SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed_trades, " +
