@@ -101,6 +101,28 @@ test("Binance signed read-only preflight verifies key permissions then reads spo
     ["BTCUSDT", "ETHUSDT", "SOLUSDT"]);
 });
 
+test("Binance strategy can request a bounded custom pair set for account fee verification", async () => {
+  const result = await preflightBinanceReadOnly(env, {
+    feeSymbols: ["xrpUSDT", "invalid", "ADAUSDT", "XRPUSDT"],
+    fetchImpl: async (url) => {
+      const parsed = new URL(url);
+      if (parsed.pathname.endsWith("/apiRestrictions")) return jsonResponse(safePermissions);
+      if (parsed.pathname === "/api/v3/account") return jsonResponse({ balances: [] });
+      if (parsed.pathname === "/api/v3/account/commission") return jsonResponse({
+        symbol: parsed.searchParams.get("symbol"),
+        standardCommission: { maker: "0.001", taker: "0.001" },
+        taxCommission: { maker: "0", taker: "0" },
+        specialCommission: { maker: "0", taker: "0" },
+        discount: { enabledForAccount: false, enabledForSymbol: false, discountAsset: "BNB", discount: "0.75" }
+      });
+      return jsonResponse({}, 404);
+    }
+  });
+  assert.deepEqual(result.fee_symbols, ["XRPUSDT", "ADAUSDT"]);
+  assert.deepEqual(result.fees.symbols.map((item) => item.symbol), ["XRPUSDT", "ADAUSDT"]);
+  assert.equal(result.fees.verified_count, 2);
+});
+
 test("Binance connector refuses account sync when Spot trading permission is enabled", async () => {
   let accountRead = false;
   const result = await preflightBinanceReadOnly(env, {
