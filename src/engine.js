@@ -63,6 +63,8 @@ export class TradingEngine extends DurableObject {
       "CREATE TABLE IF NOT EXISTS trades(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),entry_price REAL NOT NULL,quantity REAL NOT NULL,notional_usd REAL NOT NULL,stop_loss REAL NOT NULL,take_profit REAL NOT NULL,fees_usd REAL NOT NULL DEFAULT 0,pnl_usd REAL,opened_at_ms INTEGER NOT NULL,closed_at_ms INTEGER,exit_price REAL,metadata_json TEXT NOT NULL DEFAULT '{}')",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN'",
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms)",
+      "CREATE INDEX IF NOT EXISTS idx_trades_closed_at_id_pnl ON trades(closed_at_ms DESC,id DESC,pnl_usd) WHERE status='CLOSED'",
+      "CREATE TABLE IF NOT EXISTS trade_ledger_summary(id INTEGER PRIMARY KEY CHECK(id=1),total_trades INTEGER NOT NULL,closed_trades INTEGER NOT NULL,realized_pnl_usd REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}')",
       "CREATE TABLE IF NOT EXISTS auth_login_attempts(id INTEGER PRIMARY KEY AUTOINCREMENT,ip_hash TEXT NOT NULL,attempted_at_ms INTEGER NOT NULL)",
       "CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_ip_time ON auth_login_attempts(ip_hash,attempted_at_ms)",
@@ -75,8 +77,41 @@ export class TradingEngine extends DurableObject {
       "CREATE INDEX IF NOT EXISTS idx_live_fills_order_time ON live_fills(order_id,trade_time)",
       "CREATE INDEX IF NOT EXISTS idx_live_fills_client_time ON live_fills(client_order_id,trade_time)"
     ];
-    // Durable Object SQL exec expects a single statement per call.
+    // Durable Object SQL exec expects one SQLite statement per call.
     for (const statement of schemaStatements) this.sql.exec(statement);
+
+    // Backfill the exact ledger summary once per Durable Object database.
+    // Subsequent startups perform only a one-row existence probe; SQLite
+    // triggers keep the summary transactionally aligned with trade writes.
+    const ledgerSummaryExists = this.sql.exec(
+      "SELECT 1 AS present FROM trade_ledger_summary WHERE id=1 LIMIT 1"
+    ).toArray().length > 0;
+    if (!ledgerSummaryExists) {
+      this.sql.exec(
+        "INSERT INTO trade_ledger_summary(id,total_trades,closed_trades,realized_pnl_usd) " +
+        "SELECT 1,COUNT(*),COALESCE(SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END),0)," +
+        "COALESCE(SUM(CASE WHEN status='CLOSED' THEN pnl_usd ELSE 0 END),0) FROM trades"
+      );
+    }
+    const ledgerSummaryTriggers = [
+      "CREATE TRIGGER IF NOT EXISTS trg_trades_ledger_summary_insert AFTER INSERT ON trades BEGIN " +
+      "UPDATE trade_ledger_summary SET total_trades=total_trades+1," +
+      "closed_trades=closed_trades+CASE WHEN NEW.status='CLOSED' THEN 1 ELSE 0 END," +
+      "realized_pnl_usd=realized_pnl_usd+CASE WHEN NEW.status='CLOSED' THEN COALESCE(NEW.pnl_usd,0) ELSE 0 END " +
+      "WHERE id=1; END",
+      "CREATE TRIGGER IF NOT EXISTS trg_trades_ledger_summary_update AFTER UPDATE OF status,pnl_usd ON trades " +
+      "WHEN OLD.status IS NOT NEW.status OR COALESCE(OLD.pnl_usd,0)<>COALESCE(NEW.pnl_usd,0) BEGIN " +
+      "UPDATE trade_ledger_summary SET " +
+      "closed_trades=closed_trades+CASE WHEN NEW.status='CLOSED' THEN 1 ELSE 0 END-CASE WHEN OLD.status='CLOSED' THEN 1 ELSE 0 END," +
+      "realized_pnl_usd=realized_pnl_usd+CASE WHEN NEW.status='CLOSED' THEN COALESCE(NEW.pnl_usd,0) ELSE 0 END-" +
+      "CASE WHEN OLD.status='CLOSED' THEN COALESCE(OLD.pnl_usd,0) ELSE 0 END WHERE id=1; END",
+      "CREATE TRIGGER IF NOT EXISTS trg_trades_ledger_summary_delete AFTER DELETE ON trades BEGIN " +
+      "UPDATE trade_ledger_summary SET total_trades=total_trades-1," +
+      "closed_trades=closed_trades-CASE WHEN OLD.status='CLOSED' THEN 1 ELSE 0 END," +
+      "realized_pnl_usd=realized_pnl_usd-CASE WHEN OLD.status='CLOSED' THEN COALESCE(OLD.pnl_usd,0) ELSE 0 END " +
+      "WHERE id=1; END"
+    ];
+    for (const statement of ledgerSummaryTriggers) this.sql.exec(statement);
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
@@ -113,6 +148,24 @@ export class TradingEngine extends DurableObject {
       "INSERT INTO app_state(key,value_json) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json",
       key, JSON.stringify(value)
     );
+  }
+
+  getTradeLedgerSummary() {
+    const rows = this.sql.exec(
+      "SELECT total_trades,closed_trades,realized_pnl_usd FROM trade_ledger_summary WHERE id=1 LIMIT 1"
+    ).toArray();
+    if (!rows.length) return null;
+    const totalTrades = Number(rows[0].total_trades);
+    const closedTrades = Number(rows[0].closed_trades);
+    const realizedPnl = Number(rows[0].realized_pnl_usd);
+    if (!Number.isSafeInteger(totalTrades) || totalTrades < 0 ||
+        !Number.isSafeInteger(closedTrades) || closedTrades < 0 ||
+        closedTrades > totalTrades || !Number.isFinite(realizedPnl)) return null;
+    return {
+      total_trades: totalTrades,
+      closed_trades: closedTrades,
+      realized_pnl_usd: realizedPnl
+    };
   }
 
   logEvent(type, message, metadata = {}) {
@@ -709,7 +762,9 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/trades") {
         const limit = Math.max(1, Math.min(100, Number.parseInt(url.searchParams.get("limit") || "50", 10) || 50));
         const offset = Math.max(0, Number.parseInt(url.searchParams.get("offset") || "0", 10) || 0);
-        const total = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
+        const ledgerSummary = this.getTradeLedgerSummary();
+        if (!ledgerSummary) return jsonResponse({ error: "ledger_summary_unavailable" }, 503);
+        const total = ledgerSummary.total_trades;
         return jsonResponse({
           trades: this.getTrades(limit, offset), total, limit, offset,
           has_more: offset + limit < total, open_positions: this.getOpenTrades()
@@ -778,7 +833,9 @@ export class TradingEngine extends DurableObject {
         let body;
         try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_json" }, 400); }
         const settings = this.getState("settings") || {};
-        const tradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count);
+        const ledgerSummary = this.getTradeLedgerSummary();
+        if (!ledgerSummary) return jsonResponse({ error: "ledger_summary_unavailable" }, 503);
+        const tradeCount = ledgerSummary.total_trades;
         const openPositions = this.getOpenTrades().length;
         const review = reviewLegacyPaperCapital(settings, {
           action: body?.action,
@@ -2278,7 +2335,9 @@ export class TradingEngine extends DurableObject {
   }
 
   portfolio(markBySymbol, risk, nowMs) {
-    const realized = Number(this.sql.exec("SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED'").toArray()[0]?.pnl || 0);
+    const ledgerSummary = this.getTradeLedgerSummary();
+    const ledgerSummaryAvailable = ledgerSummary !== null;
+    const realized = ledgerSummaryAvailable ? ledgerSummary.realized_pnl_usd : null;
     const initial = Number(this.getState("settings")?.initial_capital_usd || 100);
     const openTrades = this.getOpenTrades();
     let unrealized = 0;
@@ -2294,37 +2353,43 @@ export class TradingEngine extends DurableObject {
       unrealized += (estimatedExit - trade.entry_price) * trade.quantity - trade.fees_usd - exitFee;
       exposure += bid * trade.quantity;
     }
-    const equity = initial + realized + unrealized;
+    const equity = ledgerSummaryAvailable ? initial + realized + unrealized : null;
     const settings = this.getState("settings");
     const storedPeak = Math.max(initial, Number(settings.peak_equity_usd || initial));
-    // An unmarked open position makes current equity incomplete. Do not let a
-    // stale/incomplete valuation move the persisted high-water mark.
-    const peak = unmarked > 0 ? storedPeak : Math.max(storedPeak, equity);
-    if (unmarked === 0 && peak > storedPeak) {
+    // An unmarked open position or unavailable ledger summary makes current
+    // equity incomplete. Never move the high-water mark from incomplete data.
+    const peak = !ledgerSummaryAvailable || unmarked > 0 ? storedPeak : Math.max(storedPeak, equity);
+    if (ledgerSummaryAvailable && unmarked === 0 && peak > storedPeak) {
       settings.peak_equity_usd = peak;
       this.setState("settings", settings);
     }
-    const drawdown = unmarked > 0 ? null : (peak > 0 ? Math.max(0, ((peak - equity) / peak) * 100) : 0);
-    const dayKey = new Date(nowMs).toISOString().slice(0, 10);
+    const drawdown = !ledgerSummaryAvailable || unmarked > 0
+      ? null : (peak > 0 ? Math.max(0, ((peak - equity) / peak) * 100) : 0);
+
+    const day = new Date(nowMs);
+    const dayKey = day.toISOString().slice(0, 10);
+    const dayStartMs = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+    const nextDayStartMs = dayStartMs + (24 * 60 * 60 * 1000);
     const closedToday = Number(this.sql.exec(
-      "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED' AND date(closed_at_ms/1000,'unixepoch')=?",
-      dayKey
+      "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades " +
+      "WHERE status='CLOSED' AND closed_at_ms>=? AND closed_at_ms<?",
+      dayStartMs, nextDayStartMs
     ).toArray()[0]?.pnl || 0);
+
     const monday = new Date(nowMs);
     const weekday = (monday.getUTCDay() + 6) % 7;
     monday.setUTCDate(monday.getUTCDate() - weekday);
     const weekStartMs = Date.UTC(monday.getUTCFullYear(), monday.getUTCMonth(), monday.getUTCDate());
     const closedThisWeek = Number(this.sql.exec(
-      "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades WHERE status='CLOSED' AND closed_at_ms>=?",
-      weekStartMs
+      "SELECT COALESCE(SUM(pnl_usd),0) AS pnl FROM trades " +
+      "WHERE status='CLOSED' AND closed_at_ms>=? AND closed_at_ms<=?",
+      weekStartMs, nowMs
     ).toArray()[0]?.pnl || 0);
-    const ledgerTradeCount = Number(this.sql.exec(
-      "SELECT COUNT(*) AS count FROM trades"
-    ).toArray()[0]?.count || 0);
+    const tradeCount = ledgerSummaryAvailable ? ledgerSummary.total_trades : 0;
     const dayBaseline = resolveRiskBaseline({
       periodKey: dayKey, storedPeriodKey: this.getState("risk_day_key"),
       storedBaseline: this.getState("risk_day_baseline"), equity, closedPnl: closedToday,
-      unmarkedPositions: unmarked, tradeCount: ledgerTradeCount
+      unmarkedPositions: unmarked, tradeCount
     });
     if (dayBaseline.shouldPersist) {
       this.setState("risk_day_key", dayKey);
@@ -2334,29 +2399,34 @@ export class TradingEngine extends DurableObject {
     const weekBaseline = resolveRiskBaseline({
       periodKey: weekKey, storedPeriodKey: this.getState("risk_week_key"),
       storedBaseline: this.getState("risk_week_baseline"), equity, closedPnl: closedThisWeek,
-      unmarkedPositions: unmarked, tradeCount: ledgerTradeCount
+      unmarkedPositions: unmarked, tradeCount
     });
     if (weekBaseline.shouldPersist) {
       this.setState("risk_week_key", weekKey);
       this.setState("risk_week_baseline", weekBaseline.baseline);
     }
     return {
-      mode: "paper_only", initial_capital_usd: initial, realized_pnl_usd: realized, unrealized_pnl_usd: unrealized,
-      equity_usd: equity, exposure_usd: exposure, open_positions: openTrades.length, unmarked_positions: unmarked,
-      peak_equity_usd: peak, drawdown_pct_from_peak: drawdown,
+      mode: "paper_only", initial_capital_usd: initial,
+      realized_pnl_usd: ledgerSummaryAvailable ? realized : null,
+      unrealized_pnl_usd: unrealized,
+      equity_usd: equity, exposure_usd: exposure, open_positions: openTrades.length,
+      unmarked_positions: unmarked, peak_equity_usd: ledgerSummaryAvailable ? peak : null,
+      drawdown_pct_from_peak: drawdown,
       daily_equity_pnl_usd: dayBaseline.initialized ? equity - dayBaseline.baseline : null,
       weekly_equity_pnl_usd: weekBaseline.initialized ? equity - weekBaseline.baseline : null,
       daily_risk_baseline_usd: dayBaseline.initialized ? dayBaseline.baseline : null,
       weekly_risk_baseline_usd: weekBaseline.initialized ? weekBaseline.baseline : null,
       daily_risk_baseline_initialized: dayBaseline.initialized,
       weekly_risk_baseline_initialized: weekBaseline.initialized,
-      ledger_trade_count: ledgerTradeCount,
+      ledger_trade_count: ledgerSummaryAvailable ? ledgerSummary.total_trades : null,
+      ledger_summary_available: ledgerSummaryAvailable,
       risk_period_timezone: "UTC", last_updated_at_ms: nowMs
     };
   }
 
   entryBlockReasons(portfolio, risk, nowMs) {
     const reasons = [];
+    if (portfolio.ledger_summary_available !== true) reasons.push("ledger_summary_unavailable");
     if (portfolio.unmarked_positions > 0) reasons.push("open_position_without_fresh_mark");
     if (portfolio.open_positions >= risk.max_open_positions) reasons.push("max_open_positions");
     const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
@@ -2663,6 +2733,7 @@ export class TradingEngine extends DurableObject {
     const trades = this.getTrades(30);
     const openPositions = this.getOpenTrades();
     const marks = this.buildPositionLockedBidMarks(markets, nowMs);
+    const analytics = this.tradeAnalytics();
     const portfolio = this.portfolio(marks, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs);
     return {
       mode: "paper_only", live_trading_enabled: false,
@@ -2675,7 +2746,7 @@ export class TradingEngine extends DurableObject {
       market_context: assessCrossMarketContext(markets, nowMs),
       portfolio, markets, trades, open_positions: openPositions,
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
-      runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
+      runtime, analytics, research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
   }
