@@ -216,7 +216,7 @@ export function coinbaseAdvancedStatus(env = {}) {
     mode: "live_setup_locked",
     credentials_configured: config.credentialsConfigured,
     credential_key_format_hint: config.privateKeyFormatHint,
-    supported_private_key_formats: ["Ed25519 Base64 (32/64 bytes)", "Ed25519 PKCS#8 PEM", "ECDSA P-256 EC PRIVATE KEY PEM"],
+    supported_private_key_formats: ["Ed25519 Base64 (32/64 bytes)", "Ed25519 PKCS#8 PEM", "ECDSA P-256 SEC1 PEM"],
     allowed_products_configured: config.allowedProductsValid,
     allowed_products: config.allowedProducts,
     max_order_quote_configured: config.maxOrderQuoteValid,
