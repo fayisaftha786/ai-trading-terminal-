@@ -950,7 +950,8 @@ export async function fetchProductSnapshot(
   productRef,
   nowMs = Date.now(),
   cachedCandles = {},
-  requestState = DEFAULT_REQUEST_STATE
+  requestState = DEFAULT_REQUEST_STATE,
+  { allowBitstampLegacyExit = false } = {}
 ) {
   let primary = null;
   let primaryError = null;
@@ -960,6 +961,22 @@ export async function fetchProductSnapshot(
     if (snapshotIsEntryReady(primary, Date.now())) return primary;
   } catch (error) {
     primaryError = error;
+  }
+
+  // New PAPER entries and all ordinary market monitoring are Coinbase-only.
+  // Bitstamp may be queried only to continue marking an already-open legacy
+  // PAPER position whose entry record explicitly names Bitstamp.
+  if (allowBitstampLegacyExit !== true) {
+    if (primary) {
+      primary.data_quality.legacy_provider_fallback_skipped = true;
+      primary.data_quality.entry_blocked_by_provider_policy =
+        primary.market_data_provider !== "coinbase_exchange" ||
+        primary.data_quality.book_status !== "available" ||
+        primary.one_hour_audit?.ok !== true ||
+        primary.six_hour_audit?.ok !== true;
+      return primary;
+    }
+    throw primaryError || new Error("coinbase_market_data_unavailable");
   }
 
   try {
@@ -972,34 +989,32 @@ export async function fetchProductSnapshot(
         primary?.data_quality?.one_hour_refresh_error ||
         primary?.data_quality?.six_hour_refresh_error ||
         "primary_snapshot_incomplete");
-    backup.data_quality.failover_used = true;
+    backup.data_quality.legacy_exit_compatibility = true;
     backup.data_quality.failover_reason = primaryError
-      ? "primary_provider_request_failed"
-      : "primary_snapshot_incomplete";
+      ? "coinbase_unavailable_for_existing_bitstamp_position"
+      : "coinbase_snapshot_incomplete_for_existing_bitstamp_position";
     if (snapshotIsEntryReady(backup, Date.now())) return backup;
-    if (!primary) return backup;
-    // If the backup is also incomplete, retain the better fresh primary quote
-    // for exit monitoring; entry readiness remains blocked by missing checks.
-    if (Number.isFinite(primary.bid) && primary.bid > 0 &&
-        Number.isFinite(primary.ask) && primary.ask >= primary.bid) {
-      primary.data_quality.failover_attempted = true;
-      primary.data_quality.failover_error = "backup_snapshot_incomplete";
-      primary.data_quality.backup_provider = "bitstamp_spot";
-      return primary;
+    if (primary) {
+      // Preserve a valid Coinbase quote for any Coinbase-entered position.
+      if (Number.isFinite(primary.bid) && primary.bid > 0 &&
+          Number.isFinite(primary.ask) && primary.ask >= primary.bid) {
+        primary.data_quality.legacy_provider_fallback_attempted = true;
+        primary.data_quality.legacy_provider_fallback_error = "bitstamp_snapshot_incomplete";
+        return primary;
+      }
     }
     return backup;
   } catch (backupError) {
     if (primary) {
-      primary.data_quality.failover_attempted = true;
-      primary.data_quality.failover_error = providerErrorCode(backupError);
-      primary.data_quality.backup_provider = "bitstamp_spot";
+      primary.data_quality.legacy_provider_fallback_attempted = true;
+      primary.data_quality.legacy_provider_fallback_error = providerErrorCode(backupError);
       return primary;
     }
     const combined = new Error(
-      "Primary Coinbase and secondary Bitstamp market-data requests failed"
+      "Coinbase market data is unavailable and legacy Bitstamp exit data could not be refreshed"
     );
-    combined.code = "all_market_data_providers_unavailable";
-    combined.primary_error_code = primaryError ? providerErrorCode(primaryError) : "primary_snapshot_incomplete";
+    combined.code = "legacy_exit_market_data_unavailable";
+    combined.primary_error_code = primaryError ? providerErrorCode(primaryError) : "coinbase_snapshot_incomplete";
     combined.backup_error_code = providerErrorCode(backupError);
     combined.status = Number(backupError?.status) || Number(primaryError?.status) || 503;
     throw combined;
