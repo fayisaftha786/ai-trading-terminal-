@@ -176,10 +176,14 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)");
   }
 
-  cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs) {
+  cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs, previousRows = null) {
     if (!audit?.ok || !Array.isArray(audit.rows)) return false;
     const rows = normalizeResearchCandleWindow(audit.rows.slice(-150));
     if (!rows) return false;
+    // Reuse the window already loaded for this scan to avoid both redundant
+    // app_state writes and extra SQL reads when no new closed candle arrived.
+    const previous = normalizeResearchCandleWindow(previousRows);
+    if (previous && JSON.stringify(previous) === JSON.stringify(rows)) return true;
     const key = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds;
     this.setState(key, {
       version: 1,
@@ -1336,6 +1340,33 @@ export class TradingEngine extends DurableObject {
           product, Date.now(), cachedCandles, undefined,
           { allowBitstampLegacyExit: legacyBitstampExitSymbols.has(product.symbol) }
         );
+        // Refresh validated JSON windows immediately, independently of the SQL
+        // archive. The research archive may be temporarily unreadable after a
+        // row-read quota is exhausted, but a fresh provider response can still
+        // keep strategy inputs current for the next scan.
+        const snapshotExchange = snapshot.market_data_provider || "coinbase_exchange";
+        const cacheTimeframes = [
+          [60, "one_minute", snapshot.one_minute_audit],
+          [300, "five_minute", snapshot.five_minute_audit],
+          [3600, "one_hour", snapshot.one_hour_audit],
+          [21600, "six_hour", snapshot.six_hour_audit]
+        ];
+        for (const [timeframeSeconds, key, audit] of cacheTimeframes) {
+          const previousRows = snapshotExchange === "bitstamp_spot"
+            ? cachedCandles.bitstamp?.[key]
+            : cachedCandles[key];
+          try {
+            this.cacheResearchCandleWindow(
+              snapshotExchange, product.product, timeframeSeconds,
+              audit, Date.now(), previousRows
+            );
+          } catch (error) {
+            console.error("Research candle window cache update failed", {
+              product: product.product, timeframe_seconds: timeframeSeconds,
+              error: String(error?.message || error).slice(0, 120)
+            });
+          }
+        }
         candleArchives.push({
           product: product.product,
           exchange: snapshot.market_data_provider || "coinbase_exchange",
@@ -1815,7 +1846,6 @@ export class TradingEngine extends DurableObject {
       product, timeframeSeconds, barsCount, retainedFirst, latest,
       cumulativeGaps, receivedAtMs, inserted > 0 ? receivedAtMs : null
     );
-    this.cacheResearchCandleWindow("coinbase_exchange", product, timeframeSeconds, audit, receivedAtMs);
     return { stored: inserted, bars_count: barsCount, cumulative_missing_intervals: cumulativeGaps, status: "clean" };
   }
 
@@ -1871,7 +1901,6 @@ export class TradingEngine extends DurableObject {
         exchange, product, timeframeSeconds, cutoff
       );
     }
-    this.cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs);
     return {
       stored: inserted,
       bars_count: Math.min(retentionBars, rows.length),
