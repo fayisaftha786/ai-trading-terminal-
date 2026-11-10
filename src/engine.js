@@ -1211,15 +1211,19 @@ export class TradingEngine extends DurableObject {
     const terminalStatuses = new Set([
       "FILLED", "CANCELLED", "CANCELED", "EXPIRED", "FAILED"
     ]);
+    const lastAttemptAt = (item) => {
+      const value = Number(item?.last_reconciled_at_ms || item?.updated_at_ms || item?.created_at_ms || 0);
+      return Number.isFinite(value) ? value : 0;
+    };
     const active = records.filter((item) => {
       const status = String(item?.status || "").toUpperCase();
       if (activeStatuses.has(status)) return true;
       if (!terminalStatuses.has(status) || !item?.exchange_order_id) return false;
       const fillStatus = String(item?.fill_sync?.status || "").toLowerCase();
       if (fillStatus === "complete" || fillStatus === "proof_required") return false;
-      const lastAttemptAt = Number(item?.last_reconciled_at_ms || item?.updated_at_ms || item?.created_at_ms);
-      return !Number.isFinite(lastAttemptAt) || nowMs - lastAttemptAt >= 5 * 60 * 1000;
-    }).slice(0, 3);
+      const lastAttempt = lastAttemptAt(item);
+      return !lastAttempt || nowMs - lastAttempt >= 5 * 60 * 1000;
+    }).sort((left, right) => lastAttemptAt(left) - lastAttemptAt(right)).slice(0, 3);
     let checked = 0;
     let failed = 0;
     for (const record of active) {
