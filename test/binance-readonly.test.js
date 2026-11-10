@@ -80,7 +80,8 @@ test("Binance signed read-only preflight verifies key permissions then reads spo
   assert.equal(result.connected, true);
   assert.deepEqual(result.balances, [
     { asset: "BTC", free: "0.01000000", locked: "0.00200000", total: "0.012" },
-    { asset: "USDT", free: "25.50", locked: "0.00", total: "25.5" }
+    { asset: "USDT", free: "25.50", locked: "0.00", total: "25.5" },
+    { asset: "BNB", free: "0.10", locked: "0", total: "0.1" }
   ]);
   assert.equal(result.order_execution_available, false);
   assert.equal(result.live_trading_enabled, false);
