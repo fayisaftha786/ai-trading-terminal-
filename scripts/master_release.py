@@ -134,7 +134,7 @@ def main() -> int:
         "restart_exit_recovery_present": "startup_exit_recovery" in main_source,
         "indicator_analyzer_uses_wilder_adx_and_direction": all(token in strategy_source for token in ("Wilder RSI", "_wilder_atr_adx", "plus_di14", "ema20_slope_pct")),
         "raw_candle_integrity_detects_duplicates_and_alignment": all(token in strategy_source for token in ("candle_integrity_report", "duplicate_timestamps", "off_grid_timestamps", "missing_intervals")),
-        "market_data_gaps_force_hold": "if not primary_clean or not higher_clean" in market_data_source and 'analysis["regime"] = "DATA_GAP"' in market_data_source,
+        "market_data_gaps_force_hold": "if not primary_clean or not higher_clean" in market_data_source and 'item["regime"] = "DATA_GAP"' in market_data_source,
         "research_backtests_reject_raw_candle_integrity_failures": "candle_integrity_report" in backtest_source and "duplicate/invalid" in backtest_source,
         "research_backtests_use_same_saved_risk_profile": "current_saved_server_risk_profile" in main_source and 'risk_per_trade_pct=float(risk["risk_per_trade_pct"])' in main_source and 'fee_bps=float(risk["fee_bps_per_side"])' in main_source,
         "risk_profile_checks_net_reward_risk": "minimum_target_pct" in risk_source and "net_reward_risk" in schema_source,
