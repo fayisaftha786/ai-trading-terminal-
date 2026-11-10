@@ -52,3 +52,10 @@ test("AI Brain uses a single 50-market batch and visibly reports verified candle
   assert.match(html, /cached until the next bar closes/);
   assert.match(radar, /window\.binanceRadarSymbols = markets\.map/);
 });
+
+test("AI Brain displays specialist committee votes instead of presenting its score as a probability", () => {
+  assert.match(html, /<th>VOTES<\/th>/);
+  assert.match(html, /committee\.passed_votes/);
+  assert.match(html, /eight transparent specialist votes/);
+  assert.match(html, /score_is_probability/);
+});
