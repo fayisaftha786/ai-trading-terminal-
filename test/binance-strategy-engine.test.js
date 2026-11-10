@@ -25,6 +25,6 @@ test("Binance strategy is public-read-only and never enables an exchange order",
 
 test("Binance strategy filters thin ticker snapshots using 24h trade count", () => {
   assert.match(strategy, /active_24h_trade_count/);
-  assert.match(strategy, /ticker\\?\\.count/);
+  assert.match(strategy, /ticker\?\.count/);
   assert.doesNotMatch(strategy, /recent_last_trade|tickerTime/);
 });
