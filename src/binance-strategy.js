@@ -120,6 +120,13 @@ export function analyzeBinanceMultiTimeframeMarket({
     analyses[label]?.regime === "UPTREND" &&
     analyses[label]?.score >= 75
   );
+  const volumeChecks = {
+    trigger_15m_participation: Number.isFinite(analyses["15m"]?.volume_ratio_20) &&
+      analyses["15m"].volume_ratio_20 >= 0.8,
+    setup_1h_participation: Number.isFinite(analyses["1h"]?.volume_ratio_20) &&
+      analyses["1h"].volume_ratio_20 >= 0.8
+  };
+  const volumeAligned = Object.values(volumeChecks).every(Boolean);
   const score = Math.round(
     (Number(analyses["15m"]?.score || 0) * 0.2) +
     (Number(analyses["1h"]?.score || 0) * 0.35) +
@@ -156,13 +163,75 @@ export function analyzeBinanceMultiTimeframeMarket({
   for (const [key, passed] of Object.entries(dataChecks)) if (!passed) blockReasons.push(key);
   for (const [key, passed] of Object.entries(liquidityChecks)) if (!passed) blockReasons.push(key);
   for (const [key, passed] of Object.entries(edgeChecks)) if (!passed) blockReasons.push(key);
+  for (const [key, passed] of Object.entries(volumeChecks)) if (!passed) blockReasons.push(key);
   if (!trendAligned) blockReasons.push("multi_timeframe_trend_not_aligned");
   for (const reason of [...portfolioBlockReasons, ...symbolBlockReasons]) {
     if (typeof reason === "string" && reason) blockReasons.push(reason);
   }
 
-  const signal = trendAligned ? "LONG_CANDIDATE" : "HOLD";
-  const paperReviewReady = signal === "LONG_CANDIDATE" && blockReasons.length === 0;
+  const committeeVotes = [
+    {
+      id: "regime",
+      label: "Market regime",
+      approved: analyses["1h"]?.regime === "UPTREND" && analyses["4h"]?.regime === "UPTREND",
+      evidence: "1h and 4h must both be classified UPTREND"
+    },
+    {
+      id: "structure",
+      label: "Multi-timeframe structure",
+      approved: trendAligned,
+      evidence: "15m trigger, 1h setup and 4h context must each score at least 75 and be BUY_CANDIDATE"
+    },
+    {
+      id: "momentum",
+      label: "Directional momentum",
+      approved: ["15m", "1h", "4h"].every((label) =>
+        Number.isFinite(analyses[label]?.adx14) &&
+        analyses[label].adx14 >= 18 &&
+        analyses[label].plus_di14 > analyses[label].minus_di14
+      ),
+      evidence: "ADX >= 18 and +DI above -DI on all three frames"
+    },
+    {
+      id: "volume",
+      label: "Volume participation",
+      approved: volumeAligned,
+      evidence: "20-bar relative volume >= 0.8 on both 15m and 1h"
+    },
+    {
+      id: "data",
+      label: "Data integrity",
+      approved: Object.values(dataChecks).every(Boolean) &&
+        Object.values(audits).every((audit) => audit.ok),
+      evidence: "Closed candles, valid quotes, current frame ages and active 24h trade count"
+    },
+    {
+      id: "liquidity",
+      label: "Market liquidity",
+      approved: Object.values(liquidityChecks).every(Boolean),
+      evidence: "24h volume, <=15 bps spread and >=$5k top-20 depth on each side"
+    },
+    {
+      id: "cost",
+      label: "Net-cost edge",
+      approved: Object.values(edgeChecks).every(Boolean),
+      evidence: "Fee/slippage/spread model, positive net edge, net reward/risk and volatility range"
+    },
+    {
+      id: "portfolio",
+      label: "Portfolio risk",
+      approved: portfolioBlockReasons.length === 0 && symbolBlockReasons.length === 0,
+      evidence: "No portfolio guard, open-position or symbol-cooldown veto"
+    }
+  ];
+  const passedCommitteeVotes = committeeVotes.filter((vote) => vote.approved).length;
+  const strategyVotesPassed = committeeVotes
+    .filter((vote) => ["regime", "structure", "momentum", "volume"].includes(vote.id))
+    .every((vote) => vote.approved);
+  const signal = strategyVotesPassed ? "LONG_CANDIDATE" : "HOLD";
+  const paperReviewReady = signal === "LONG_CANDIDATE" &&
+    passedCommitteeVotes === committeeVotes.length &&
+    blockReasons.length === 0;
   return {
     symbol: marketSymbol,
     binance_symbol: normalizedSymbol,
@@ -177,8 +246,14 @@ export function analyzeBinanceMultiTimeframeMarket({
         regime: analysis.regime,
         rsi14: analysis.rsi14 ?? null,
         adx14: analysis.adx14 ?? null,
+        plus_di14: analysis.plus_di14 ?? null,
+        minus_di14: analysis.minus_di14 ?? null,
         atr_pct: analysis.atr_pct ?? null,
+        ema20: analysis.ema20 ?? null,
+        ema50: analysis.ema50 ?? null,
+        ema20_slope_pct: analysis.ema20_slope_pct ?? null,
         relative_volume: analysis.volume_ratio_20 ?? null,
+        breakout_20: analysis.breakout_20 ?? null,
         last_closed_candle_ms: analysis.last_closed_candle_ms ?? null,
         candle_age_ms: candleAgeMs[label],
         audit_ok: audits[label].ok,
@@ -197,6 +272,13 @@ export function analyzeBinanceMultiTimeframeMarket({
       quote_snapshot_evaluated_at_ms: nowMs
     },
     market_regime_4h: regime4h,
+    strategy_committee: {
+      mode: "transparent_deterministic_specialist_consensus",
+      passed_votes: passedCommitteeVotes,
+      total_votes: committeeVotes.length,
+      unanimous: passedCommitteeVotes === committeeVotes.length,
+      votes: committeeVotes
+    },
     cost_model: {
       fee_bps_per_side: feeBpsPerSide,
       slippage_bps_per_side: slippageBpsPerSide,
@@ -223,6 +305,6 @@ export function analyzeBinanceMultiTimeframeMarket({
         ? "Passed research, data, liquidity and estimated-cost gates. Ready for a separate paper-ledger review; no trade has been placed."
         : "No paper trade. At least one strategy, data-quality, liquidity, cost or portfolio gate did not pass."
     },
-    warning: "Deterministic multi-timeframe research filters, not a trained model or calibrated probability. Historical indicators cannot guarantee future returns."
+    warning: "Eight transparent specialist rule checks, not autonomous LLM agents, a trained model or a calibrated probability. Historical indicators cannot guarantee future returns."
   };
 }
