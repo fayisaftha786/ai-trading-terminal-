@@ -81,7 +81,7 @@ jobs:
 
       - name: Verify deployed Worker revision and PAPER-only safety
         env:
-          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
+          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/worker/health
           EXPECTED_DEPLOY_COMMIT_SHA: ${{ github.sha }}
         shell: bash
         run: |
@@ -124,7 +124,7 @@ jobs:
 
       - name: Verify production revision remains stable after Cloudflare build hooks
         env:
-          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
+          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/worker/health
           EXPECTED_DEPLOY_COMMIT_SHA: ${{ github.sha }}
         shell: bash
         run: |

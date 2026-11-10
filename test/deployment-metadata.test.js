@@ -135,3 +135,27 @@ test("Durable Object failures return controlled HTTP 503 instead of an unhandled
   assert.ok(workerSource.includes('error: "trading_engine_temporarily_unavailable"'));
   assert.ok(workerSource.includes("return await stub.fetch(request)"));
 });
+
+test("dashboard analytics bounds recent execution samples while keeping all-time totals intact", () => {
+  assert.ok(engineSource.includes("const DASHBOARD_ANALYTICS_SAMPLE_LIMIT = 250;"));
+  const analyticsStart = engineSource.indexOf("  tradeAnalytics()");
+  const analyticsEnd = engineSource.indexOf("  parseJson(", analyticsStart);
+  const analytics = engineSource.slice(analyticsStart, analyticsEnd);
+  assert.ok(analytics.includes("ORDER BY opened_at_ms DESC,id DESC LIMIT ?"));
+  assert.ok(analytics.includes("ORDER BY closed_at_ms DESC,id DESC LIMIT ?"));
+  assert.ok(analytics.includes("DASHBOARD_ANALYTICS_SAMPLE_LIMIT"));
+  assert.ok(analytics.includes("longest_loss_streak_in_latest_250_closed"));
+  assert.ok(analytics.includes("loss_streak_scope: \"latest 250 closed trades\""));
+  assert.ok(analytics.includes("FROM trades"));
+});
+
+test("worker deployment health is independent of Durable Object SQL availability", () => {
+  const start = workerSource.indexOf('url.pathname === "/api/worker/health"');
+  const authStatus = workerSource.indexOf('url.pathname === "/api/auth/status"', start);
+  const workerHealth = workerSource.slice(start, authStatus);
+  assert.ok(start >= 0 && authStatus > start);
+  assert.ok(workerHealth.includes("deploymentInfo(env)"));
+  assert.ok(workerHealth.includes('mode: "paper_only"'));
+  assert.ok(workerHealth.includes("live_trading_enabled: false"));
+  assert.ok(deploymentWorkflow.includes("/api/worker/health"));
+});

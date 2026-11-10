@@ -21,7 +21,8 @@ import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
-const BOOK_REFRESH_INTERVAL_MS = 10 * 1000; // Independent L2-only refresh cadence.
+const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
+const DASHBOARD_ANALYTICS_SAMPLE_LIMIT = 250; // Independent L2-only refresh cadence.
 const MAX_QUOTE_AGE_MS = 120000;
 const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
@@ -2091,7 +2092,8 @@ export class TradingEngine extends DurableObject {
       "FROM (SELECT * FROM equity_snapshots ORDER BY at_ms DESC LIMIT 200) ORDER BY at_ms ASC"
     ).toArray();
     const executionRows = this.sql.exec(
-      "SELECT entry_price,metadata_json,status FROM trades ORDER BY opened_at_ms DESC,id DESC LIMIT 1000"
+      "SELECT entry_price,metadata_json,status FROM trades ORDER BY opened_at_ms DESC,id DESC LIMIT ?",
+      DASHBOARD_ANALYTICS_SAMPLE_LIMIT
     ).toArray().map((row) => ({
       entry_price: Number(row.entry_price),
       status: row.status,
@@ -2099,7 +2101,8 @@ export class TradingEngine extends DurableObject {
     }));
     const executionAudit = summarizePaperExecution(executionRows);
     const recentClosed = this.sql.exec(
-      "SELECT pnl_usd FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT 1000"
+      "SELECT pnl_usd FROM trades WHERE status='CLOSED' ORDER BY closed_at_ms DESC,id DESC LIMIT ?",
+      DASHBOARD_ANALYTICS_SAMPLE_LIMIT
     ).toArray();
     let currentLossStreak = 0;
     let longestRecentLossStreak = 0;
@@ -2129,8 +2132,8 @@ export class TradingEngine extends DurableObject {
       average_loss_usd: totals.average_loss_usd == null ? null : Number(totals.average_loss_usd),
       average_holding_minutes: totals.average_holding_minutes == null ? null : Number(totals.average_holding_minutes),
       execution_audit: executionAudit,
-      longest_loss_streak_in_latest_1000_closed: longestRecentLossStreak,
-      loss_streak_scope: "latest 1000 closed trades",
+      longest_loss_streak_in_latest_250_closed: longestRecentLossStreak,
+      loss_streak_scope: "latest 250 closed trades",
       per_symbol: perSymbol.map((row) => ({
         symbol: row.symbol, total_trades: Number(row.total_trades || 0),
         closed_trades: Number(row.closed_trades || 0), wins: Number(row.wins || 0),

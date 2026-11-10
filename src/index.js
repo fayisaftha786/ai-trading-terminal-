@@ -157,6 +157,14 @@ async function login(request, env) {
 
 async function routeApi(request, env) {
   const url = new URL(request.url);
+  if (url.pathname === "/api/worker/health" && request.method === "GET") {
+    return json({
+      status: "ok",
+      mode: "paper_only",
+      live_trading_enabled: false,
+      ...deploymentInfo(env)
+    });
+  }
   if (url.pathname === "/api/auth/status" && request.method === "GET") return json({ required: true, mode: "paper_only" });
   if (url.pathname === "/api/auth/login" && request.method === "POST") return login(request, env);
   const health = url.pathname === "/api/health" && request.method === "GET";
@@ -183,6 +191,26 @@ async function routeApi(request, env) {
   }
 }
 
+function deploymentInfo(env) {
+  const metadata = env.CF_VERSION_METADATA;
+  const workerVersion = metadata && typeof metadata.id === "string"
+    ? {
+        id: metadata.id,
+        tag: typeof metadata.tag === "string" ? metadata.tag : null,
+        timestamp: metadata.timestamp ?? null
+      }
+    : null;
+  const deploymentCommitSha = typeof env.DEPLOY_COMMIT_SHA === "string" &&
+    /^[a-f0-9]{40}$/i.test(env.DEPLOY_COMMIT_SHA)
+    ? env.DEPLOY_COMMIT_SHA.toLowerCase()
+    : null;
+  return {
+    deployment_commit_sha: deploymentCommitSha,
+    deployment_provenance_status: deploymentCommitSha ? "verified" : "unverified",
+    worker_version: workerVersion
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -190,25 +218,9 @@ export default {
       const response = await routeApi(request, env);
       if (url.pathname === "/api/health" && request.method === "GET" && response.ok) {
         const payload = await response.json();
-        const metadata = env.CF_VERSION_METADATA;
-        const workerVersion = metadata && typeof metadata.id === "string"
-          ? {
-              id: metadata.id,
-              tag: typeof metadata.tag === "string" ? metadata.tag : null,
-              timestamp: metadata.timestamp ?? null
-            }
-          : null;
-        // Keep source provenance separate from Cloudflare's optional version tag.
-        // The deployment workflow injects this public, non-secret Git SHA at build time.
-        const deploymentCommitSha = typeof env.DEPLOY_COMMIT_SHA === "string" &&
-          /^[a-f0-9]{40}$/i.test(env.DEPLOY_COMMIT_SHA)
-          ? env.DEPLOY_COMMIT_SHA.toLowerCase()
-          : null;
         return addSecurityHeaders(json({
           ...payload,
-          deployment_commit_sha: deploymentCommitSha,
-          deployment_provenance_status: deploymentCommitSha ? "verified" : "unverified",
-          worker_version: workerVersion
+          ...deploymentInfo(env)
         }));
       }
       return addSecurityHeaders(response);
