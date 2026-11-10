@@ -109,11 +109,20 @@ async function login(request, env) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "reserve", ip_hash: ipHash })
     }));
-  } catch {
+  } catch (error) {
+    console.error("Login rate-limit reserve request failed", {
+      name: typeof error?.name === "string" ? error.name : "Error",
+      message: String(error?.message || error).slice(0, 180)
+    });
     return json({ error: "login_rate_limit_unavailable" }, 503);
   }
   if (rateLimitResponse.status === 429) return json({ error: "too_many_login_attempts" }, 429);
-  if (!rateLimitResponse.ok) return json({ error: "login_rate_limit_unavailable" }, 503);
+  if (!rateLimitResponse.ok) {
+    console.error("Login rate-limit reserve returned a non-success response", {
+      status: rateLimitResponse.status
+    });
+    return json({ error: "login_rate_limit_unavailable" }, 503);
+  }
 
   const now = Date.now();
   const usernameMatch = equalBytes(await sha256(username), await sha256(expectedUsername));
@@ -128,10 +137,19 @@ async function login(request, env) {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ action: "clear", ip_hash: ipHash })
     }));
-  } catch {
+  } catch (error) {
+    console.error("Login rate-limit clear request failed", {
+      name: typeof error?.name === "string" ? error.name : "Error",
+      message: String(error?.message || error).slice(0, 180)
+    });
     return json({ error: "login_rate_limit_unavailable" }, 503);
   }
-  if (!clearResponse.ok) return json({ error: "login_rate_limit_unavailable" }, 503);
+  if (!clearResponse.ok) {
+    console.error("Login rate-limit clear returned a non-success response", {
+      status: clearResponse.status
+    });
+    return json({ error: "login_rate_limit_unavailable" }, 503);
+  }
   const token = await sign({ sub: "owner", exp: Math.floor(now / 1000) + (8 * 60 * 60) }, env.SESSION_SECRET);
   return json({ access_token: token, token_type: "Bearer", expires_in: 28800 });
 }
