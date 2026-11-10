@@ -24,10 +24,10 @@ def test_auto_demo_runs_only_in_foreground_and_keeps_open_trade_exit_checks():
     assert "onDestroy(){mainHandler.removeCallbacks(autoRefreshTask)" in source
 
 
-def test_auto_demo_fetches_only_closed_contiguous_1h_and_4h_candles():
+def test_auto_demo_fetches_only_closed_contiguous_1h_and_6h_candles():
     source = (JAVA / "LocalPaperActivity.java").read_text()
     assert 'fetchCandles("1h",200,HOUR_MS,MAX_CANDLE_AGE_MS)' in source
-    assert 'fetchCandles("4h",180,FOUR_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS)' in source
+    assert 'fetchCandles("6h",180,SIX_HOURS_MS,PaperSignal.MAX_HIGHER_AGE_MS)' in source
     assert "if(closeTime>=now) continue" in source
     assert "openTime-previousOpen!=intervalMs" in source
     assert "PaperSignal.MIN_HISTORY" in source
