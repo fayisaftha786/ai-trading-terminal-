@@ -835,7 +835,7 @@ function snapshotIsEntryReady(snapshot, nowMs = Date.now()) {
  * caller explicitly identifies an already-open legacy PAPER position whose
  * recorded entry provider is Bitstamp. That compatibility read preserves
  * same-venue exit marking; incomplete book/candle data remains entry-ineligible.
- * Historical Bitstamp OHLC backfill is a separate manual research operation.
+ * Historical research uses the Coinbase archive; Bitstamp backfill is not exposed.
  */
 export async function fetchProductSnapshot(
   productRef,
