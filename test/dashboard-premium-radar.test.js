@@ -57,5 +57,5 @@ test("AI Brain displays specialist committee votes instead of presenting its sco
   assert.match(html, /<th>VOTES<\/th>/);
   assert.match(html, /committee\.passed_votes/);
   assert.match(html, /eight transparent specialist votes/);
-  assert.match(html, /score_is_probability/);
+  assert.match(html, /not a forecast, probability/);
 });
