@@ -57,6 +57,7 @@ def main() -> int:
     worker_coinbase_source = (ROOT / "src/coinbase.js").read_text(encoding="utf-8")
     worker_engine_source = (ROOT / "src/engine.js").read_text(encoding="utf-8")
     worker_strategy_source = (ROOT / "src/strategy.js").read_text(encoding="utf-8")
+    worker_automation_guards_source = (ROOT / "src/automation-guards.js").read_text(encoding="utf-8")
     backtest_source = (ROOT / "app/services/backtest.py").read_text(encoding="utf-8")
     risk_source = (ROOT / "app/services/risk.py").read_text(encoding="utf-8")
     paper_source = (ROOT / "app/services/paper.py").read_text(encoding="utf-8")
@@ -142,6 +143,7 @@ def main() -> int:
         "worker_paper_trade_creation_has_independent_coinbase_guard": 'if (market?.market_data_provider !== "coinbase_exchange")' in worker_engine_source and '"paper_entry_assessment_not_eligible"' in worker_engine_source,
         "legacy_exit_provider_failure_has_explicit_diagnostic": '"legacy_exit_market_data_unavailable"' in worker_engine_source,
         "worker_cross_market_context_requires_coinbase": 'market?.market_data_provider !== "coinbase_exchange"' in worker_strategy_source and "cross_market_inputs_missing_or_stale" in worker_strategy_source,
+        "worker_market_universe_health_requires_coinbase": 'selectedProvider !== "coinbase_exchange"' in worker_automation_guards_source and "coinbase_market_data_required_for_new_entry_universe" in worker_automation_guards_source,
         "worker_bitstamp_live_fallback_is_legacy_exit_only": "allowBitstampLegacyExit = false" in worker_coinbase_source and "allowBitstampLegacyExit: legacyBitstampExitSymbols.has(product.symbol)" in worker_engine_source and 'trade.metadata?.market_data_provider === "bitstamp_spot"' in worker_engine_source and "legacy_exit_quote_only" in worker_coinbase_source and "legacyBitstampExitSymbols.has(product.symbol)" in worker_engine_source,
         "bitstamp_research_backfill_removed": "/api/research/backfill" not in worker_engine_source and "backfillBitstampResearchHistory" not in worker_engine_source and "fetchBitstampResearchHistory" not in worker_coinbase_source and "archiveProviderHistoryBackfill" not in worker_engine_source,
         "research_backtests_reject_raw_candle_integrity_failures": "candle_integrity_report" in backtest_source and "duplicate/invalid" in backtest_source,
