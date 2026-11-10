@@ -104,7 +104,7 @@ test("gapped candle history fails audit and cannot produce a ready review", () =
 });
 
 test("25-symbol analysis batches reduce sequential request waves", () => {
-  assert.equal(BINANCE_STRATEGY_BATCH_LIMIT, 25);
+  assert.equal(BINANCE_STRATEGY_BATCH_LIMIT, 50);
 });
 
 test("closed-candle cache is reused until the next candle closes", () => {
