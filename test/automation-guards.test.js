@@ -9,7 +9,7 @@ import {
   buildMarketDataProviderDiagnostics,
   assessAdaptiveRisk,
   assessLossCooldown,
-  deriveSchedulerStatus,
+  deriveSchedulerStatus, shouldRunScheduledMarketScan,
   normalizeProviderFailureRows,
   normalizeScanIssueRows,
   mergeScanRuntimeState,
@@ -210,6 +210,14 @@ test("a long gap since a healthy scan halts entries even when current feed recov
   }).reason, "consecutive_market_data_failures");
 });
 
+
+test("short Durable Object alarms refresh books without advancing the full market scan early", () => {
+  assert.equal(shouldRunScheduledMarketScan(null, NOW, 90000), true);
+  assert.equal(shouldRunScheduledMarketScan(NOW - 89999, NOW, 90000), false);
+  assert.equal(shouldRunScheduledMarketScan(NOW - 90000, NOW, 90000), true);
+  assert.equal(shouldRunScheduledMarketScan(NOW + 6000, NOW, 90000), true);
+  assert.equal(shouldRunScheduledMarketScan(NOW - 60000, NOW, 0), true);
+});
 
 test("scheduler heartbeat is independent of manual scans and reports missed alarms", () => {
   assert.deepEqual(deriveSchedulerStatus({

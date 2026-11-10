@@ -172,8 +172,8 @@ export function evaluateMicroScalpResearch({
     });
   }
 
-  const fiveMinute = analyzeTimeframe(fiveMinuteAudit);
-  const oneMinute = analyzeTimeframe(oneMinuteAudit);
+  const fiveMinute = analyzeTimeframe(fiveMinuteAudit, 300000);
+  const oneMinute = analyzeTimeframe(oneMinuteAudit, 60000);
   if (!Number.isFinite(fiveMinute.atr_pct) || !Number.isFinite(oneMinute.atr_pct)) {
     return block("micro_timeframe_indicator_warmup_failed");
   }

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampResearchHistory, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -22,7 +22,8 @@ import { createServerLivePreview, consumeServerLivePreview } from "./live-order-
 import { binanceReadOnlyStatus, preflightBinanceReadOnly } from "./binance-readonly.js";
 import { analyzeBinanceMultiTimeframeMarket, BINANCE_STRATEGY_BATCH_LIMIT, BINANCE_STRATEGY_INTERVALS, shouldRefreshBinanceCandleCache } from "./binance-strategy.js";
 
-const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
+const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
+const BOOK_REFRESH_INTERVAL_MS = 10 * 1000; // Independent L2-only refresh cadence.
 const MAX_QUOTE_AGE_MS = 120000;
 const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
@@ -163,7 +164,7 @@ export class TradingEngine extends DurableObject {
   async ensureAlarm() {
     const alarm = await this.ctx.storage.getAlarm();
     if (alarm === null) {
-      const dueAt = Date.now() + 30000;
+      const dueAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = dueAt;
       this.setState("runtime", runtime);
@@ -547,6 +548,21 @@ export class TradingEngine extends DurableObject {
           // the persisted quotes. Current snapshot health is reported separately below.
           last_scan_healthy_market_count: Number(runtime.healthy_market_count) || 0,
           last_scan_expected_market_count: Number(runtime.expected_market_count) || PRODUCTS.length,
+          last_book_refresh_at_ms: Number(runtime.last_book_refresh_at_ms) > 0
+            ? Number(runtime.last_book_refresh_at_ms) : null,
+          last_book_refresh_age_ms: Number(runtime.last_book_refresh_at_ms) > 0
+            ? Math.max(0, nowMs - Number(runtime.last_book_refresh_at_ms)) : null,
+          last_book_refresh_status: runtime.last_book_refresh_status || "not_started",
+          last_book_refresh_success_count: Number(runtime.last_book_refresh_success_count) || 0,
+          last_book_refresh_failed_count: Number(runtime.last_book_refresh_failed_count) || 0,
+          last_book_refresh_skipped_count: Number(runtime.last_book_refresh_skipped_count) || 0,
+          last_book_refresh_healthy_market_count: Number(runtime.last_book_refresh_healthy_market_count) || 0,
+          last_book_refresh_expected_market_count: Number(runtime.last_book_refresh_expected_market_count) || PRODUCTS.length,
+          last_book_refresh_issues: (Array.isArray(runtime.last_book_refresh_issues)
+            ? runtime.last_book_refresh_issues : []).slice(0, PRODUCTS.length).map((issue) => ({
+              symbol: typeof issue?.symbol === "string" ? issue.symbol.slice(0, 24) : null,
+              reason: typeof issue?.reason === "string" ? issue.reason.slice(0, 120) : "unknown"
+            })),
           current_market_feed: {
             status: currentMarketStatus,
             freshness_state: marketFeedFreshness.state,
@@ -589,16 +605,19 @@ export class TradingEngine extends DurableObject {
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",
           schedule_minutes: SCAN_INTERVAL_MS / 60000,
-       schedule_seconds: SCAN_INTERVAL_MS / 1000,
+          schedule_seconds: SCAN_INTERVAL_MS / 1000,
+          book_refresh_seconds: BOOK_REFRESH_INTERVAL_MS / 1000,
           live_trading_enabled: false, binance_testnet_enabled: false,
           market_data_status: currentMarketStatus,
           market_freshness_policy: {
-            scheduler_interval_ms: SCAN_INTERVAL_MS,
+            scheduler_interval_ms: BOOK_REFRESH_INTERVAL_MS,
+            strategy_scan_interval_ms: SCAN_INTERVAL_MS,
+            book_refresh_interval_ms: BOOK_REFRESH_INTERVAL_MS,
             quote_max_age_ms: MAX_QUOTE_AGE_MS,
             order_book_max_age_ms: MAX_ORDER_BOOK_AGE_MS,
             theoretical_book_fresh_window_ms: MAX_ORDER_BOOK_AGE_MS,
-            theoretical_stale_gap_between_scans_ms: Math.max(0, SCAN_INTERVAL_MS - MAX_ORDER_BOOK_AGE_MS),
-            note: "Order-book snapshots expire after the strict 15-second gate. With a 90-second full-scan cadence, current-feed health is expected to become unavailable between scans; entry gates remain strict."
+            theoretical_stale_gap_between_book_refreshes_ms: Math.max(0, BOOK_REFRESH_INTERVAL_MS - MAX_ORDER_BOOK_AGE_MS),
+            note: "Strategy/candle scans run every 90 seconds; a separate L2-only refresh targets every 10 seconds. Order books still expire after the strict 15-second gate. Missed or failed refreshes make the feed unavailable and block new entries."
           },
           scheduler: {
             status: scheduler.status,
@@ -1353,6 +1372,52 @@ export class TradingEngine extends DurableObject {
   async alarm() {
     const invokedAtMs = Date.now();
     const startingRuntime = this.getState("runtime") || {};
+    const fullScanDue = shouldRunScheduledMarketScan(
+      startingRuntime.last_scheduled_scan_at_ms,
+      invokedAtMs,
+      SCAN_INTERVAL_MS
+    );
+
+    // Frequent alarms maintain L2 freshness independently from the heavier
+    // strategy/candle scan. They do not alter scheduled-scan health counters.
+    if (!fullScanDue) {
+      let refreshResult = null;
+      let refreshErrorCode = null;
+      try {
+        refreshResult = await runAfterActiveScan(
+          () => this.scanPromise || this.researchBackfillPromise,
+          () => this.refreshOrderBooksOnly()
+        );
+      } catch (error) {
+        refreshErrorCode = typeof error?.code === "string" && /^[a-z0-9_]{1,80}$/.test(error.code)
+          ? error.code
+          : "book_refresh_cycle_failed";
+      } finally {
+        // One scheduler-state write per short alarm; snapshot rows and setAlarm
+        // are the other bounded writes on this path.
+        const current = this.getState("runtime") || {};
+        current.last_scheduled_alarm_at_ms = invokedAtMs;
+        if (refreshResult?.telemetry) {
+          Object.assign(current, refreshResult.telemetry);
+        } else if (refreshErrorCode) {
+          current.last_book_refresh_at_ms = Date.now();
+          current.last_book_refresh_status = "error";
+          current.last_book_refresh_failed_count = PRODUCTS.length;
+          current.last_book_refresh_issues = [{ symbol: null, reason: refreshErrorCode }];
+        }
+        const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
+        current.next_alarm_at_ms = nextAt;
+        this.setState("runtime", current);
+        await this.ctx.storage.setAlarm(nextAt);
+      }
+      if (refreshErrorCode) {
+        this.logEvent("order_book_refresh_error", "Scheduled L2-only market refresh failed", {
+          reason: refreshErrorCode
+        });
+      }
+      return;
+    }
+
     const previousScheduledScanStatus = startingRuntime.last_scheduled_scan_status || "not_run";
     const previousScheduledScanError = startingRuntime.last_scheduled_scan_error || null;
     startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
@@ -1360,7 +1425,8 @@ export class TradingEngine extends DurableObject {
     startingRuntime.last_scheduled_scan_error = null;
     this.setState("runtime", startingRuntime);
     const priorRuntime = this.getState("runtime") || {};
-    const cycleKey = String(priorRuntime.next_alarm_at_ms || Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
+    const cycleKey = String(priorRuntime.next_alarm_at_ms ||
+      Math.floor(invokedAtMs / SCAN_INTERVAL_MS) * SCAN_INTERVAL_MS);
     try {
       const result = await runAfterActiveScan(
         () => this.scanPromise || this.researchBackfillPromise,
@@ -1389,9 +1455,6 @@ export class TradingEngine extends DurableObject {
           : (feed?.issues || []).map((issue) => (issue.symbol || "universe") + ": " + issue.reason)
             .join("; ").slice(0, 180) || null;
       } else if (runtime.last_scheduled_scan_status === "running") {
-        // A duplicate alarm can arrive while another scheduled run is active.
-        // Preserve the completed run's status if it finished while this alarm
-        // waited; otherwise restore the status from before this duplicate alarm.
         runtime.last_scheduled_scan_status = previousScheduledScanStatus;
         runtime.last_scheduled_scan_error = previousScheduledScanError;
       }
@@ -1442,9 +1505,7 @@ export class TradingEngine extends DurableObject {
         consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
       });
     } finally {
-      // This performs read-only order/fill reconciliation only. It never
-      // creates, edits or cancels orders. With no credentials or no active
-      // local orders, it exits without contacting Coinbase.
+      // Reconciliation is read-only; it never creates, edits or cancels orders.
       try {
         await this.reconcileOpenCoinbaseLiveOrders("scheduled_alarm");
       } catch (error) {
@@ -1452,7 +1513,7 @@ export class TradingEngine extends DurableObject {
           error_code: typeof error?.code === "string" ? error.code : "live_order_reconciliation_failed"
         });
       }
-      const nextAt = Date.now() + SCAN_INTERVAL_MS;
+      const nextAt = Date.now() + BOOK_REFRESH_INTERVAL_MS;
       const runtime = this.getState("runtime") || {};
       runtime.next_alarm_at_ms = nextAt;
       this.setState("runtime", runtime);
@@ -1558,8 +1619,8 @@ export class TradingEngine extends DurableObject {
           six_hour: snapshot.six_hour_audit,
           received_at_ms: Date.now()
         });
-        const primary = analyzeTimeframe(snapshot.one_hour_audit);
-        const higher = analyzeTimeframe(snapshot.six_hour_audit);
+        const primary = analyzeTimeframe(snapshot.one_hour_audit, 3600000);
+        const higher = analyzeTimeframe(snapshot.six_hour_audit, 21600000);
         const strategyResearch = evaluateResearchCandidates(
           snapshot.one_hour_audit, snapshot.six_hour_audit, 6 * 60 * 60 * 1000
         );
@@ -1718,7 +1779,9 @@ export class TradingEngine extends DurableObject {
     // disable action cannot be hidden by a stale pre-fetch automation setting.
     const state = this.getState("settings") || {};
     const risk = { ...DEFAULT_RISK, ...(state.risk || {}) };
+    const marketContext = assessCrossMarketContext(markets, Date.now());
     for (const market of markets) {
+      market.market_context = marketContext;
       if (market.status !== "live") {
         market.entry_gate = { eligible: false, reason: "market_data_unavailable" };
       } else if (market.one_hour_audit_summary?.ok !== true) {
@@ -1731,7 +1794,8 @@ export class TradingEngine extends DurableObject {
           primary: market.primary || {},
           higher: market.higher || {},
           nowMs: Date.now(),
-          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps }
+          costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps },
+          marketContext
         });
       }
       this.saveMarket(market, market.status === "live" ? "live" : "error");
@@ -1910,7 +1974,7 @@ export class TradingEngine extends DurableObject {
         data_quality: market.data_quality || null, error: market.error || null
       })),
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
-      market_feed: marketFeed,
+      market_feed: marketFeed, market_context: marketContext,
       portfolio: updatedPortfolio, live_trading_enabled: false, binance_testnet_enabled: false
     };
   }
@@ -2301,6 +2365,126 @@ export class TradingEngine extends DurableObject {
   getMarkets() {
     return this.sql.exec("SELECT data_json FROM market_snapshots ORDER BY symbol").toArray()
       .map((row) => { try { return JSON.parse(row.data_json); } catch { return { status: "error" }; } });
+  }
+
+  /**
+   * Refresh only L2 books between slower strategy/candle scans. This method
+   * never recalculates entry signals or opens positions. Each book must come
+   * from the exact provider already selected for that market.
+   */
+  async refreshOrderBooksOnly() {
+    const markets = this.getMarkets();
+    const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
+    const coinbaseState = createCoinbaseRequestState();
+    const requestState = { ...coinbaseState, bitstamp: { ...coinbaseState.bitstamp } };
+    const issues = [];
+    let refreshed = 0;
+    let failed = 0;
+    let skipped = 0;
+
+    for (const product of PRODUCTS) {
+      const market = bySymbol.get(product.symbol);
+      if (!market || market.status !== "live") {
+        skipped += 1;
+        issues.push({ symbol: product.symbol, reason: "market_snapshot_unavailable" });
+        continue;
+      }
+
+      const provider = market.market_data_provider;
+      try {
+        let book;
+        if (provider === "coinbase_exchange") {
+          book = await fetchCoinbaseOrderBook(market.product, requestState);
+        } else if (provider === "bitstamp_spot") {
+          book = await fetchBitstampOrderBook(market.product, requestState);
+        } else {
+          skipped += 1;
+          issues.push({ symbol: product.symbol, reason: "market_data_provider_unsupported" });
+          continue;
+        }
+
+        const retrievedAtMs = Number(book?.book_retrieved_at_ms);
+        if (!Number.isFinite(retrievedAtMs) || retrievedAtMs <= 0 ||
+            retrievedAtMs > Date.now() + 1000 ||
+            ![book.bid, book.ask, book.bid_depth_quote, book.ask_depth_quote].every(Number.isFinite) ||
+            book.bid <= 0 || book.ask < book.bid ||
+            book.bid_depth_quote < 0 || book.ask_depth_quote < 0) {
+          throw new Error("order_book_failed_validation");
+        }
+
+        market.bid = book.bid;
+        market.ask = book.ask;
+        market.bid_depth_quote = book.bid_depth_quote;
+        market.ask_depth_quote = book.ask_depth_quote;
+        market.book_retrieved_at_ms = retrievedAtMs;
+        market.book_event_time_ms = Number.isFinite(book.book_event_time_ms)
+          ? book.book_event_time_ms : null;
+        market.book_age_ms = Math.max(0, Date.now() - retrievedAtMs);
+        market.book_sequence = Number.isSafeInteger(book.book_sequence) ? book.book_sequence : null;
+        market.quote_received_at_ms = retrievedAtMs;
+        market.spread_bps = ((book.ask - book.bid) / ((book.ask + book.bid) / 2)) * 10000;
+        market.data_quality = {
+          ...(market.data_quality || {}),
+          book_provider: provider,
+          book_status: "available",
+          book_error: null,
+          book_freshness_source: provider === "bitstamp_spot"
+            ? "bitstamp_exchange_order_book_timestamp"
+            : "coinbase_local_l2_retrieval_time",
+          quote_freshness_source: "local_order_book_response_time_for_exit_marking"
+        };
+        this.saveMarket(market, "live");
+        refreshed += 1;
+      } catch (error) {
+        failed += 1;
+        const status = Number(error?.status);
+        const errorCode = typeof error?.code === "string" && /^[a-z0-9_]{1,80}$/.test(error.code)
+          ? error.code
+          : status === 429 ? "provider_rate_limited"
+            : status >= 500 ? "provider_server_error"
+              : "order_book_refresh_failed";
+        market.data_quality = {
+          ...(market.data_quality || {}),
+          book_provider: provider,
+          book_status: "provider_error",
+          book_error: errorCode
+        };
+        this.saveMarket(market, "live");
+        issues.push({ symbol: product.symbol, reason: errorCode });
+      }
+    }
+
+    const refreshedMarkets = this.getMarkets();
+    const feed = assessMarketUniverse(
+      refreshedMarkets, PRODUCTS.map((product) => product.symbol), Date.now(), MAX_QUOTE_AGE_MS, MAX_ORDER_BOOK_AGE_MS
+    );
+    const status = failed === 0 && skipped === 0 ? "completed"
+      : refreshed > 0 ? "partial" : "unavailable";
+
+    // Existing PAPER positions get a fresh-book exit check at this faster cadence.
+    // The provider lock is retained; this path has no entry or live-order code.
+    const settings = this.getState("settings") || {};
+    const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const markBySymbol = this.buildPositionLockedBidMarks(refreshedMarkets, Date.now());
+    const exits = this.monitorExits(markBySymbol, risk, Date.now());
+    this.portfolio(markBySymbol, risk, Date.now());
+
+    const telemetry = {
+      last_book_refresh_at_ms: Date.now(),
+      last_book_refresh_status: status,
+      last_book_refresh_success_count: refreshed,
+      last_book_refresh_failed_count: failed,
+      last_book_refresh_skipped_count: skipped,
+      last_book_refresh_healthy_market_count: feed.healthy_market_count,
+      last_book_refresh_expected_market_count: feed.expected_market_count,
+      last_book_refresh_issues: issues.slice(0, PRODUCTS.length).map((issue) => ({
+        symbol: issue.symbol,
+        reason: String(issue.reason || "unknown").slice(0, 100)
+      })),
+      last_book_refresh_exits: exits
+    };
+
+    return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits, telemetry };
   }
 
   getOpenTrades() {
@@ -2837,6 +3021,15 @@ export class TradingEngine extends DurableObject {
       daily_cycles_remaining: cycleAllowance.remaining,
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       schedule_seconds: SCAN_INTERVAL_MS / 1000,
+      book_refresh_seconds: BOOK_REFRESH_INTERVAL_MS / 1000,
+      last_book_refresh_at_ms: Number(runtime.last_book_refresh_at_ms) > 0
+        ? Number(runtime.last_book_refresh_at_ms) : null,
+      last_book_refresh_age_ms: Number(runtime.last_book_refresh_at_ms) > 0
+        ? Math.max(0, nowMs - Number(runtime.last_book_refresh_at_ms)) : null,
+      last_book_refresh_status: runtime.last_book_refresh_status || "not_started",
+      last_book_refresh_success_count: Number(runtime.last_book_refresh_success_count) || 0,
+      last_book_refresh_failed_count: Number(runtime.last_book_refresh_failed_count) || 0,
+      last_book_refresh_skipped_count: Number(runtime.last_book_refresh_skipped_count) || 0,
       scanner_status: scheduler.status,
       last_scan_age_ms: lastScanAgeMs,
       last_scheduled_alarm_age_ms: scheduler.ageMs,
@@ -2902,6 +3095,7 @@ export class TradingEngine extends DurableObject {
       },
       automation: this.automationStatus(),
       current_market_feed: currentMarketFeedDiagnostics,
+      market_context: assessCrossMarketContext(markets, nowMs),
       portfolio, markets, trades, open_positions: openPositions,
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
       runtime, analytics: this.tradeAnalytics(), research_history: this.researchHistorySummary(),
