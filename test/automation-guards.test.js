@@ -494,6 +494,15 @@ test("legacy Bitstamp exit diagnostics preserve provider and future timestamp ev
   market.book_event_time_ms = NOW + 1000;
   market.one_hour_audit_summary.last_closed_candle_ms = NOW - 3600000;
   market.six_hour_audit_summary.last_closed_candle_ms = NOW - 21600000;
+  market.entry_gate = { eligible: false, reason: "coinbase_market_data_required_for_new_entry" };
+  market.market_context = {
+    status: "verified", mode: "RISK_OFF", reason: "btc_anchor_trend_or_volatility_risk_off"
+  };
+  market.primary = {
+    signal: "HOLD", score: 42, regime: "DOWNTREND", rsi14: 43.2, atr_pct: 1.25, adx14: 24.5
+  };
+  market.higher = { regime: "DOWNTREND" };
+  market.spread_bps = 2.4;
 
   const rows = buildMarketDataProviderDiagnostics([market], NOW);
   assert.equal(rows.length, 1);
@@ -506,6 +515,24 @@ test("legacy Bitstamp exit diagnostics preserve provider and future timestamp ev
   assert.equal(rows[0].one_hour_closed_age_ms, 0);
   assert.equal(rows[0].six_hour_closed_age_ms, 0);
   assert.equal(rows[0].market_candidate_eligible, false);
+  assert.equal(rows[0].entry_gate_reason, "coinbase_market_data_required_for_new_entry");
+  assert.equal(rows[0].market_context_status, "verified");
+  assert.equal(rows[0].market_context_mode, "risk_off");
+  assert.equal(rows[0].market_context_reason, "btc_anchor_trend_or_volatility_risk_off");
+  assert.equal(rows[0].primary_signal, "hold");
+  assert.equal(rows[0].primary_score, 42);
+  assert.equal(rows[0].primary_regime, "downtrend");
+  assert.equal(rows[0].higher_regime, "downtrend");
+  assert.equal(rows[0].primary_rsi14, 43.2);
+  assert.equal(rows[0].primary_atr_pct, 1.25);
+  assert.equal(rows[0].primary_adx14, 24.5);
+  assert.equal(rows[0].spread_bps, 2.4);
+  assert.equal(rows[0].entry_spread_bps, null);
+
+  const untrustedReason = healthyMarket("BTC/USD");
+  untrustedReason.entry_gate = { eligible: false, reason: "unsafe reason with details" };
+  const sanitized = buildMarketDataProviderDiagnostics([untrustedReason], NOW);
+  assert.equal(sanitized[0].entry_gate_reason, "unrecognized");
 
   const missing = healthyMarket("ETH/USD");
   delete missing.one_hour_audit_summary.last_closed_candle_ms;
