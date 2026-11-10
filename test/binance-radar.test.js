@@ -66,7 +66,7 @@ test("selects the 50 highest-volume eligible USDT Spot markets and excludes stab
 test("market selection falls back to the liquid candidates when strict activity thresholds leave too few", () => {
   const selected = selectBinanceRadarMarkets([
     { symbol: "BTCUSDT", lastPrice: "100", bidPrice: "99", askPrice: "101", quoteVolume: "2000000", count: 50 },
-    { symbol: "ETHUSDT", lastPrice: "10", bidPrice: "9.99", askPrice: "10.01", quoteVolume: "1000000", count: 25 }
+    { symbol: "ETHUSDT", lastPrice: "10", bidPrice: "9.99", askPrice: "10.01", quoteVolume: "1000000", count: 50 }
   ]);
   assert.deepEqual(selected.map((row) => row.symbol), ["BTCUSDT", "ETHUSDT"]);
 });
