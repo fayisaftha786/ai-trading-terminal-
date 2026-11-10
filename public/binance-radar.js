@@ -15,7 +15,7 @@ function finitePositive(value) {
 
 export function normalizeBinanceRadarTicker(row, receivedAt = Date.now()) {
   const symbol = String(row?.s ?? row?.symbol ?? "").trim().toUpperCase();
-  if (!/^[A-Z0-9]{5,24}USDT$/.test(symbol)) return null;
+  if (!/^[A-Z0-9]{1,20}USDT$/.test(symbol)) return null;
 
   const last = finitePositive(row?.c ?? row?.lastPrice);
   if (last === null) return null;
@@ -79,7 +79,7 @@ export function selectBinanceRadarMarkets(rows, {
 export function buildBinanceRadarStreamUrl(symbols) {
   if (!Array.isArray(symbols)) throw new TypeError("symbols_array_required");
   const unique = [...new Set(symbols.map((symbol) => String(symbol).trim().toUpperCase()))]
-    .filter((symbol) => /^[A-Z0-9]{5,24}USDT$/.test(symbol))
+    .filter((symbol) => /^[A-Z0-9]{1,20}USDT$/.test(symbol))
     .slice(0, BINANCE_RADAR_LIMIT);
   if (!unique.length) throw new Error("at_least_one_valid_usdt_symbol_required");
   const streams = unique.map((symbol) => symbol.toLowerCase() + "@ticker").join("/");
