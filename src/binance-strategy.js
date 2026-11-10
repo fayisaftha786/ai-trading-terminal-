@@ -5,7 +5,7 @@ export const BINANCE_STRATEGY_INTERVALS = Object.freeze({
   "1h": 3_600_000,
   "4h": 14_400_000
 });
-export const BINANCE_STRATEGY_BATCH_LIMIT = 10;
+export const BINANCE_STRATEGY_BATCH_LIMIT = 25;
 const MINIMUM_BARS = 150;
 
 function positive(value) {
@@ -28,6 +28,16 @@ export function normalizeBinanceKlines(input) {
       volume: values[5]
     };
   }).filter(Boolean);
+}
+
+export function shouldRefreshBinanceCandleCache(input, intervalMs, nowMs = Date.now()) {
+  if (!Number.isFinite(intervalMs) || intervalMs <= 0 || !Number.isFinite(nowMs)) return true;
+  const rows = normalizeBinanceKlines(input);
+  const audit = auditCandles(rows, intervalMs, nowMs, MINIMUM_BARS);
+  if (!audit.ok) return true;
+  const expectedLatestClosedOpenMs = Math.floor(nowMs / intervalMs) * intervalMs - intervalMs;
+  const actualLatestClosedOpenMs = audit.rows.at(-1)?.time;
+  return !Number.isFinite(actualLatestClosedOpenMs) || actualLatestClosedOpenMs < expectedLatestClosedOpenMs;
 }
 
 function bookSideQuote(levels) {
@@ -62,8 +72,8 @@ export function analyzeBinanceMultiTimeframeMarket({
   const ask = positive(ticker?.askPrice);
   const last = positive(ticker?.lastPrice);
   const quoteVolume = positive(ticker?.quoteVolume) || 0;
-  const eventTime = Number(ticker?.closeTime);
-  const tickerTime = Number.isFinite(eventTime) && eventTime > 0 ? eventTime : null;
+  // Binance 24h ticker closeTime is the rolling-window boundary, not the
+  // timestamp of the last execution. Do not use it as last-trade freshness.
   const mid = bid !== null && ask !== null && ask >= bid ? (bid + ask) / 2 : null;
   const spreadBps = mid ? ((ask - bid) / mid) * 10_000 : null;
   const bidDepthQuote = bookSideQuote(depth?.bids);
@@ -127,7 +137,7 @@ export function analyzeBinanceMultiTimeframeMarket({
     fresh_1h_candle: Number.isFinite(candleAgeMs["1h"]) && candleAgeMs["1h"] <= 75 * 60_000,
     fresh_4h_candle: Number.isFinite(candleAgeMs["4h"]) && candleAgeMs["4h"] <= 5 * 60 * 60_000,
     valid_two_sided_quote: bid !== null && ask !== null && ask >= bid && last !== null,
-    recent_last_trade: tickerTime !== null && nowMs - tickerTime >= -5_000 && nowMs - tickerTime <= 3 * 60_000
+    active_24h_trade_count: Number.isFinite(Number(ticker?.count)) && Number(ticker.count) >= 250
   };
   const liquidityChecks = {
     quote_volume_24h: quoteVolume >= 5_000_000,
