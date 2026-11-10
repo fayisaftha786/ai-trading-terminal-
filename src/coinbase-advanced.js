@@ -405,6 +405,39 @@ async function loadActiveExchangeOrders(env, fetchImpl) {
   }
   throw new Error("coinbase_advanced_open_orders_pagination_incomplete");
 }
+async function loadTodayExchangeOrders(env, fetchImpl, nowMs = Date.now()) {
+  const start = new Date(nowMs);
+  start.setUTCHours(0, 0, 0, 0);
+  const startDate = start.toISOString();
+  const orderIds = new Set();
+  let cursor = '';
+  const seenCursors = new Set();
+  for (let page = 0; page < 5; page += 1) {
+    const query = new URLSearchParams();
+    query.set('limit', '100');
+    query.set('product_type', 'SPOT');
+    query.set('start_date', startDate);
+    if (cursor) query.set('cursor', cursor);
+    const payload = await advancedRequest(env, 'GET', API_PREFIX + '/orders/historical/batch?' + query.toString(), undefined, fetchImpl);
+    if (!Array.isArray(payload.orders)) throw new Error('coinbase_advanced_daily_orders_response_invalid');
+    for (const order of payload.orders) {
+      if (typeof order?.order_id !== 'string' || !order.order_id || orderIds.has(order.order_id)) {
+        throw new Error('coinbase_advanced_daily_order_record_invalid');
+      }
+      orderIds.add(order.order_id);
+    }
+    if (payload.has_next === false) {
+      return { count: orderIds.size, pages: page + 1, pagination_complete: true, start_date: startDate };
+    }
+    if (payload.has_next !== true || typeof payload.cursor !== 'string' ||
+        !payload.cursor || seenCursors.has(payload.cursor)) {
+      throw new Error('coinbase_advanced_daily_orders_pagination_invalid');
+    }
+    seenCursors.add(payload.cursor);
+    cursor = payload.cursor;
+  }
+  throw new Error('coinbase_advanced_daily_orders_pagination_incomplete');
+}
 function accountBalancesForProducts(accounts, products) {
   const currencies = new Set(products.flatMap((product) => [
     String(product.quote_currency_id || "").toUpperCase(),
@@ -511,9 +544,14 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       if (!check.eligible) blockers.push(...check.blockers.map((item) => productId + ":" + item));
     }
     const exchangeOrders = await loadActiveExchangeOrders(env, fetchImpl);
+    const dailyExchangeOrders = await loadTodayExchangeOrders(env, fetchImpl);
     if (config.maxOpenOrders < 1 || exchangeOrders.orders.length >= config.maxOpenOrders) {
       blockers.push("maximum_open_exchange_orders_reached");
     }
+    if (config.maxDailyOrders < 1 || dailyExchangeOrders.count >= config.maxDailyOrders) {
+      blockers.push("maximum_daily_exchange_orders_reached");
+    }
+
     const balances = accountBalancesForProducts(accounts, products);
     const eligibleProducts = products.filter((product) => product.eligible);
     for (const product of eligibleProducts) {
@@ -541,8 +579,14 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       exchange_open_orders: exchangeOrders.orders,
       exchange_order_pages: exchangeOrders.pages,
       exchange_order_pagination_complete: exchangeOrders.pagination_complete,
+      exchange_daily_order_count: dailyExchangeOrders.count,
+      exchange_daily_order_start_date: dailyExchangeOrders.start_date,
+      exchange_daily_order_pages: dailyExchangeOrders.pages,
+      exchange_daily_order_pagination_complete: dailyExchangeOrders.pagination_complete,
       order_submission_available: ready && exchangeOrders.pagination_complete &&
-        exchangeOrders.orders.length < config.maxOpenOrders && config.orderExecutionEnabled &&
+        dailyExchangeOrders.pagination_complete &&
+        exchangeOrders.orders.length < config.maxOpenOrders &&
+        dailyExchangeOrders.count < config.maxDailyOrders && config.orderExecutionEnabled &&
         config.maxOpenOrders > 0 && config.maxDailyOrders > 0 &&
         permissions.can_trade === true,
       order_submission_configured: config.credentialsConfigured &&

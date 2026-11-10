@@ -598,6 +598,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
     else caps.push("quote cap missing");
     caps.push("open orders cap "+String(status?.max_open_orders??"—"));
     caps.push("exchange open orders "+(hasPreflight?String(result?.exchange_open_order_count??"unknown"):"not checked"));
+    caps.push("exchange daily orders "+(hasPreflight?String(result?.exchange_daily_order_count??"unknown"):"not checked")+"/"+String(status?.max_daily_orders??"—"));
     caps.push("daily orders "+String(status?.max_daily_orders??"—"));
     caps.push("execution switch "+(status?.order_execution_configured?"ON":"OFF"));
     limits.textContent=caps.join(" · ");
@@ -670,6 +671,9 @@ async function runCoinbasePreflight({silent=false,force=false}={}){
         exchange_open_orders:result.exchange_open_orders||[],
         exchange_order_pages:result.exchange_order_pages??null,
         exchange_order_pagination_complete:result.exchange_order_pagination_complete??null,
+        exchange_daily_order_count:result.exchange_daily_order_count??null,
+        exchange_daily_order_start_date:result.exchange_daily_order_start_date??null,
+        exchange_daily_order_pagination_complete:result.exchange_daily_order_pagination_complete??null,
         order_submission_available:result.order_submission_available===true,
         background_reconciliation:result.background_reconciliation||coinbaseStaticStatus?.background_reconciliation||null,
         live_trading_enabled:false,

@@ -75,3 +75,9 @@ test("Coinbase connection center shows exchange-side open-order cap diagnostics"
   assert.match(dashboard, /exchange_open_order_count/);
   assert.match(dashboard, /exchange_order_pagination_complete/);
 });
+
+test("Coinbase dashboard exposes exchange-side daily order cap diagnostics", () => {
+  assert.match(dashboard, /exchange daily orders/);
+  assert.match(dashboard, /exchange_daily_order_count/);
+  assert.match(dashboard, /exchange_daily_order_pagination_complete/);
+});

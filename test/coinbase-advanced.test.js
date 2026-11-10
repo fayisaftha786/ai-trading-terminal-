@@ -96,7 +96,7 @@ async function verifyJwt(token, publicKeyPem) {
   );
   return { header, payload, valid };
 }
-function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, dailyOrders, dailyOrderPages, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -126,6 +126,14 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
         quote_min_size: "1.00", quote_max_size: "10000.00",
         quote_increment: "0.01", base_min_size: "0.00001", base_max_size: "100", base_increment: "0.00001", price_increment: "0.01"
       });
+    }
+    if (parsed.pathname.endsWith("/orders/historical/batch") && parsed.searchParams.has("start_date")) {
+      const cursor = parsed.searchParams.get("cursor") || "";
+      const pageIndex = cursor ? 1 : 0;
+      if (Array.isArray(dailyOrderPages)) {
+        return Response.json(dailyOrderPages[pageIndex] || { orders: [], has_next: false });
+      }
+      return Response.json(dailyOrders || { orders: [], has_next: false, cursor: "" });
     }
     if (parsed.pathname.endsWith("/orders/historical/batch")) {
       const cursor = parsed.searchParams.get("cursor") || "";
@@ -606,4 +614,34 @@ test("open-order scan fails closed when Coinbase pagination is incomplete or rep
   const repeatedResult = await preflightCoinbaseAdvanced(env, { fetchImpl: repeated.fetchImpl });
   assert.equal(repeatedResult.status, "provider_check_failed");
   assert.ok(repeatedResult.blockers.includes("coinbase_advanced_open_orders_pagination_invalid"));
+});
+
+test("preflight enforces the daily cap against completed exchange orders from the current UTC day", async () => {
+  const env = makeEnv({ COINBASE_ADVANCED_MAX_DAILY_ORDERS: '1' });
+  const fake = mockApi(env, {
+    dailyOrders: {
+      orders: [{ order_id: 'completed-external-order', product_id: 'BTC-USD', side: 'BUY', status: 'FILLED' }],
+      has_next: false
+    }
+  });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.exchange_daily_order_count, 1);
+  assert.equal(new Date(result.exchange_daily_order_start_date).toISOString(), result.exchange_daily_order_start_date);
+  assert.ok(result.exchange_daily_order_start_date.endsWith("T00:00:00.000Z"));
+  const dailyCall = fake.calls.find((call) => call.path.includes("start_date="));
+  assert.ok(dailyCall);
+  const dailyQuery = new URL("https://api.coinbase.com" + dailyCall.path).searchParams;
+  assert.equal(dailyQuery.get("product_type"), "SPOT");
+  assert.equal(dailyQuery.get("start_date"), result.exchange_daily_order_start_date);
+  assert.equal(dailyQuery.has("order_status"), false);
+  assert.ok(result.blockers.includes('maximum_daily_exchange_orders_reached'));
+});
+
+test("daily exchange order count fails closed on incomplete pagination", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, { dailyOrders: { orders: [], has_next: true } });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, 'provider_check_failed');
+  assert.ok(result.blockers.includes('coinbase_advanced_daily_orders_pagination_invalid'));
 });
