@@ -13,10 +13,10 @@ const READ_ONLY_DISABLED_FLAGS = [
   "enablePortfolioMarginTrading"
 ];
 
-function parseFeeSymbols(value) {
-  const raw = String(value || DEFAULT_FEE_SYMBOLS.join(","));
+function parseFeeSymbols(value, limit = 10) {
+  const raw = Array.isArray(value) ? value.join(",") : String(value || DEFAULT_FEE_SYMBOLS.join(","));
   return [...new Set(raw.split(",").map((item) => item.trim().toUpperCase())
-    .filter((item) => /^[A-Z0-9]{2,18}USDT$/.test(item)))].slice(0, 10);
+    .filter((item) => /^[A-Z0-9]{2,18}USDT$/.test(item)))].slice(0, limit);
 }
 
 function configuration(env = {}) {
@@ -212,19 +212,26 @@ function summarizeCommission(payload, symbol, balances) {
 
 async function readPairCommissions(config, balances, fetchImpl) {
   const retrievedAt = Date.now();
-  const symbols = await Promise.all(config.feeSymbols.map(async (symbol) => {
-    try {
-      const payload = await signedGet("/api/v3/account/commission", config, fetchImpl, { symbol });
-      const summary = summarizeCommission(payload, symbol, balances);
-      return summary
-        ? { ...summary, status: "verified" }
-        : { symbol, status: "invalid_response", error_code: "binance_commission_response_invalid" };
-    } catch (error) {
-      return {
-        symbol,
-        status: "unavailable",
-        error_code: typeof error?.code === "string" ? error.code : "binance_commission_check_failed"
-      };
+  const symbols = Array(config.feeSymbols.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(5, config.feeSymbols.length);
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (nextIndex < config.feeSymbols.length) {
+      const index = nextIndex++;
+      const symbol = config.feeSymbols[index];
+      try {
+        const payload = await signedGet("/api/v3/account/commission", config, fetchImpl, { symbol });
+        const summary = summarizeCommission(payload, symbol, balances);
+        symbols[index] = summary
+          ? { ...summary, status: "verified" }
+          : { symbol, status: "invalid_response", error_code: "binance_commission_response_invalid" };
+      } catch (error) {
+        symbols[index] = {
+          symbol,
+          status: "unavailable",
+          error_code: typeof error?.code === "string" ? error.code : "binance_commission_check_failed"
+        };
+      }
     }
   }));
   const verifiedCount = symbols.filter((item) => item.status === "verified").length;
@@ -239,9 +246,10 @@ async function readPairCommissions(config, balances, fetchImpl) {
   };
 }
 
-export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch } = {}) {
-  const staticStatus = binanceReadOnlyStatus(env);
+export async function preflightBinanceReadOnly(env = {}, { fetchImpl = fetch, feeSymbols } = {}) {
   const config = configuration(env);
+  if (Array.isArray(feeSymbols)) config.feeSymbols = parseFeeSymbols(feeSymbols, 50);
+  const staticStatus = { ...binanceReadOnlyStatus(env), fee_symbols: config.feeSymbols };
   if (!staticStatus.account_preflight_available) {
     return {
       ...staticStatus,
