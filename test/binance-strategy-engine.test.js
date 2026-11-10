@@ -9,8 +9,8 @@ test("Binance strategy uses persistent closed-candle cache and current REST dept
   assert.match(engine, /CREATE TABLE IF NOT EXISTS binance_strategy_candle_cache/);
   assert.match(engine, /loadBinanceStrategyCandleCache/);
   assert.match(engine, /saveBinanceStrategyCandleCache/);
-  assert.match(engine, /depth\\?symbol=/);
-  assert.match(engine, /ticker\\/24hr\\?symbols=/);
+  assert.match(engine, /depth\?symbol=/);
+  assert.match(engine, /ticker\/24hr\?symbols=/);
   assert.match(engine, /stale_fallback_timeframes/);
 });
 
