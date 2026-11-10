@@ -7,7 +7,7 @@ The project has two distinct PAPER surfaces:
 1. **Android Local PAPER:** Android app, public market data and a local virtual ledger. Manual entry and close require fresh quotes; stale cached prices fail closed.
 2. **Cloudflare Free PAPER Worker:** dashboard, SQLite-backed Durable Object ledger, scheduled market scan and simulated exit monitor. Main configures a 90-second delay between cycles; a cache-busting production probe after PR #66 merge reported `schedule_seconds: 90`, but the first pending alarm was inherited from the prior 15-minute schedule.
 
-The Cloudflare Worker is PAPER-only. Live exchange orders; Binance integrations have been removed. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
+The Cloudflare Worker is PAPER-only. Live exchange orders remain disabled. The older Python/FastAPI backend and Render deployment path are separate projects and are not the same runtime as this Worker.
 
 ## Market-data integrity
 
