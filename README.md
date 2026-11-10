@@ -4,7 +4,7 @@ Coinbase-only crypto market research and paper-trading platform with a Cloudflar
 
 ## Exchange scope
 
-- Coinbase is the only supported centralized-exchange account/order connector and the only provider for new live market snapshots and new PAPER entries. A narrow Bitstamp read-only compatibility path may continue marking an already-open legacy PAPER position that was originally opened from Bitstamp data; it cannot create new entries. Bitstamp is also used only for explicitly requested historical research backfill, not for ordinary market scans.
+- Coinbase is the only supported centralized-exchange account/order connector and the only provider for ordinary market scans and all new PAPER entries. A narrow Bitstamp read-only compatibility path may continue marking an already-open legacy PAPER position that was originally opened from Bitstamp data; it cannot create new entries. Bitstamp is also used only for explicitly requested historical research backfill, not for ordinary market scans.
 - Solana token discovery through Jupiter is research and screening only; it does not submit swaps.
 - Coinbase Advanced Trade account connectivity and guarded order workflows remain separate features. They require explicit owner configuration, fresh preflight checks, bounded limits and confirmation.
 
