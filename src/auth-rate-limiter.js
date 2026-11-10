@@ -1,3 +1,5 @@
+import { DurableObject } from "cloudflare:workers";
+
 export class AuthRateLimiter extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
