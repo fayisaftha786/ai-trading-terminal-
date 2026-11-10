@@ -79,7 +79,7 @@ function addSecurityHeaders(response) {
   headers.set("x-frame-options", "DENY");
   headers.set("referrer-policy", "no-referrer");
   headers.set("permissions-policy", "camera=(), microphone=(), geolocation=()");
-  headers.set("content-security-policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com https://data-api.binance.vision wss://data-stream.binance.vision; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'");
+  headers.set("content-security-policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' https://api.exchange.coinbase.com wss://ws-feed.exchange.coinbase.com; img-src 'self' data:; base-uri 'none'; frame-ancestors 'none'");
   return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
 }
 
