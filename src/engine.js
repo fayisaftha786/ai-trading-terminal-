@@ -172,7 +172,7 @@ export class TradingEngine extends DurableObject {
 
 
   async scanBinanceStrategyBatch(symbols) {
-    const tickerUrl = "https://data-api.binance.vision/api/v3/ticker/24hr?symbols=" +
+    const tickerUrl = "https://api.binance.com/api/v3/ticker/24hr?symbols=" +
       encodeURIComponent(JSON.stringify(symbols));
     const tickerResponse = await fetch(tickerUrl, {
       headers: { "accept": "application/json" },
@@ -236,7 +236,7 @@ export class TradingEngine extends DurableObject {
       }
 
       try {
-        const base = "https://data-api.binance.vision/api/v3/";
+        const base = "https://api.binance.com/api/v3/";
         const cacheInfo = { reused_timeframes: [], refreshed_timeframes: [], stale_fallback_timeframes: [] };
         const fetchJson = async (url, label) => {
           const response = await fetch(url, {
