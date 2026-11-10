@@ -42,12 +42,92 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 @media(max-width:760px){.ticker-grid{grid-template-columns:1fr}.ticker-card{padding:14px}.ticker-meta{gap:12px}}
 .footer{font-size:12px;color:var(--muted);margin:18px 0}
 @media(max-width:760px){main{padding:14px 10px}.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.brand{font-size:20px}.value{font-size:20px}}
+
+/* Premium terminal refinement: clarity, spacing, depth and mobile ergonomics. */
+:root{--bg:#070b15;--panel:#111a2c;--panel2:#0c1525;--line:#25344e;--text:#f3f6ff;--muted:#92a2bf;--purple:#a79aff;--green:#4ce0aa;--red:#ff778b;--gold:#f2c879}
+body{background:radial-gradient(ellipse at 14% -8%,#342e6b55 0,transparent 38%),radial-gradient(ellipse at 92% 8%,#0d5b6750 0,transparent 30%),linear-gradient(180deg,#070b15 0%,#080e1b 48%,#070b15 100%);letter-spacing:.005em}
+main{max-width:1480px;padding:22px clamp(12px,2vw,28px) 60px}
+.top{align-items:center;padding:10px 0 18px;border-bottom:1px solid #28365266}
+.brand{font-size:clamp(21px,2vw,28px);letter-spacing:.055em}
+.eyebrow{font-size:10px;letter-spacing:.2em}
+.panel,.card{background:linear-gradient(145deg,rgba(18,29,49,.96),rgba(10,18,33,.98));border:1px solid #2c3d59;border-radius:18px;box-shadow:0 12px 34px #02061142,inset 0 1px #ffffff08}
+.panel{padding:clamp(14px,1.8vw,22px);margin-top:16px}
+.panel h2{font-size:clamp(16px,1.35vw,19px);letter-spacing:.012em}
+.card{padding:16px;transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease}
+.card:hover{transform:translateY(-2px);border-color:#5b6592;box-shadow:0 16px 36px #02061155}
+.note{background:linear-gradient(120deg,#151f34,#101a2d);border-color:#344563;color:#cbd6eb}
+button{background:linear-gradient(180deg,#1d2b45,#17243a);border-color:#354763;transition:transform .16s ease,border-color .16s ease,filter .16s ease}
+button:hover:not(:disabled){transform:translateY(-1px);border-color:#7a83bd;filter:brightness(1.08)}
+button.primary{background:linear-gradient(135deg,#b2a7ff,#8676ef);box-shadow:0 6px 18px #9887ff2b}
+button.danger{background:linear-gradient(135deg,#5c2637,#3b1b2b)}
+:focus-visible{outline:2px solid #a79aff;outline-offset:3px}
+.tag,.feed-pill{letter-spacing:.05em}
+.table-wrap{border:1px solid #263751;border-radius:13px;background:#091323}
+table{border-collapse:separate;border-spacing:0}
+th{background:#0c1729;position:sticky;top:0}
+tbody tr:hover td{background:#ffffff07}
+td,th{border-bottom:1px solid #24334b}
+.app-nav{display:flex;gap:7px;align-items:center;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;padding:9px;margin:12px 0 16px;border:1px solid #2b3c58;border-radius:15px;background:rgba(10,18,33,.84);backdrop-filter:blur(18px);position:sticky;top:8px;z-index:30;box-shadow:0 10px 30px #02061155}
+.app-nav a{flex:0 0 auto;text-decoration:none;color:#a8b6d0;font-size:11px;font-weight:850;letter-spacing:.07em;padding:8px 12px;border-radius:9px;border:1px solid transparent;white-space:nowrap}
+.app-nav a:hover,.app-nav a:focus-visible{color:#fff;background:#9b8cff18;border-color:#8e82e955}
+#modePanel{border-color:#4d4a80;background:radial-gradient(circle at 92% 8%,#7d70dc20,transparent 28%),linear-gradient(145deg,#171d37,#0d1729)}
+#liveMarketPanel{background:radial-gradient(circle at 4% 0%,#2f8b8a14,transparent 25%),linear-gradient(145deg,#111d31,#0b1425)}
+.radar-kpis{grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:12px 0}
+.radar-kpi{padding:14px;border:1px solid #2b3c58;border-radius:14px;background:linear-gradient(150deg,#142039,#0b1527);min-width:0}
+.radar-kpi .label{font-size:10px;letter-spacing:.13em}
+.radar-kpi strong{display:block;font-size:clamp(19px,2vw,25px);font-weight:900;margin-top:4px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.radar-kpi small{color:var(--muted);font-size:10px}
+.radar-toolbar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin:12px 0}
+.radar-toolbar input,.radar-toolbar select{min-height:40px;padding:9px 12px;color:var(--text);background:#081322;border:1px solid #30435f;border-radius:10px;font:inherit}
+.radar-toolbar input{flex:1 1 190px;min-width:150px}
+.radar-toolbar select{flex:0 1 170px}
+.radar-table table{min-width:980px}
+.radar-pair strong{display:block;font-size:12px;letter-spacing:.03em}
+.radar-pair small{display:block;font-size:10px;color:var(--muted);margin-top:2px}
+.radar-price,.radar-volume{font-variant-numeric:tabular-nums;font-weight:800}
+.radar-spread{display:inline-flex;padding:4px 8px;border-radius:999px;font-size:10px;font-weight:850;font-variant-numeric:tabular-nums}
+.radar-spread.tight{color:#61e5b4;background:#49d7a218;border:1px solid #49d7a244}
+.radar-spread.normal{color:#f0cf8c;background:#e0b45a14;border:1px solid #e0b45a44}
+.radar-spread.wide{color:#ff8798;background:#ff6f8214;border:1px solid #ff6f8244}
+.radar-live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:middle}
+.radar-live-dot.on{background:var(--green);box-shadow:0 0 0 3px #49d7a21a}
+.radar-live-dot.off{background:var(--red)}
+.radar-monitor{font-size:9px;letter-spacing:.1em;font-weight:900;color:#a9a0ff}
+.radar-caption{font-size:11px;color:var(--muted);line-height:1.55;margin-top:10px}
+#binanceRadarPanel .row{margin-bottom:8px}
+#binanceRadarPanel .tag{white-space:nowrap}
+#binanceRadarRows td{white-space:nowrap}
+section[id]{scroll-margin-top:82px}
+@media(max-width:760px){
+ main{padding:12px 10px 42px}
+ .top{padding-bottom:13px}
+ .app-nav{top:5px;margin:9px 0 12px;padding:6px}
+ .app-nav a{font-size:10px;padding:8px 10px}
+ .panel{padding:13px;border-radius:15px}
+ .radar-kpis{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .radar-toolbar input{flex-basis:100%}
+ .radar-toolbar select{flex:1 1 130px}
+}
+@media(prefers-reduced-motion:reduce){
+ *,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}
+}
 </style></head>
 <body><main>
 <section id="login" class="panel login hidden"><div class="eyebrow">PRIVATE INSTANCE</div><h1>AI Trading Terminal</h1><p class="muted">Sign in to your private paper-trading dashboard. API keys are not used here.</p>
 <form id="loginForm"><label>Username<input id="username" autocomplete="username" value="admin" required maxlength="128"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="primary" type="submit">Sign in</button><p id="loginError" class="status"></p></form></section>
 <section id="app" class="hidden">
 <header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Coinbase public market data · virtual ledger · live execution locked</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
+<nav class="app-nav" aria-label="Trading terminal sections">
+  <a href="#modePanel">OVERVIEW</a>
+  <a href="#liveMarketPanel">MARKETS</a>
+  <a href="#binanceRadarPanel">50-MARKET RADAR</a>
+  <a href="#marketIntelligencePanel">INTELLIGENCE</a>
+  <a href="#exchangeConnections">EXCHANGES</a>
+  <a href="#automationPanel">AUTOMATION</a>
+  <a href="#researchArchivePanel">RESEARCH LAB</a>
+  <a href="#performancePanel">PERFORMANCE</a>
+  <a href="#paperLedgerPanel">LEDGER</a>
+</nav>
 <section class="panel" id="modePanel">
   <div class="row"><h2>Trading mode</h2><span id="modeBadge" class="tag good">DEMO ACTIVE</span></div>
   <div class="mode-switch">
@@ -68,14 +148,54 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
   <div class="chart-foot"><span id="chartSource">Source: Coinbase Exchange archived closed candles</span><span id="chartUpdated">Waiting for chart data</span></div>
   <p class="note">Streaming ticker prices are display-only and do not feed the strategy or execute trades. The chart uses validated, closed Coinbase candles from the research archive. WebSocket disconnection, stale timestamps or missing candles are shown explicitly; no synthetic prices are generated.</p>
 </section>
-<div class="grid">
+<section class="panel" id="binanceRadarPanel">
+  <div class="row">
+    <div>
+      <div class="eyebrow">LIVE MARKET INTELLIGENCE / BINANCE SPOT</div>
+      <h2>50-market liquidity radar</h2>
+      <div class="muted">Dynamic top-volume USDT Spot pairs · live ticker streams · public data only</div>
+    </div>
+    <span id="radarFeedState" class="tag">WAITING FOR DATA</span>
+  </div>
+  <div class="grid radar-kpis">
+    <article class="radar-kpi"><div class="label">MARKETS TRACKED</div><strong id="radarMarketCount">—</strong><small>Top liquid markets</small></article>
+    <article class="radar-kpi"><div class="label">FRESH STREAMS</div><strong id="radarLiveCount">—</strong><small>Updated within 6 seconds</small></article>
+    <article class="radar-kpi"><div class="label">MEDIAN SPREAD</div><strong id="radarMedianSpread">—</strong><small>Best bid / best ask · bps</small></article>
+    <article class="radar-kpi"><div class="label">LARGEST 24H MOVE</div><strong id="radarTopMover">—</strong><small>Absolute percentage move</small></article>
+  </div>
+  <div class="row"><small class="muted" id="radarLastUpdate">Waiting for first stream event</small><small class="muted">Auto-pauses when this dashboard tab is hidden</small></div>
+  <div class="radar-toolbar">
+    <input id="radarSearch" type="search" autocomplete="off" maxlength="24" placeholder="Search BTC, ETH, SOL…" aria-label="Search Binance markets">
+    <select id="radarFilter" aria-label="Filter Binance markets">
+      <option value="all">All markets</option>
+      <option value="gainers">Gainers</option>
+      <option value="losers">Decliners</option>
+      <option value="tight">Tight spreads ≤ 12 bps</option>
+    </select>
+    <select id="radarSort" aria-label="Sort Binance markets">
+      <option value="volume">Sort · 24h volume</option>
+      <option value="move">Sort · 24h move</option>
+      <option value="tight">Sort · Tightest spread</option>
+    </select>
+    <button id="radarRefresh" type="button">Refresh universe</button>
+  </div>
+  <div class="table-wrap radar-table">
+    <table>
+      <thead><tr><th>MARKET</th><th>BINANCE LAST</th><th>24H CHANGE</th><th>BID / ASK SPREAD</th><th>COINBASE REF. GAP*</th><th>24H QUOTE VOLUME</th><th>FEED AGE</th><th>MODE</th></tr></thead>
+      <tbody id="binanceRadarRows"><tr><td colspan="8">Waiting for Binance public market data. No synthetic prices are used.</td></tr></tbody>
+    </table>
+  </div>
+  <p class="radar-caption" id="radarUniverseNote">Market universe loads from Binance public 24-hour ticker statistics. The dashboard subscribes to up to 50 individual Spot ticker streams over one market-data-only WebSocket connection.</p>
+  <p class="note">RESEARCH / MONITOR ONLY · This radar does not generate BUY/SELL signals or submit orders. *The Coinbase reference gap is shown only for BTC, ETH and SOL and assumes USD/USDT parity; it is not an executable arbitrage price. Fees, order-book depth, quote-asset basis, latency, market impact and account restrictions must be checked before any cross-venue strategy could be considered.</p>
+</section>
+<div class="grid" id="portfolioOverview">
 <article class="card"><div class="label">PAPER EQUITY</div><div class="value" id="equity">$10.00</div><div class="muted">Simulated USD</div></article>
 <article class="card"><div class="label">NET REALIZED P&amp;L</div><div class="value" id="realized">$0.00</div><div class="muted">Closed paper trades</div></article>
 <article class="card"><div class="label">OPEN POSITIONS</div><div class="value" id="positions">0</div><div class="muted" id="exposure">$0 exposure</div></article>
 <article class="card"><div class="label">DRAWDOWN FROM PEAK</div><div class="value" id="drawdown">0.00%</div><div class="muted">Paper-only circuit breaker</div></article></div>
-<section class="panel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note" id="riskPeriodDetails">Daily and weekly risk baselines will appear after the first verified portfolio valuation.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
+<section class="panel" id="riskPanel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note" id="riskPeriodDetails">Daily and weekly risk baselines will appear after the first verified portfolio valuation.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
 
-<section class="panel" id="realModePanel"><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
+<section class="panel" id="realModePanel"><span id="exchangeConnections" class="anchor-target"></span><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
 <p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View + Trade permissions, with Transfer disabled. Configure COINBASE_ADVANCED_API_KEY, COINBASE_ADVANCED_API_SECRET, COINBASE_ADVANCED_ORDER_ENABLED=true, an explicit spot allowlist, a small quote cap, and strict open/daily order limits as Worker secrets. Do not enable this until you have verified the account, region eligibility, balances and the exact order preview.</p><p class="note">Every preview is bound server-side to its exact product, side, size, limit price and fee. It expires after 60 seconds and can authorize only one manual confirmation; the submit request cannot change the previewed order details. Real-money auto-entry is not enabled.</p>
 <div class="coinbase-connect-shell">
 <div class="coinbase-connect-top"><div><div class="eyebrow">SECURE EXCHANGE LINK</div><h3>Coinbase connection center</h3><p class="muted">Server-side CDP authentication · read-only account sync · guarded manual orders</p></div><div class="connection-sync"><span class="feed-pill" id="coinbaseSyncState">NOT CHECKED</span><small id="coinbaseLastSync">No authenticated account check yet</small></div></div>
@@ -116,23 +236,23 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
   <div class="controls"><button id="binancePreflight" type="button">Verify / refresh Binance account</button><span id="binanceStatusText" class="status">Credentials are configured only through Cloudflare Worker Secrets.</span></div>
   <pre id="binanceDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No Binance account preflight has been run. Binance is not connected until signed permissions and read-only balances are verified.</pre>
 </section>
-<section class="panel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
-<section class="panel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
-<section class="panel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
+<section class="panel" id="automationPanel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries start OFF. The owner must explicitly enable them after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
+<section class="panel" id="marketIntelligencePanel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
+<section class="panel" id="microScalpPanel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
 <p class="note">Closed 1-minute breakout + volume trigger, 5-minute trend setup, with 1H/6H context. Costs assume 60 bps/side taker fee (placeholder until the account tier is verified), 10 bps/side slippage and the current observed spread. These are research candidates only: no order is sent. The current 90-second scheduled scanner is not a real-time exchange feed or scalping execution engine.</p>
 <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>1M / 5M</th><th>1H / 6H</th><th>SPREAD</th><th>ROUND-TRIP COST</th><th>EST. NET MOVE</th><th>RESEARCH DECISION</th></tr></thead><tbody id="microScalp"><tr><td colspan="7">Waiting for verified 1M/5M market data.</td></tr></tbody></table></div></section>
-<section class="panel"><h2>Research data archive · validated closed candles</h2>
+<section class="panel" id="researchArchivePanel"><h2>Research data archive · validated closed candles</h2>
 <p class="note">Public Coinbase candles only. The archive grows as clean closed bars arrive; it does not create trades, fills or predictions.</p>
 <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>TIMEFRAME</th><th>STORED BARS</th><th>COVERAGE</th><th>GAPS</th><th>LATEST CLOSED</th><th>DATA STATUS</th></tr></thead>
 <tbody id="researchHistory"><tr><td colspan="7">Waiting for the first clean market scan.</td></tr></tbody></table></div>
 </section>
-<section class="panel">
+<section class="panel" id="strategyLabPanel">
 <div class="row"><h2>Strategy tournament · offline research only</h2><button id="runTournament" type="button">Run strategy tournament</button></div>
 <p class="note"><strong>RESEARCH ONLY — NOT A BACKTEST OF THE PRODUCTION PAPER BOT.</strong> These trend, range mean-reversion and breakout hypotheses use separate ATR-based stop/target rules and next-hour-open fills. Production PAPER uses the cloud-paper-v1 entry gates, live ask/bid quote fills, a cost-aware dynamic target and trailing stop. Historical OHLCV has no spread or order-book depth, so production entry gates cannot be replayed from this archive. Results compare research hypotheses only; they are not the bot's expected returns.</p>
 <p class="note" id="tournamentStatus">Run manually when enough clean candle history is available. Strict walk-forward validation requires at least 3,000 clean 1H bars and 500 clean 6H bars per asset, four non-overlapping 28-day test folds and a separate final holdout.</p>
 <div class="table-wrap" id="tournamentResults"><div class="muted">No tournament has been run in this session.</div></div>
 </section>
-<section class="panel"><h2>Trade performance · all recorded paper trades</h2>
+<section class="panel" id="performancePanel"><h2>Trade performance · all recorded paper trades</h2>
 <div class="grid">
 <article class="card"><div class="label">CLOSED TRADES</div><div class="value" id="closedTrades">0</div><div class="muted" id="tradeCoverage">No closed trades yet</div></article>
 <article class="card"><div class="label">WIN RATE</div><div class="value" id="winRate">—</div><div class="muted">Closed trades only</div></article>
@@ -143,8 +263,8 @@ button{border:1px solid var(--line);background:#19243b;color:var(--text);padding
 <div class="row"><span class="status" id="tradeRiskStats">Fees: — · Avg hold: — · Longest recent loss streak: —</span></div><div class="row"><span class="status" id="executionAuditStats">Modeled execution audit: waiting for trade samples</span></div>
 <div class="table-wrap"><table><thead><tr><th>MARKET</th><th>TRADES</th><th>WIN RATE</th><th>NET P&amp;L</th><th>FEES</th></tr></thead><tbody id="symbolAnalytics"><tr><td colspan="5">No trade data yet.</td></tr></tbody></table></div>
 <p class="note" id="analyticsCaveat">Performance statistics require closed trades. Small samples are not evidence of a durable trading edge.</p></section>
-<section class="panel"><div class="row"><h2>Paper trade ledger · latest 30</h2><span class="status" id="ledgerCoverage">Showing latest records</span></div><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>STATUS</th><th>ENTRY</th><th>QTY</th><th>STOP / TARGET</th><th>NET P&amp;L</th><th>TIME</th><th>ACTION</th></tr></thead><tbody id="trades"><tr><td colspan="7">No paper trades yet.</td></tr></tbody></table></div></section>
-<section class="panel"><h2>Automation event log</h2><div id="events" class="events"><div class="muted">No events yet.</div></div></section>
+<section class="panel" id="paperLedgerPanel"><div class="row"><h2>Paper trade ledger · latest 30</h2><span class="status" id="ledgerCoverage">Showing latest records</span></div><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>STATUS</th><th>ENTRY</th><th>QTY</th><th>STOP / TARGET</th><th>NET P&amp;L</th><th>TIME</th><th>ACTION</th></tr></thead><tbody id="trades"><tr><td colspan="7">No paper trades yet.</td></tr></tbody></table></div></section>
+<section class="panel" id="eventLogPanel"><h2>Automation event log</h2><div id="events" class="events"><div class="muted">No events yet.</div></div></section>
 <p class="footer">This is not an AI-trained predictive model. Signal scoring is deterministic and uncalibrated. Coinbase public data availability may vary by region. Data gaps, stale quotes, wide spreads and low depth cause HOLD / no entry. Paper fills are approximations; this 90-second monitor is not a real-time exchange-native stop or scalping execution feed. No real funds are moved. No profit is promised.</p>
 </section></main>
 <script>
@@ -920,4 +1040,4 @@ document.addEventListener("visibilitychange",()=>{
     runCoinbasePreflight({silent:true}).catch(()=>{});
   }
 });
-</script></body></html>
+</script><script type="module" src="/binance-radar.js"></script></body></html>
