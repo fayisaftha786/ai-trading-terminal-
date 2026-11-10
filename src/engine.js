@@ -13,7 +13,7 @@ import {
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
 import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, shouldRunScheduledMarketScan, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
-import { buildResearchHistorySummary, countMissingArchiveBars, selectNewClosedCandles } from "./research.js";
+import { buildResearchHistorySummary, countMissingArchiveBars, normalizeResearchCandleWindow, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
@@ -176,37 +176,9 @@ export class TradingEngine extends DurableObject {
     this.sql.exec("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT 500)");
   }
 
-  normalizeResearchCandleWindow(rows) {
-    if (!Array.isArray(rows) || rows.length > 150) return null;
-    const normalized = [];
-    let previousTime = Number.NEGATIVE_INFINITY;
-    for (const row of rows) {
-      const candle = {
-        time: Number(row?.time),
-        open: Number(row?.open),
-        high: Number(row?.high),
-        low: Number(row?.low),
-        close: Number(row?.close),
-        volume: Number(row?.volume)
-      };
-      if (![candle.time, candle.open, candle.high, candle.low, candle.close, candle.volume]
-        .every(Number.isFinite) ||
-          candle.time <= previousTime ||
-          candle.open <= 0 || candle.high <= 0 || candle.low <= 0 ||
-          candle.close <= 0 || candle.volume < 0 ||
-          candle.high < Math.max(candle.open, candle.close, candle.low) ||
-          candle.low > Math.min(candle.open, candle.close, candle.high)) {
-        return null;
-      }
-      previousTime = candle.time;
-      normalized.push(candle);
-    }
-    return normalized;
-  }
-
   cacheResearchCandleWindow(exchange, product, timeframeSeconds, audit, receivedAtMs) {
     if (!audit?.ok || !Array.isArray(audit.rows)) return false;
-    const rows = this.normalizeResearchCandleWindow(audit.rows.slice(-150));
+    const rows = normalizeResearchCandleWindow(audit.rows.slice(-150));
     if (!rows) return false;
     const key = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds;
     this.setState(key, {
@@ -222,7 +194,7 @@ export class TradingEngine extends DurableObject {
     const cacheKey = "research_candle_window:" + exchange + ":" + product + ":" + timeframeSeconds;
     const cached = this.getState(cacheKey);
     if (cached && cached.version === 1 && Array.isArray(cached.rows)) {
-      const rows = this.normalizeResearchCandleWindow(cached.rows);
+      const rows = normalizeResearchCandleWindow(cached.rows);
       if (rows && cached.rows.length <= 150) return rows;
     }
 
@@ -241,7 +213,7 @@ export class TradingEngine extends DurableObject {
       close: Number(row.close),
       volume: Number(row.volume)
     }));
-    const normalized = this.normalizeResearchCandleWindow(rows);
+    const normalized = normalizeResearchCandleWindow(rows);
     if (normalized) {
       this.setState(cacheKey, {
         version: 1,
