@@ -23,6 +23,7 @@ import { createServerLivePreview, consumeServerLivePreview } from "./live-order-
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
 const DASHBOARD_ANALYTICS_SAMPLE_LIMIT = 250; // Independent L2-only refresh cadence.
+const TRADE_ANALYTICS_CACHE_TTL_MS = 5 * 60 * 1000;
 const MAX_QUOTE_AGE_MS = 120000;
 const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
@@ -82,8 +83,15 @@ export class TradingEngine extends DurableObject {
       JSON.stringify({ initial_capital_usd: 10, trading_mode: "demo", risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
     const currentSettings = this.getState("settings");
-    const historicalTradeCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM trades").toArray()[0]?.count || 0);
-    const migratedSettings = migratePaperAutomationSettings(currentSettings, historicalTradeCount);
+    // The profile migration only needs to know whether any historical trade exists.
+    // Avoid a full-ledger COUNT scan every time the Durable Object is instantiated.
+    let migratedSettings = currentSettings;
+    if (Number(currentSettings?.paper_automation_profile_version || 0) < PAPER_AUTOMATION_PROFILE.version) {
+      const hasHistoricalTrades = this.sql.exec(
+        "SELECT 1 AS has_trades FROM trades LIMIT 1"
+      ).toArray().length > 0;
+      migratedSettings = migratePaperAutomationSettings(currentSettings, hasHistoricalTrades ? 1 : 0);
+    }
     if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
       this.setState("settings", migratedSettings);
     }
@@ -2059,6 +2067,19 @@ export class TradingEngine extends DurableObject {
   }
 
   tradeAnalytics() {
+    const nowMs = Date.now();
+    const cached = this.getState("trade_analytics_cache");
+    if (cached && cached.value && Number.isFinite(Number(cached.calculated_at_ms)) &&
+        nowMs - Number(cached.calculated_at_ms) >= 0 &&
+        nowMs - Number(cached.calculated_at_ms) < TRADE_ANALYTICS_CACHE_TTL_MS) {
+      return { ...cached.value, analytics_calculated_at_ms: Number(cached.calculated_at_ms) };
+    }
+    const value = this.computeTradeAnalytics();
+    this.setState("trade_analytics_cache", { calculated_at_ms: nowMs, value });
+    return { ...value, analytics_calculated_at_ms: nowMs };
+  }
+
+  computeTradeAnalytics() {
     const totals = this.sql.exec(
       "SELECT COUNT(*) AS total_trades, " +
       "SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed_trades, " +
