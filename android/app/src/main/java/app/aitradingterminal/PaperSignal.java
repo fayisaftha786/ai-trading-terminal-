@@ -15,7 +15,7 @@ public final class PaperSignal {
     public static final long MAX_TICKER_AGE_MS = 120_000L;
     public static final long MAX_BOOK_AGE_MS = 15_000L;
     public static final long MAX_PRIMARY_AGE_MS = 90L * 60_000L;
-    public static final long MAX_HIGHER_AGE_MS = 5L * 60L * 60_000L;
+    public static final long MAX_HIGHER_AGE_MS = 7L * 60L * 60_000L;
 
     private PaperSignal() {}
 
