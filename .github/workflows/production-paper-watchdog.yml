@@ -70,7 +70,6 @@ jobs:
                   statusOk: health.status === "ok",
                   paperOnly: health.mode === "paper_only",
                   liveTradingDisabled: health.live_trading_enabled === false,
-                  binanceTestnetDisabled: health.binance_testnet_enabled === false,
                   workerVersionIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
                   deployedCommitMatchesMain: health.deployment_commit_sha === process.env.EXPECTED_MAIN_SHA,
                   schedulerHeartbeatFresh: validAge(scheduler.last_alarm_age_ms),
