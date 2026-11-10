@@ -37,7 +37,7 @@ def test_market_sources_must_match_provider_and_quote_currency():
     )
     assert mismatched_provider["matched"] is False
     assert "provider_mismatch:ticker=other_public_provider,strategy=coinbase_public_fallback" in mismatched_provider["issues"]
-    assert "quote_currency_mismatch:ticker=USDT,strategy=USD" in mismatched_provider["issues"]
+    assert "quote_currency_mismatch:ticker=EUR,strategy=USD" in mismatched_provider["issues"]
 
     unknown_source = compare_market_sources(
         {"quote_currency": "EUR"},
@@ -56,13 +56,13 @@ def test_coinbase_fallback_is_consistent_only_when_configured_pair_uses_usd():
     assert exact_usd["matched"] is True
     assert exact_usd["quote_basis_verified"] is True
 
-    mapped_usdt = compare_market_sources(
-        {"symbol": "BTC/USD", "market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
+    mapped_other_quote = compare_market_sources(
+        {"symbol": "BTC/EUR", "market_data_provider": "coinbase_public_fallback", "quote_currency": "USD"},
         {"provider": "coinbase_public_fallback", "quote_currency": "USD"},
     )
-    assert mapped_usdt["matched"] is True
-    assert mapped_usdt["quote_basis_verified"] is True
-    assert "configured_pair_quote_mismatch:configured=USD,actual=USD" in mapped_usdt["issues"]
+    assert mapped_other_quote["matched"] is False
+    assert mapped_other_quote["quote_basis_verified"] is False
+    assert "configured_pair_quote_mismatch:configured=EUR,actual=USD" in mapped_other_quote["issues"]
 
 
 
@@ -136,10 +136,10 @@ def test_scan_report_discloses_configured_exchange_and_actual_fallback_provider(
     }
 
     rendered = render_markdown(report)
-    assert "Configured exchange: binance" in rendered
+    assert "Configured exchange: coinbase" in rendered
     assert "Actual market-data adapter: coinbase_public_fallback" in rendered
     assert "ticker=coinbase_public_fallback/USD" in rendered
     assert "candles=coinbase_public_fallback/USD" in rendered
     assert "Quote basis" in rendered
     assert "UNVERIFIED" in rendered
-    assert "configured_pair=BTC/EUR; configured_quote=USDT" in rendered
+    assert "configured_pair=BTC/EUR; configured_quote=EUR" in rendered
