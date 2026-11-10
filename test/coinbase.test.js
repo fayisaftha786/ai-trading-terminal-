@@ -537,7 +537,8 @@ test("both market-data providers unavailable returns explicit combined provider 
         { symbol: "SOL/USD", product: "SOL-USD" },
         Date.now(),
         {},
-        createCoinbaseRequestState()
+        createCoinbaseRequestState(),
+        { allowBitstampLegacyExit: true }
       ),
       (error) => error.code === "all_market_data_providers_unavailable" &&
         error.primary_error_code === "provider_http_error" &&
@@ -653,7 +654,8 @@ test("Bitstamp fallback rejects non-SPOT ticker responses", async () => {
     await assert.rejects(
       fetchProductSnapshot(
         { symbol: "SOL/USD", product: "SOL-USD" },
-        Date.now(), {}, createCoinbaseRequestState()
+        Date.now(), {}, createCoinbaseRequestState(),
+        { allowBitstampLegacyExit: true }
       ),
       (error) => error.code === "all_market_data_providers_unavailable"
     );
@@ -857,7 +859,9 @@ test("Bitstamp research backfill rejects gaps rather than persisting incomplete 
   } finally {
     globalThis.fetch = originalFetch;
   }
-});test("ordinary market snapshots never fail over to Bitstamp", async () => {
+});
+
+test("ordinary market snapshots never fail over to Bitstamp", async () => {
   const originalFetch = globalThis.fetch;
   const calls = [];
   globalThis.fetch = async (url) => {
