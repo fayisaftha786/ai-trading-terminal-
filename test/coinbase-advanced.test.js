@@ -38,6 +38,39 @@ function makeEnv(overrides = {}) {
   };
 }
 
+function makeEd25519Credentials() {
+  const pair = generateKeyPairSync("ed25519", {
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs8", format: "pem" }
+  });
+  const privateDer = Buffer.from(
+    pair.privateKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""),
+    "base64"
+  );
+  const publicDer = Buffer.from(
+    pair.publicKey.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""),
+    "base64"
+  );
+  return {
+    apiKey: "organizations/test-org/apiKeys/ed25519-key",
+    privateKeyPem: pair.privateKey,
+    publicKeyPem: pair.publicKey,
+    seed: privateDer.subarray(-32),
+    publicRaw: publicDer.subarray(-32)
+  };
+}
+
+function makeEd25519Env(secret, credentials = makeEd25519Credentials()) {
+  return {
+    COINBASE_ADVANCED_API_KEY: credentials.apiKey,
+    COINBASE_ADVANCED_API_SECRET: secret,
+    COINBASE_ADVANCED_ALLOWED_PRODUCTS: "BTC-USD",
+    COINBASE_ADVANCED_MAX_ORDER_QUOTE: "10",
+    _testPublicKeyPem: credentials.publicKeyPem,
+    _testJwtAlgorithm: "EdDSA"
+  };
+}
+
 async function verifyJwt(token, publicKeyPem) {
   const [encodedHeader, encodedPayload, encodedSignature] = token.split(".");
   const decode = (value) => {
@@ -47,22 +80,22 @@ async function verifyJwt(token, publicKeyPem) {
   };
   const header = JSON.parse(decode(encodedHeader).toString("utf8"));
   const payload = JSON.parse(decode(encodedPayload).toString("utf8"));
+  const ed25519 = header.alg === "EdDSA";
   const publicKey = await webcrypto.subtle.importKey(
     "spki",
     Buffer.from(publicKeyPem.replace(/-----[^-]+-----/g, "").replace(/\s+/g, ""), "base64"),
-    { name: "ECDSA", namedCurve: "P-256" },
+    ed25519 ? { name: "Ed25519" } : { name: "ECDSA", namedCurve: "P-256" },
     false,
     ["verify"]
   );
   const valid = await webcrypto.subtle.verify(
-    { name: "ECDSA", hash: "SHA-256" },
+    ed25519 ? { name: "Ed25519" } : { name: "ECDSA", hash: "SHA-256" },
     publicKey,
     decode(encodedSignature),
     new TextEncoder().encode(encodedHeader + "." + encodedPayload)
   );
   return { header, payload, valid };
 }
-
 function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
@@ -72,7 +105,7 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
     const token = auth.slice("Bearer ".length);
     const checked = await verifyJwt(token, publicKeyPem);
     assert.equal(checked.valid, true, "request JWT must be a valid ES256 signature");
-    assert.equal(checked.header.alg, "ES256");
+    assert.equal(checked.header.alg, env._testJwtAlgorithm || "ES256");
     assert.equal(checked.header.kid, env.COINBASE_ADVANCED_API_KEY);
     assert.equal(checked.payload.uri, options.method + " api.coinbase.com" + parsed.pathname + parsed.search);
     calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: options.body ? JSON.parse(options.body) : null });
@@ -175,6 +208,45 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.nbf, 1800000000);
   assert.equal(verified.payload.exp - verified.payload.nbf, 90);
   assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
+});
+
+test("EdDSA JWT from recommended Coinbase CDP Ed25519 PKCS8 PEM verifies", async () => {
+  const credentials = makeEd25519Credentials();
+  const env = makeEd25519Env(credentials.privateKeyPem, credentials);
+  const jwt = await createCoinbaseAdvancedJwt({
+    apiKey: env.COINBASE_ADVANCED_API_KEY,
+    privateKeyPem: env.COINBASE_ADVANCED_API_SECRET,
+    method: "GET",
+    path: "/api/v3/brokerage/key_permissions",
+    nowSeconds: 1800000100
+  });
+  const verified = await verifyJwt(jwt, credentials.publicKeyPem);
+  assert.equal(verified.valid, true);
+  assert.equal(verified.header.alg, "EdDSA");
+  assert.equal(verified.header.kid, env.COINBASE_ADVANCED_API_KEY);
+  assert.equal(verified.payload.iss, "cdp");
+  assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions");
+});
+
+test("EdDSA JWT accepts Coinbase raw Base64 Ed25519 seeds in both 32-byte and 64-byte forms", async () => {
+  const credentials = makeEd25519Credentials();
+  const secrets = [
+    credentials.seed.toString("base64"),
+    Buffer.concat([credentials.seed, credentials.publicRaw]).toString("base64")
+  ];
+  for (const secret of secrets) {
+    const env = makeEd25519Env(secret, credentials);
+    const jwt = await createCoinbaseAdvancedJwt({
+      apiKey: env.COINBASE_ADVANCED_API_KEY,
+      privateKeyPem: env.COINBASE_ADVANCED_API_SECRET,
+      method: "GET",
+      path: "/api/v3/brokerage/accounts",
+      nowSeconds: 1800000200
+    });
+    const verified = await verifyJwt(jwt, credentials.publicKeyPem);
+    assert.equal(verified.valid, true);
+    assert.equal(verified.header.alg, "EdDSA");
+  }
 });
 
 test("manual submission availability requires fresh successful preflight and Coinbase Trade permission", async () => {
