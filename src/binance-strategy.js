@@ -5,7 +5,7 @@ export const BINANCE_STRATEGY_INTERVALS = Object.freeze({
   "1h": 3_600_000,
   "4h": 14_400_000
 });
-export const BINANCE_STRATEGY_BATCH_LIMIT = 25;
+export const BINANCE_STRATEGY_BATCH_LIMIT = 50;
 const MINIMUM_BARS = 150;
 
 function positive(value) {
