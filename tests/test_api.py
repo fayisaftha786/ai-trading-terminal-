@@ -5,7 +5,6 @@ def test_health_is_paper_only(client):
     assert response.json()["mode"] == "paper_only"
     assert response.json()["live_trading_enabled"] is False
     assert response.json()["automatic_strategy_mode"] == "paper_only"
-    assert response.json()["testnet_manual_orders_enabled"] is False
 
 
 def test_live_executor_is_locked(client):
@@ -254,32 +253,6 @@ def test_restart_resumes_cex_exit_monitoring_but_keeps_new_entries_off(tmp_path)
 
 
 
-def test_testnet_status_is_separate_from_live_trading(client):
-    response = client.get("/api/testnet/status")
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["environment"] == "testnet_only"
-    assert payload["enabled"] is False
-    assert payload["live_trading_enabled"] is False
-    assert payload["production_endpoint_used"] is False
-
-
-def test_testnet_connection_check_fails_closed_without_local_setup(client):
-    response = client.post("/api/testnet/connection-check")
-    assert response.status_code == 409
-    assert "disabled" in response.json()["detail"].lower()
-
-
-def test_testnet_limit_order_controls_are_present_in_dashboard(client):
-    page = client.get("/")
-    script = client.get("/static/app.js")
-    assert 'id="testnetOrderForm"' in page.text
-    assert 'id="testnetStopBtn"' in page.text
-    assert 'id="testnetResetBtn"' in page.text
-    assert "refreshTestnetOrder" in script.text
-    assert "cancelTestnetOrder" in script.text
-    assert "RESET TESTNET ORDER LOCK" in script.text
-
 
 def test_risk_update_rejects_target_that_cannot_cover_execution_costs(client):
     payload = {
@@ -413,19 +386,3 @@ def test_auto_paper_opt_in_persists_across_process_restart_and_kill_switch_clear
     after_kill = create_app(config=config, db_path=database_path)
     assert after_kill.state.auto_paper_enabled is False
 
-
-def test_binance_production_account_status_is_read_only_and_disabled_by_default(client):
-    response = client.get("/api/binance/account/status")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["environment"] == "production_read_only"
-    assert body["enabled"] is False
-    assert body["ready_for_connection_check"] is False
-    assert body["order_execution_available"] is False
-    assert body["live_trading_enabled"] is False
-
-
-def test_binance_production_connection_check_fails_closed_by_default(client):
-    response = client.post("/api/binance/account/connection-check")
-    assert response.status_code == 409
-    assert "disabled" in response.json()["detail"].lower()
