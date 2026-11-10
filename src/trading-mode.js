@@ -9,9 +9,10 @@ export function normalizeTradingMode(value) {
 }
 
 /**
- * Select a dashboard execution mode without ever enabling order execution.
+ * Select a dashboard execution mode without enabling execution by itself.
  * Switching modes always turns off paper auto-entry; the owner must opt in
- * again after returning to DEMO. REAL remains connection/preflight-only.
+ * again after returning to DEMO. REAL manual orders require a separate guarded
+ * Worker secret, a fresh server-bound preview and explicit owner confirmation.
  */
 export function selectTradingMode(settings, requestedMode, {
   openPaperPositions = 0,
