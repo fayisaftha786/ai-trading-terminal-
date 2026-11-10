@@ -17,7 +17,7 @@ class Settings:
     initial_capital_usd: float = float(os.getenv("PAPER_INITIAL_CAPITAL_USD", "100"))
     cex_exchange: str = os.getenv("CEX_EXCHANGE", "coinbase").lower()
     cex_symbols: tuple[str, ...] = tuple(
-        s.strip() for s in os.getenv("CEX_SYMBOLS", "BTC/USDT,ETH/USDT,SOL/USDT").split(",") if s.strip()
+        s.strip() for s in os.getenv("CEX_SYMBOLS", "BTC/USD,ETH/USD,SOL/USD").split(",") if s.strip()
     )
     jupiter_base_url: str = os.getenv("JUPITER_BASE_URL", "https://api.jup.ag/tokens/v2")
     jupiter_api_key: str | None = os.getenv("JUPITER_API_KEY") or None
