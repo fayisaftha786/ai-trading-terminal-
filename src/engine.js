@@ -20,6 +20,7 @@ import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { binanceReadOnlyStatus, preflightBinanceReadOnly } from "./binance-readonly.js";
+import { analyzeBinanceMultiTimeframeMarket, BINANCE_STRATEGY_BATCH_LIMIT } from "./binance-strategy.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // 90s keeps a 120s quote TTL useful across sequential 3-market scans.
 const MAX_QUOTE_AGE_MS = 120000;
@@ -30,6 +31,22 @@ function jsonResponse(data, status = 200) {
     status,
     headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store, private" }
   });
+}
+
+
+async function mapWithConcurrency(items, concurrency, worker) {
+  const results = new Array(items.length);
+  let cursor = 0;
+  const lanes = Math.max(1, Math.min(items.length, Math.trunc(concurrency) || 1));
+  await Promise.all(Array.from({ length: lanes }, async () => {
+    while (true) {
+      const index = cursor;
+      cursor += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  }));
+  return results;
 }
 
 export class TradingEngine extends DurableObject {
@@ -123,6 +140,144 @@ export class TradingEngine extends DurableObject {
       this.setState("runtime", runtime);
       await this.ctx.storage.setAlarm(dueAt);
     }
+  }
+
+
+  async scanBinanceStrategyBatch(symbols) {
+    const nowMs = Date.now();
+    const response = await fetch("https://data-api.binance.vision/api/v3/ticker/24hr", {
+      headers: { "accept": "application/json" },
+      signal: AbortSignal.timeout(12000)
+    });
+    if (!response.ok) {
+      const error = new Error("binance_ticker_http_" + response.status);
+      error.status = response.status;
+      throw error;
+    }
+    const tickerRows = await response.json();
+    if (!Array.isArray(tickerRows)) throw new Error("binance_ticker_payload_invalid");
+    const tickerBySymbol = new Map(tickerRows.map((row) => [String(row?.symbol || "").toUpperCase(), row]));
+    const settings = this.getState("settings") || {};
+    const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const currentMarkets = this.getMarkets();
+    const positionMarks = this.buildPositionLockedBidMarks(currentMarkets, nowMs);
+    const portfolio = this.portfolio(positionMarks, risk, nowMs);
+    const portfolioBlockReasons = [];
+    if (portfolio.unmarked_positions > 0) portfolioBlockReasons.push("open_position_without_fresh_mark");
+    if (portfolio.open_positions >= risk.max_open_positions) portfolioBlockReasons.push("max_open_positions");
+    const protection = this.riskProtectionStatus(portfolio, risk, nowMs);
+    portfolioBlockReasons.push(...(protection.block_reasons || []));
+    if (settings.capital_setup_required) portfolioBlockReasons.push("paper_capital_setup_review_required");
+    if (portfolio.equity_usd > 0 &&
+        portfolio.exposure_usd >= portfolio.equity_usd * risk.max_total_exposure_pct / 100) {
+      portfolioBlockReasons.push("max_exposure");
+    }
+    const uniquePortfolioBlocks = [...new Set(portfolioBlockReasons)];
+
+    const results = await mapWithConcurrency(symbols, 6, async (symbol) => {
+      const ticker = tickerBySymbol.get(symbol);
+      if (!ticker) {
+        return {
+          symbol: symbol.slice(0, -4) + "/USDT",
+          binance_symbol: symbol,
+          status: "provider_error",
+          signal: "HOLD",
+          composite_score: 0,
+          risk_check: { passed: false, block_reasons: ["ticker_not_returned_by_binance"] },
+          paper_trade: { status: "BLOCKED", requires_owner_confirmation: true, order_created: false }
+        };
+      }
+
+      try {
+        const base = "https://data-api.binance.vision/api/v3/";
+        const query = "symbol=" + encodeURIComponent(symbol) + "&limit=180";
+        const requests = await Promise.all([
+          fetch(base + "klines?interval=15m&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
+          fetch(base + "klines?interval=1h&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
+          fetch(base + "klines?interval=4h&" + query, { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) }),
+          fetch(base + "depth?symbol=" + encodeURIComponent(symbol) + "&limit=20", { headers: { "accept": "application/json" }, signal: AbortSignal.timeout(12000) })
+        ]);
+        const labels = ["15m", "1h", "4h", "depth"];
+        const payloads = await Promise.all(requests.map(async (item, index) => {
+          if (!item.ok) throw new Error("binance_" + labels[index] + "_http_" + item.status);
+          return item.json();
+        }));
+        const symbolRow = this.sql.exec(
+          "SELECT status,opened_at_ms,closed_at_ms FROM trades WHERE symbol=? ORDER BY opened_at_ms DESC,id DESC LIMIT 1",
+          symbol.slice(0, -4) + "/USDT"
+        ).toArray()[0];
+        const symbolBlockReasons = [];
+        if (symbolRow?.status === "OPEN") symbolBlockReasons.push("position_already_open");
+        else if (symbolRow) {
+          const lastAt = Number(symbolRow.closed_at_ms || symbolRow.opened_at_ms);
+          if (Number.isFinite(lastAt) && nowMs - lastAt < 4 * 60 * 60 * 1000) {
+            symbolBlockReasons.push("symbol_cooldown_4h");
+          }
+        }
+        const analysis = analyzeBinanceMultiTimeframeMarket({
+          symbol,
+          ticker,
+          depth: payloads[3],
+          candlesByInterval: {
+            "15m": payloads[0],
+            "1h": payloads[1],
+            "4h": payloads[2]
+          },
+          nowMs: Date.now(),
+          costs: {
+            feeBpsPerSide: risk.fee_bps_per_side,
+            slippageBps: risk.slippage_bps
+          },
+          portfolioBlockReasons: uniquePortfolioBlocks,
+          symbolBlockReasons
+        });
+        return analysis;
+      } catch (error) {
+        return {
+          symbol: symbol.slice(0, -4) + "/USDT",
+          binance_symbol: symbol,
+          status: "provider_error",
+          signal: "HOLD",
+          composite_score: 0,
+          risk_check: {
+            passed: false,
+            block_reasons: [String(error?.message || "binance_market_data_unavailable").slice(0, 120)]
+          },
+          paper_trade: {
+            status: "BLOCKED",
+            requires_owner_confirmation: true,
+            order_created: false,
+            note: "No trade is possible when any required provider request fails."
+          }
+        };
+      }
+    });
+
+    return {
+      status: "completed",
+      source: "Binance Spot public REST market data",
+      data_mode: "public_market_data_only",
+      scanned_at_ms: Date.now(),
+      requested_symbols: symbols.length,
+      analyzed_markets: results.filter((item) => item.status === "analyzed").length,
+      candidate_count: results.filter((item) => item.signal === "LONG_CANDIDATE").length,
+      paper_review_ready_count: results.filter((item) => item.paper_trade?.status === "PAPER_REVIEW_READY").length,
+      portfolio: {
+        open_positions: portfolio.open_positions,
+        exposure_usd: portfolio.exposure_usd,
+        unmarked_positions: portfolio.unmarked_positions,
+        auto_paper_enabled: settings.auto_paper_enabled === true,
+        mode: normalizeTradingMode(settings.trading_mode)
+      },
+      workflow: ["radar", "multi_timeframe_analysis", "signal", "risk_check", "paper_review", "performance_review"],
+      execution: {
+        paper_orders_created: 0,
+        live_trading_enabled: false,
+        live_execution_locked: true,
+        note: "Analysis is read-only. A separate owner-confirmed Binance paper-ledger integration is not enabled by this scanner."
+      },
+      markets: results
+    };
   }
 
   async fetch(request) {
@@ -677,6 +832,19 @@ export class TradingEngine extends DurableObject {
           latest_age_ms: latest ? Math.max(0, nowMs - (latest.time + timeframeSeconds * 1000)) : null,
           retrieved_at_ms: nowMs
         });
+      }
+      if (request.method === "GET" && url.pathname === "/api/strategy/binance-intelligence") {
+        const rawSymbols = String(url.searchParams.get("symbols") || "");
+        const symbols = [...new Set(rawSymbols.split(",").map((value) => value.trim().toUpperCase()).filter(Boolean))];
+        if (!symbols.length || symbols.length > BINANCE_STRATEGY_BATCH_LIMIT ||
+            symbols.some((symbol) => !/^[A-Z0-9]{1,18}USDT$/.test(symbol))) {
+          return jsonResponse({
+            error: "invalid_symbol_batch",
+            maximum_symbols_per_batch: BINANCE_STRATEGY_BATCH_LIMIT,
+            expected: "one to ten comma-separated Binance USDT Spot symbols"
+          }, 400);
+        }
+        return jsonResponse(await this.scanBinanceStrategyBatch(symbols));
       }
       if (request.method === "GET" && url.pathname === "/api/dashboard") return jsonResponse(this.dashboard());
       if (request.method === "GET" && url.pathname === "/api/markets") return jsonResponse({ markets: this.getMarkets() });
