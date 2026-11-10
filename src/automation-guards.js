@@ -394,10 +394,16 @@ function diagnosticClosedAge(lastOpenMs, intervalMs, nowMs) {
   return Number.isFinite(value) && value > 0 ? nowMs - (value + intervalMs) : null;
 }
 
+function diagnosticNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? Number(number.toFixed(4)) : null;
+}
+
 /**
- * Build a bounded, sanitized view of the selected provider and its freshness
- * evidence from the actual persisted market snapshots, not a stale runtime copy.
- * Negative ages are kept visible so future timestamps cannot masquerade as fresh.
+ * Build a bounded, sanitized view of the selected provider, freshness evidence
+ * and exact per-market entry gate from the actual persisted market snapshots.
+ * Negative ages remain visible so future timestamps cannot masquerade as fresh.
  */
 export function buildMarketDataProviderDiagnostics(markets, nowMs = Date.now(), limit = 3) {
   const rows = Array.isArray(markets) ? markets : [];
@@ -406,6 +412,16 @@ export function buildMarketDataProviderDiagnostics(markets, nowMs = Date.now(), 
 
   return rows.slice(0, safeLimit).map((market) => {
     const quality = market?.data_quality || {};
+    const entryGate = market?.entry_gate || {};
+    const marketContext = market?.market_context || {};
+    const primary = market?.primary || {};
+    const higher = market?.higher || {};
+    const entryGateReason = typeof entryGate.reason === "string"
+      ? safeProviderDiagnosticCode(entryGate.reason) || "unrecognized"
+      : "not_evaluated";
+    const code = (value) => safeProviderDiagnosticCode(
+      typeof value === "string" ? value.toLowerCase() : value
+    );
     return {
       symbol: typeof market?.symbol === "string" ? market.symbol.slice(0, 24) : null,
       status: market?.status === "live" ? "live" : "error",
@@ -431,7 +447,21 @@ export function buildMarketDataProviderDiagnostics(markets, nowMs = Date.now(), 
       six_hour_closed_age_ms: diagnosticClosedAge(
         market?.six_hour_audit_summary?.last_closed_candle_ms, 21600000, nowMs
       ),
-      market_candidate_eligible: market?.entry_gate?.eligible === true
+      market_candidate_eligible: entryGate.eligible === true,
+      entry_gate_reason: entryGate.eligible === true ? "eligible" : entryGateReason,
+      market_context_status: code(marketContext.status),
+      market_context_mode: code(marketContext.mode),
+      market_context_reason: code(marketContext.reason),
+      primary_signal: code(primary.signal),
+      primary_score: diagnosticNumber(primary.score),
+      primary_regime: code(primary.regime),
+      higher_regime: code(higher.regime),
+      primary_rsi14: diagnosticNumber(primary.rsi14),
+      primary_atr_pct: diagnosticNumber(primary.atr_pct),
+      primary_adx14: diagnosticNumber(primary.adx14),
+      spread_bps: diagnosticNumber(market?.spread_bps),
+      entry_spread_bps: diagnosticNumber(entryGate.spread_bps),
+      entry_round_trip_cost_bps: diagnosticNumber(entryGate.round_trip_cost_bps)
     };
   });
 }
