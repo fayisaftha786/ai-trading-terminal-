@@ -211,6 +211,8 @@ export function coinbaseAdvancedStatus(env = {}) {
   if (!config.credentialsConfigured) blockers.push("coinbase_advanced_credentials_not_configured");
   if (!config.allowedProductsValid) blockers.push("explicit_spot_product_allowlist_required");
   if (!config.maxOrderQuoteValid) blockers.push("maximum_order_quote_cap_required");
+  if (config.maxOpenOrders < 1) blockers.push("valid_maximum_open_order_limit_required");
+  if (config.maxDailyOrders < 1) blockers.push("valid_maximum_daily_order_limit_required");
   return {
     provider: "coinbase_advanced_trade",
     mode: "live_setup_locked",
@@ -362,6 +364,47 @@ async function loadAccounts(env, fetchImpl) {
   throw new Error("coinbase_advanced_accounts_pagination_incomplete");
 }
 
+const ACTIVE_EXCHANGE_ORDER_STATUSES = new Set(["PENDING", "OPEN", "UNKNOWN_ORDER_STATUS", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"]);
+const EXCHANGE_ORDER_STATUS_QUERY = ["PENDING", "OPEN", "UNKNOWN_ORDER_STATUS", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
+
+async function loadActiveExchangeOrders(env, fetchImpl) {
+  const orders = [];
+  const seenCursors = new Set();
+  let cursor = "";
+  for (let page = 0; page < 5; page += 1) {
+    const query = new URLSearchParams();
+    query.set("limit", "100");
+    query.set("product_type", "SPOT");
+    for (const status of EXCHANGE_ORDER_STATUS_QUERY) query.append("order_status", status);
+    if (cursor) query.set("cursor", cursor);
+    const payload = await advancedRequest(env, "GET", API_PREFIX + "/orders/historical/batch?" + query.toString(), undefined, fetchImpl);
+    if (!Array.isArray(payload.orders)) throw new Error("coinbase_advanced_open_orders_response_invalid");
+    for (const order of payload.orders) {
+      const status = String(order?.status || "").toUpperCase();
+      if (typeof order?.order_id !== "string" || !order.order_id ||
+          typeof order?.product_id !== "string" || !["BUY", "SELL"].includes(order?.side) ||
+          !ACTIVE_EXCHANGE_ORDER_STATUSES.has(status)) {
+        throw new Error("coinbase_advanced_open_order_record_invalid");
+      }
+      orders.push({
+        order_id: order.order_id,
+        product_id: order.product_id,
+        side: order.side,
+        status
+      });
+    }
+    if (payload.has_next === false) {
+      return { orders, pages: page + 1, pagination_complete: true };
+    }
+    if (payload.has_next !== true || typeof payload.cursor !== "string" ||
+        !payload.cursor || seenCursors.has(payload.cursor)) {
+      throw new Error("coinbase_advanced_open_orders_pagination_invalid");
+    }
+    seenCursors.add(payload.cursor);
+    cursor = payload.cursor;
+  }
+  throw new Error("coinbase_advanced_open_orders_pagination_incomplete");
+}
 function accountBalancesForProducts(accounts, products) {
   const currencies = new Set(products.flatMap((product) => [
     String(product.quote_currency_id || "").toUpperCase(),
@@ -467,6 +510,10 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       });
       if (!check.eligible) blockers.push(...check.blockers.map((item) => productId + ":" + item));
     }
+    const exchangeOrders = await loadActiveExchangeOrders(env, fetchImpl);
+    if (config.maxOpenOrders < 1 || exchangeOrders.orders.length >= config.maxOpenOrders) {
+      blockers.push("maximum_open_exchange_orders_reached");
+    }
     const balances = accountBalancesForProducts(accounts, products);
     const eligibleProducts = products.filter((product) => product.eligible);
     for (const product of eligibleProducts) {
@@ -490,7 +537,12 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       eligible_products: eligibleProducts.map((product) => product.product_id),
       account_count: accounts.length,
       account_pagination_complete: true,
-      order_submission_available: ready && config.orderExecutionEnabled &&
+      exchange_open_order_count: exchangeOrders.orders.length,
+      exchange_open_orders: exchangeOrders.orders,
+      exchange_order_pages: exchangeOrders.pages,
+      exchange_order_pagination_complete: exchangeOrders.pagination_complete,
+      order_submission_available: ready && exchangeOrders.pagination_complete &&
+        exchangeOrders.orders.length < config.maxOpenOrders && config.orderExecutionEnabled &&
         config.maxOpenOrders > 0 && config.maxDailyOrders > 0 &&
         permissions.can_trade === true,
       order_submission_configured: config.credentialsConfigured &&
