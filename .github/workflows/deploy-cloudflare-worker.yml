@@ -95,3 +95,47 @@ jobs:
           done
           echo "::error::Production Worker did not report the expected commit SHA and PAPER-only safety flags."
           exit 1
+
+      - name: Verify production revision remains stable after Cloudflare build hooks
+        env:
+          WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
+          EXPECTED_DEPLOY_COMMIT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          # Recheck after Git-connected provider build hooks have had time to publish.
+          sleep 120
+          response="$(curl --fail --silent --max-time 15 "${WORKER_HEALTH_URL}?deploy_stability=${GITHUB_SHA}" 2>/dev/null || true)"
+          if [ -z "$response" ]; then
+            echo "::error::Production Worker did not return health JSON during the stability check."
+            exit 1
+          fi
+          printf '%s' "$response" | node -e '
+            let raw = "";
+            process.stdin.setEncoding("utf8");
+            process.stdin.on("data", (chunk) => { raw += chunk; });
+            process.stdin.on("end", () => {
+              try {
+                const health = JSON.parse(raw);
+                const checks = {
+                  deploymentCommitMatches: health.deployment_commit_sha === process.env.EXPECTED_DEPLOY_COMMIT_SHA,
+                  provenanceVerified: health.deployment_provenance_status === "verified",
+                  statusOk: health.status === "ok",
+                  paperOnly: health.mode === "paper_only",
+                  liveTradingDisabled: health.live_trading_enabled === false,
+                  binanceTestnetDisabled: health.binance_testnet_enabled === false
+                };
+                console.log("Stable deployment verification:", JSON.stringify({
+                  checks,
+                  deployment_commit_sha: health.deployment_commit_sha,
+                  deployment_provenance_status: health.deployment_provenance_status,
+                  worker_version: health.worker_version
+                }));
+                if (Object.values(checks).every(Boolean)) return;
+                console.error("Production revision changed or lost deployment provenance after initial verification.");
+                process.exitCode = 1;
+              } catch (error) {
+                console.error("Stable deployment health response was invalid:", error.message);
+                process.exitCode = 1;
+              }
+            });
+          '
