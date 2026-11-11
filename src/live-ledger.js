@@ -79,7 +79,7 @@ export function buildLiveFillReport(input, syncedAtMs = null) {
     state.fees += row.commission;
     if (row.side === "BUY") {
       state.buy_base += row.base_size;
-      state.lots.push({ remaining: row.base_size, cost: row.quote_value + (row.fee_known ? row.commission : 0n) });
+      const totalCost = row.quote_value + (row.fee_known ? row.commission : 0n);\n      state.lots.push({ remaining: row.base_size, unit_cost: (totalCost * SCALE) / row.base_size });
       continue;
     }
     state.sell_base += row.base_size;
