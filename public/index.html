@@ -472,6 +472,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
   const preflightFailed=result?.status==="provider_check_failed";
   const preflightStage=typeof result?.preflight_stage==="string"?result.preflight_stage.replace(/_/g," "):"unknown stage";
   const providerHttpStatus=Number.isInteger(result?.provider_http_status)?result.provider_http_status:null;
+  const providerErrorCode=typeof result?.provider_error_code==="string"&&/^[A-Z][A-Z0-9_]{1,79}$/.test(result.provider_error_code)?result.provider_error_code:null;
   const ready=result?.status==="preflight_ready_for_manual_order_preview";
   const products=Array.isArray(result?.products)?result.products:[];
   const eligible=Array.isArray(result?.eligible_products)?result.eligible_products:[];
@@ -493,7 +494,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
     {title:"View permission",detail:hasVerifiedPermissions?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasVerifiedPermissions},
     {title:"Trade permission",detail:hasVerifiedPermissions?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasVerifiedPermissions},
     {title:"Transfer disabled",detail:hasVerifiedPermissions?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasVerifiedPermissions},
-    {title:"Latest preflight result",detail:preflightFailed?"Failed at "+preflightStage+(providerHttpStatus?" · Coinbase HTTP "+providerHttpStatus:" · provider HTTP status unavailable"):result?.status?String(result.status).replace(/_/g," "):"Not run",ok:ready,known:!!result?.status},
+    {title:"Latest preflight result",detail:preflightFailed?"Failed at "+preflightStage+(providerHttpStatus?" · Coinbase HTTP "+providerHttpStatus:" · provider HTTP status unavailable")+(providerErrorCode?" · "+providerErrorCode:""):result?.status?String(result.status).replace(/_/g," "):"Not run",ok:ready,known:!!result?.status},
     {title:"SPOT fee tier",detail:feeVerified
       ?String(feeSummary.pricing_tier||"tier unlabelled")+" · maker "+String(feeSummary.maker_fee_bps)+" bps / taker "+String(feeSummary.taker_fee_bps)+" bps"
       :String(feeSummary.reason||"Fee tier not checked").replace(/_/g," "),ok:feeVerified,known:hasVerifiedPermissions&&feeSummary.status!=="not_checked"},
@@ -643,6 +644,7 @@ async function runCoinbasePreflight({silent=false,force=false}={}){
         status:result.status,
         preflight_stage:result.preflight_stage||null,
         provider_http_status:result.provider_http_status??null,
+        provider_error_code:result.provider_error_code??null,
         permissions:result.permissions,
         eligible_products:result.eligible_products||[],
         products:result.products||[],
