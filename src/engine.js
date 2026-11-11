@@ -30,6 +30,14 @@ const MAX_QUOTE_AGE_MS = 120000;
 const MAX_ORDER_BOOK_AGE_MS = 15000;
 const DEFAULT_RISK = { ...PAPER_AUTOMATION_RISK };
 
+function configuredShadowFeeBps(env = {}) {
+  const raw = env.SHADOW_FEE_BPS_PER_SIDE;
+  if (raw == null || String(raw).trim() === "") return 10;
+  const value = Number(raw);
+  return Number.isFinite(value) && value >= 0 && value <= 1000 ? value : 60;
+}
+
+
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
@@ -3042,7 +3050,7 @@ export class TradingEngine extends DurableObject {
         higher: market.higher || {},
         nowMs,
         costs: {
-          feeBpsPerSide: Math.max(0, Number(risk.fee_bps_per_side) || 0),
+          feeBpsPerSide: configuredShadowFeeBps(this.env),
           slippageBps: Math.max(0, Number(risk.slippage_bps) || 0)
         },
         marketContext: market.market_context,
@@ -3082,7 +3090,7 @@ export class TradingEngine extends DurableObject {
     const cap = Number(risk.max_position_notional_usd) > 0 ? Number(risk.max_position_notional_usd) : 8;
     const budget = Math.min(10, cap, initial * 0.1);
     if (budget < 2) return finish("blocked", "shadow_position_budget_below_minimum", market.symbol);
-    const fee = Math.max(0, Number(risk.fee_bps_per_side) || 0);
+    const fee = configuredShadowFeeBps(this.env);
     const slip = Math.max(0, Number(risk.slippage_bps) || 0);
     const fill = simulateShadowMarketBuy({ quoteBudget: budget, asks: market.shadow_book_asks,
       feeBpsPerSide: fee, extraSlippageBps: slip });
@@ -3127,6 +3135,7 @@ export class TradingEngine extends DurableObject {
     const settings = this.getState("settings") || {};
     const runtime = this.getState("shadow_runtime") || {};
     const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const shadowFeeBps = configuredShadowFeeBps(this.env);
     const stats = this.sql.exec(
       "SELECT COUNT(*) AS total, SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed," +
       "SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open," +
@@ -3147,7 +3156,7 @@ export class TradingEngine extends DurableObject {
         markComplete = false; return { ...trade, mark_status: "book_stale_or_missing" };
       }
       const fill = simulateShadowMarketSell({ baseQuantity: Number(trade.remaining_quantity),
-        bids: market.shadow_book_bids, feeBpsPerSide: Number(trade.metadata?.fee_bps_per_side ?? risk.fee_bps_per_side),
+        bids: market.shadow_book_bids, feeBpsPerSide: Number(trade.metadata?.fee_bps_per_side ?? shadowFeeBps),
         extraSlippageBps: Number(trade.metadata?.extra_slippage_bps ?? risk.slippage_bps) });
       if (!fill.ok || fill.status !== "filled") {
         markComplete = false; return { ...trade, mark_status: "insufficient_bid_depth" };
@@ -3169,7 +3178,10 @@ export class TradingEngine extends DurableObject {
         "Stop/target conditions are sampled on scheduled scans and 10-second L2 refreshes; brief crossings between samples can be missed.",
         "Simulated fills are not Coinbase-reported executions."],
       book_freshness_limit_ms: MAX_ORDER_BOOK_AGE_MS,
-      fee_assumption_bps_per_side: risk.fee_bps_per_side,
+      fee_assumption_bps_per_side: shadowFeeBps,
+      fee_assumption_source: this.env.SHADOW_FEE_BPS_PER_SIDE == null
+        ? "default_10_bps_intro_tier_placeholder_not_account_synced"
+        : "worker_environment_SHADOW_FEE_BPS_PER_SIDE",
       extra_slippage_bps_per_side: risk.slippage_bps,
       initial_capital_usd: Number(settings.shadow_initial_capital_usd) || 100,
       total_trades: Number(stats.total || 0), closed_trades: closed, open_trades: Number(stats.open || 0),
