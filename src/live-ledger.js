@@ -91,10 +91,7 @@ export function buildLiveFillReport(input, syncedAtMs = null) {
     while (remaining > 0n && state.lots.length) {
       const lot = state.lots[0];
       const matched = min(remaining, lot.remaining);
-      const costPerUnit = (lot.cost * SCALE) / (lot.remaining + (lot.original_remaining || 0n));
-      // Store unit cost at acquisition so partial FIFO consumption remains exact.
-      const lotCost = lot.unit_cost ?? ((lot.cost * SCALE) / lot.remaining);
-      state.realized += ((proceedsPerUnit - lotCost) * matched) / SCALE;
+      state.realized += ((proceedsPerUnit - lot.unit_cost) * matched) / SCALE;
       lot.remaining -= matched;
       remaining -= matched;
       state.matched_sell_base += matched;
