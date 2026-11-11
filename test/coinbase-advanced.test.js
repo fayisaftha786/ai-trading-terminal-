@@ -683,6 +683,28 @@ test("account pagination uncertainty and incomplete provider data fail closed", 
   assert.ok(result.blockers.includes("coinbase_advanced_accounts_pagination_invalid"));
 });
 
+test("open-order preflight sends one Coinbase status filter per request and deduplicates results", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env, {
+    openOrders: {
+      orders: [{ order_id: "one-open-order", product_id: "BTC-USD", side: "BUY", status: "OPEN" }],
+      has_next: false
+    }
+  });
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.exchange_open_order_count, 1);
+  assert.equal(result.exchange_order_pagination_complete, true);
+  const orderCalls = fake.calls.filter((call) =>
+    call.path.includes("/orders/historical/batch?") && !call.path.includes("start_date=")
+  );
+  assert.equal(orderCalls.length, 6);
+  for (const call of orderCalls) {
+    const query = new URL("https://api.coinbase.com" + call.path).searchParams;
+    assert.equal(query.getAll("order_status").length, 1);
+    assert.equal(query.get("product_type"), "SPOT");
+  }
+});
+
 test("preflight blocks new manual orders when the Coinbase Advanced portfolio already has an active SPOT order", async () => {
   const env = makeEnv({ COINBASE_ADVANCED_ORDER_ENABLED: "true" });
   const fake = mockApi(env, {
