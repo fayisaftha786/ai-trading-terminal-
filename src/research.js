@@ -69,7 +69,13 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
     const rawAge = latestClosedAt === null ? null : nowMs - latestClosedAt;
     const ageMinutes = rawAge === null || rawAge < 0 ? null : Math.floor(rawAge / 60000);
     const coverageDays = expected === null || expected <= 0 ? 0 : (last - first + intervalMs) / 86400000;
-    const quality = String(record.last_quality_status || "not_started");
+    const storedQuality = String(record.last_quality_status || "not_started");
+    // "clean" describes the validity of the last accepted batch, not the
+    // completeness of the retained archive. Surface known gaps explicitly.
+    const hasKnownGaps = retainedMissing > 0 || Number(record.cumulative_missing_intervals || 0) > 0;
+    const quality = aligned && storedQuality === "clean" && hasKnownGaps
+      ? "valid_rows_archive_incomplete"
+      : aligned ? storedQuality : "archive_integrity_error";
     return {
       exchange: String(record.exchange || "coinbase_exchange"),
       product: String(record.product || ""),
@@ -86,7 +92,7 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
       coverage_days: Number(coverageDays.toFixed(2)),
       retained_missing_intervals: retainedMissing,
       cumulative_missing_intervals: Math.max(0, Number(record.cumulative_missing_intervals) || 0),
-      last_quality_status: aligned ? quality : "archive_integrity_error",
+      last_quality_status: quality,
       last_quality_check_at_ms: record.last_quality_check_at_ms == null ? null
         : (Number.isFinite(Number(record.last_quality_check_at_ms)) ? Number(record.last_quality_check_at_ms) : null),
       last_ingested_at_ms: record.last_ingested_at_ms == null ? null

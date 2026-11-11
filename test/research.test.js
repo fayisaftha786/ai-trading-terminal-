@@ -20,7 +20,7 @@ test("archive gap counter distinguishes contiguous and skipped intervals", () =>
   assert.equal(countMissingArchiveBars(null, [{ time: 11 * HOUR }], HOUR), 0);
 });
 
-test("history summary reports coverage, retained gaps, cumulative gaps and freshness", () => {
+test("history summary labels valid candle rows with retained gaps as incomplete archive", () => {
   const now = 10 * HOUR;
   const [summary] = buildResearchHistorySummary([{
     product: "BTC-USD",
@@ -40,7 +40,21 @@ test("history summary reports coverage, retained gaps, cumulative gaps and fresh
   assert.equal(summary.retained_missing_intervals, 1);
   assert.equal(summary.cumulative_missing_intervals, 2);
   assert.equal(summary.latest_age_minutes, 360);
-  assert.equal(summary.last_quality_status, "clean");
+  assert.equal(summary.last_quality_status, "valid_rows_archive_incomplete");
+});
+
+test("history summary flags cumulative archive gaps even when current retention is contiguous", () => {
+  const [summary] = buildResearchHistorySummary([{
+    product: "SOL-USD",
+    timeframe_seconds: 3600,
+    bars_count: 4,
+    first_candle_ms: 0,
+    last_candle_ms: 3 * HOUR,
+    cumulative_missing_intervals: 2,
+    last_quality_status: "clean"
+  }], 10 * HOUR);
+  assert.equal(summary.retained_missing_intervals, 0);
+  assert.equal(summary.last_quality_status, "valid_rows_archive_incomplete");
 });
 
 test("history summary flags misaligned archive boundaries", () => {
