@@ -697,10 +697,11 @@ test("open-order preflight sends one Coinbase status filter per request and dedu
   const orderCalls = fake.calls.filter((call) =>
     call.path.includes("/orders/historical/batch?") && !call.path.includes("start_date=")
   );
-  assert.equal(orderCalls.length, 6);
+  assert.equal(orderCalls.length, 5);
   for (const call of orderCalls) {
     const query = new URL("https://api.coinbase.com" + call.path).searchParams;
     assert.equal(query.getAll("order_status").length, 1);
+    assert.notEqual(query.get("order_status"), "UNKNOWN_ORDER_STATUS");
     assert.equal(query.get("product_type"), "SPOT");
   }
 });
