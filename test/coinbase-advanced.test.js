@@ -785,7 +785,7 @@ test("preflight exposes only sanitized Coinbase error enums and the exact active
   const result = await preflightCoinbaseAdvanced(env, { fetchImpl });
   assert.equal(result.status, "provider_check_failed");
   assert.equal(result.preflight_stage, "open_orders:PENDING");
-  assert.equal(result.provider_http_status, 409);
+  assert.equal(result.provider_http_status, 400);
   assert.equal(result.provider_error_code, "INVALID_ARGUMENT");
   assert.equal(JSON.stringify(result).includes("raw provider text"), false);
 });
