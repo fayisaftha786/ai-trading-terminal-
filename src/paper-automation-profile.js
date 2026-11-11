@@ -133,23 +133,47 @@ export function shouldResumePaperAutomationAfterWatchdog({
   return resumeAllowed === true && capitalSetupRequired !== true;
 }
 
-export function calculateDynamicTakeProfit({ atrPct, roundTripCostBps }) {
+export function calculateDynamicTakeProfit({
+  atrPct,
+  roundTripCostBps,
+  stopLossPct = PAPER_AUTOMATION_RISK.stop_loss_pct,
+  minimumNetRewardRisk = 1
+}) {
   const atr = Number(atrPct);
   const costs = Number(roundTripCostBps);
-  if (!Number.isFinite(atr) || atr <= 0 || !Number.isFinite(costs) || costs <= 0) {
+  const stopPct = Number(stopLossPct);
+  const rewardRiskFloor = Number(minimumNetRewardRisk);
+  if (!Number.isFinite(atr) || atr <= 0 ||
+      !Number.isFinite(costs) || costs <= 0 ||
+      !Number.isFinite(stopPct) || stopPct < 0.25 || stopPct > 10 ||
+      !Number.isFinite(rewardRiskFloor) || rewardRiskFloor < 1 || rewardRiskFloor > 3) {
     return { ok: false, reason: "dynamic_target_inputs_invalid" };
   }
-  // Target the greater of 1.5x estimated round-trip costs, 0.8x 1H ATR,
-  // or a 1% gross move. Reject exceptionally expensive/volatile setups.
-  const targetBps = Math.max(costs * 1.5, atr * 80, 100);
-  if (!Number.isFinite(targetBps) || targetBps <= costs || targetBps > 500) {
+
+  // Reward and risk are compared only after the complete estimated round-trip
+  // cost (fees, slippage and entry spread) has been deducted from both sides.
+  const stopLossBps = stopPct * 100;
+  const estimatedNetRiskBps = stopLossBps + costs;
+  const minimumTargetBps = costs + (estimatedNetRiskBps * rewardRiskFloor);
+  // Retain the volatility/cost-aware floor, but never accept a target that
+  // cannot deliver at least the required net reward-to-risk ratio.
+  const targetBps = Math.max(costs * 1.5, atr * 80, 100, minimumTargetBps);
+  const estimatedNetRewardBps = targetBps - costs;
+  const netRewardRiskRatio = estimatedNetRiskBps > 0
+    ? estimatedNetRewardBps / estimatedNetRiskBps : 0;
+  if (!Number.isFinite(targetBps) || targetBps <= costs || targetBps > 500 ||
+      netRewardRiskRatio + 1e-9 < rewardRiskFloor) {
     return { ok: false, reason: "dynamic_target_outside_safe_bounds" };
   }
   return {
     ok: true,
     target_pct: Number((targetBps / 100).toFixed(4)),
     target_bps: Number(targetBps.toFixed(2)),
-    estimated_net_edge_bps: Number((targetBps - costs).toFixed(2))
+    estimated_net_edge_bps: Number(estimatedNetRewardBps.toFixed(2)),
+    estimated_net_reward_bps: Number(estimatedNetRewardBps.toFixed(2)),
+    estimated_net_risk_bps: Number(estimatedNetRiskBps.toFixed(2)),
+    net_reward_risk_ratio: Number(netRewardRiskRatio.toFixed(4)),
+    minimum_net_reward_risk: rewardRiskFloor
   };
 }
 
