@@ -96,7 +96,7 @@ async function verifyJwt(token, publicKeyPem) {
   );
   return { header, payload, valid };
 }
-function mockApi(env, { permissions, accounts, product, preview, fillsPages, historicalOrder, openOrders, openOrderPages, dailyOrders, dailyOrderPages, feeSummary, feeSummaryStatus = 200, feeSummaryError = false, calls = [] } = {}) {
+function mockApi(env, { permissions, accounts, product, preview, createdOrder, fillsPages, historicalOrder, openOrders, openOrderPages, dailyOrders, dailyOrderPages, feeSummary, feeSummaryStatus = 200, feeSummaryError = false, calls = [] } = {}) {
   const publicKeyPem = env._testPublicKeyPem;
   const fetchImpl = async (url, options) => {
     const parsed = new URL(String(url));
@@ -154,6 +154,11 @@ function mockApi(env, { permissions, accounts, product, preview, fillsPages, his
         preview_id: "preview-test-123", commission_total: "0.10",
         order_total: "10.00", best_bid: "99000.00", best_ask: "99010.00",
         slippage: "0.00", errs: [], warning: []
+      });
+    }
+    if (parsed.pathname.endsWith("/orders") && options.method === "POST") {
+      return Response.json(createdOrder || {
+        success: true, success_response: { order_id: "created-order-test-1" }
       });
     }
     if (parsed.pathname.endsWith("/orders/historical/fills")) {
@@ -546,9 +551,11 @@ test("preview uses post-only LIMIT GTC preview endpoint only and displays fee/qu
     product_id: "BTC-USD",
     side: "BUY",
     order_configuration: {
-      limit_limit_gtc: { quote_size: "10.00", limit_price: "99000.00", post_only: true }
+      limit_limit_gtc: { base_size: "0.00010", limit_price: "99000.00", post_only: true }
     }
   });
+  assert.equal(result.quote_size, "10.00");
+  assert.equal(result.base_size, "0.00010");
   assert.equal(calls.some((call) => call.path === "/api/v3/brokerage/orders"), false,
     "the adapter must never call the order-submission endpoint");
 });
@@ -568,16 +575,20 @@ test("preview blocks missing allowlist and over-cap size before any exchange cal
   assert.equal(calls.length, 0);
 });
 
-test("preview rejects off-increment size and price before external preview", async () => {
+test("BUY quote budget is rounded down to base increment and invalid limit price is rejected", async () => {
   const env = makeEnv();
   const { fetchImpl, calls } = mockApi(env);
-  const result = await previewCoinbaseAdvancedLimitBuy(
-    env, { productId: "BTC-USD", quoteSize: "9.995", limitPrice: "99000.001" }, { fetchImpl }
+  const rounded = await previewCoinbaseAdvancedLimitBuy(
+    env, { productId: "BTC-USD", quoteSize: "10.00", limitPrice: "99000.00" }, { fetchImpl }
   );
-  assert.equal(result.status, "blocked");
-  assert.ok(result.blockers.includes("quote_size_not_aligned_to_exchange_increment"));
-  assert.equal(calls.filter((call) => call.path.endsWith("/orders/preview")).length, 0,
-    "invalid exchange increments must be rejected before the exchange order-preview endpoint");
+  assert.equal(rounded.status, "preview_ready");
+  assert.equal(rounded.base_size, "0.00010");
+  const badPrice = await previewCoinbaseAdvancedLimitBuy(
+    env, { productId: "BTC-USD", quoteSize: "10.00", limitPrice: "99000.001" }, { fetchImpl }
+  );
+  assert.equal(badPrice.status, "blocked");
+  assert.ok(badPrice.blockers.includes("limit_price_not_aligned_to_exchange_increment"));
+  assert.equal(calls.filter((call) => call.path.endsWith("/orders/preview")).length, 1);
 });
 
 test("preview blocks insufficient quote balance and provider preview errors", async () => {
@@ -630,12 +641,36 @@ test("manual submission requires explicit execution switch and Coinbase Trade pe
   });
   const noTrade = mockApi(env);
   const blocked = await submitCoinbaseAdvancedLimitBuy(env, {
-    productId: "BTC-USD", quoteSize: "5.00", limitPrice: "99000.00",
+    productId: "BTC-USD", quoteSize: "5.00", baseSize: "0.00005", limitPrice: "99000.00",
     commissionTotal: "0.10", previewId: "preview-test-123", clientOrderId: "12345678-1234-1234-1234-123456789012"
   }, { fetchImpl: noTrade.fetchImpl });
   assert.equal(blocked.status, "blocked");
   assert.ok(blocked.blockers.includes("api_key_trade_permission_required_for_manual_orders"));
   assert.equal(noTrade.calls.some((call) => call.path === "/api/v3/brokerage/orders"), false);
+});
+
+test("manual BUY submission sends base_size for LIMIT GTC and preserves the quote budget", async () => {
+  const env = makeEnv({
+    COINBASE_ADVANCED_ORDER_ENABLED: "true",
+    COINBASE_ADVANCED_MAX_OPEN_ORDERS: "1",
+    COINBASE_ADVANCED_MAX_DAILY_ORDERS: "1"
+  });
+  const fake = mockApi(env, {
+    permissions: { can_view: true, can_trade: true, can_transfer: false, portfolio_uuid: "portfolio-test" }
+  });
+  const result = await submitCoinbaseAdvancedLimitBuy(env, {
+    productId: "BTC-USD", quoteSize: "5.00", baseSize: "0.00005",
+    limitPrice: "99000.00", commissionTotal: "0.10",
+    previewId: "preview-test-123", clientOrderId: "12345678-1234-1234-1234-123456789012"
+  }, { fetchImpl: fake.fetchImpl });
+  assert.equal(result.status, "PENDING");
+  assert.equal(result.base_size, "0.00005");
+  const createCall = fake.calls.find((call) => call.path === "/api/v3/brokerage/orders");
+  assert.ok(createCall);
+  assert.deepEqual(createCall.body.order_configuration.limit_limit_gtc, {
+    base_size: "0.00005", limit_price: "99000.00", post_only: true
+  });
+  assert.equal(Object.hasOwn(createCall.body.order_configuration.limit_limit_gtc, "quote_size"), false);
 });
 
 test("account pagination uncertainty and incomplete provider data fail closed", async () => {
