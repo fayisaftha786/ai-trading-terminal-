@@ -695,7 +695,7 @@ test("open-order preflight sends one Coinbase status filter per request and dedu
   assert.equal(result.exchange_open_order_count, 1);
   assert.equal(result.exchange_order_pagination_complete, true);
   const orderCalls = fake.calls.filter((call) =>
-    call.path.endsWith("/orders/historical/batch") && !call.path.includes("start_date=")
+    call.path.includes("/orders/historical/batch?") && !call.path.includes("start_date=")
   );
   assert.equal(orderCalls.length, 6);
   for (const call of orderCalls) {
