@@ -78,6 +78,7 @@ def main() -> int:
     android_build_script = (ROOT / "build-android-debug.sh").read_text(encoding="utf-8")
     local_paper_activity = (ROOT / "android/app/src/main/java/app/aitradingterminal/LocalPaperActivity.java").read_text(encoding="utf-8")
     paper_auto_limits = (ROOT / "android/app/src/main/java/app/aitradingterminal/PaperAutoLimits.java").read_text(encoding="utf-8")
+    render_source = (ROOT / "render.yaml").read_text(encoding="utf-8")
     frontend_source = "\n".join(
         path.read_text(encoding="utf-8").lower()
         for path in (ROOT / "static").glob("*")
@@ -105,7 +106,16 @@ def main() -> int:
         "android_gradle_project_present": (ROOT / "android/settings.gradle.kts").is_file() and (ROOT / "android/app/build.gradle.kts").is_file(),
         "android_native_shell_present": (ROOT / "android/app/src/main/java/app/aitradingterminal/MainActivity.java").is_file(),
         "android_cleartext_disabled_for_all_hosts": "android:usesCleartextTraffic=\"false\"" in android_manifest and "cleartextTrafficPermitted=\"false\"" in (ROOT / "android/app/src/main/res/xml/network_security_config.xml").read_text(),
-        "android_https_cloud_backend_allowlist_present": 'return "https".equals(scheme)' in android_activity and 'your-service.onrender.com' in android_activity and 'http".equals(scheme)' not in android_activity,
+        "android_https_cloud_backend_default_points_to_production_worker": (
+            'private static final String DEFAULT_CLOUD_URL = "https://ai-trading-terminal.fayisaftha786.workers.dev";' in android_activity
+            and 'url.setText(initial == null || initial.trim().isEmpty() ? DEFAULT_CLOUD_URL : initial);' in android_activity
+            and 'return "https".equals(scheme)' in android_activity
+        ),
+        "render_exchange_config_is_coinbase_usd_only": (
+            re.search(r"- key: CEX_EXCHANGE\s+value: coinbase(?:\s|$)", render_source, re.MULTILINE) is not None
+            and "value: BTC/USD,ETH/USD,SOL/USD" in render_source
+            and "binance" not in render_source.lower()
+        ),
         "android_no_webview_file_access": "setAllowFileAccess(false)" in android_activity and "setAllowContentAccess(false)" in android_activity,
         "android_ci_apk_job_present": f"{apk_stem}-apk" in android_workflow and "build-android-debug.sh" in android_workflow and "upload-artifact@v7" in android_workflow,
         "android_ci_uploads_apk_checksum_and_metadata": all(name in android_workflow for name in (f"{apk_stem}.apk", f"{apk_stem}.apk.sha256", f"AITradingTerminal-Android-v{android_version}-build-info.txt")),
