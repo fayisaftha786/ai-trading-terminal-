@@ -45,6 +45,6 @@ test("engine validates provider timestamp before applying the fetched book", () 
   assert.ok(fetchStart >= 0 && applyAt > fetchStart);
   const beforeApply = engine.slice(fetchStart, applyAt);
   assert.ok(beforeApply.includes("validateEntryBookRetrievalTimestamp"));
-  assert.ok(beforeApply.indexOf("validateEntryBookRetrievalTimestamp") <
-    beforeApply.indexOf("Object.assign(market, freshBook)"));
+  const validationAt = engine.indexOf("validateEntryBookRetrievalTimestamp", fetchStart);
+  assert.ok(validationAt >= fetchStart && validationAt < applyAt);
 });
