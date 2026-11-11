@@ -21,6 +21,7 @@ import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { buildLiveFillReport } from "./live-ledger.js";
 import { isFreshShadowBook, simulateShadowMarketBuy, simulateShadowMarketSell } from "./shadow-trading.js";
+import { buildAiWorkforceRun, evaluateAiWorkforceRiskVeto, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
 import { buildAiWorkforceRun, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
@@ -1734,6 +1735,10 @@ export class TradingEngine extends DurableObject {
         healthy_scheduled_scan_streak: healthyScheduledScanStreak
       });
     }
+    const riskGuardianDecision = evaluateAiWorkforceRiskVeto({
+      marketFeed, marketContext, portfolio, settings: state,
+      paperMode: normalizeTradingMode(state.trading_mode) === "demo"
+    });
     const entryResults = [];
     let entryStatus = state.halted ? "halted" : "disabled";
     if (watchdogDecision.halt) {
@@ -1746,6 +1751,12 @@ export class TradingEngine extends DurableObject {
         entryResults.push({
           reason: "market_universe_data_incomplete",
           unhealthy_markets: marketFeed.issues
+        });
+      } else if (riskGuardianDecision.veto) {
+        entryStatus = "blocked";
+        entryResults.push({
+          reason: "risk_guardian_veto",
+          veto_reasons: riskGuardianDecision.vetoReasons
         });
       } else {
         const reasons = this.entryBlockReasons(portfolio, risk, Date.now());
@@ -1830,7 +1841,9 @@ export class TradingEngine extends DurableObject {
     const workforce = buildAiWorkforceRun({
       markets, marketFeed, marketContext, portfolio: updatedPortfolio,
       settings: state, runtime, entryStatus, source,
-      startedAtMs: nowMs, nowMs: Date.now()
+      startedAtMs: nowMs, nowMs: Date.now(),
+      paperMode: normalizeTradingMode(state.trading_mode) === "demo",
+      riskGuardianDecision
     });
     this.setState("workforce", workforce);
     this.logEvent("market_scan", "Market scan cycle completed", {

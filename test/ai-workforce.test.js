@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   buildAiWorkforceRun,
+  evaluateAiWorkforceRiskVeto,
   markAiWorkforceFailure,
   readAiWorkforceStatus
 } from "../src/ai-workforce.js";
@@ -62,10 +63,37 @@ function context(overrides = {}) {
     entryStatus: "no_qualified_signal",
     source: "scheduled",
     nowMs: now,
+    paperMode: true,
     ...overrides
   };
 }
 
+test("Risk Guardian requires the full market, eligible regime, marked portfolio and DEMO mode", () => {
+  const safe = evaluateAiWorkforceRiskVeto({
+    marketFeed: { healthy: true },
+    marketContext: { allowed_for_long_entries: true },
+    portfolio: { unmarked_positions: 0 },
+    settings: { halted: false },
+    paperMode: true
+  });
+  assert.equal(safe.veto, false);
+
+  const unsafe = evaluateAiWorkforceRiskVeto({
+    marketFeed: { healthy: false },
+    marketContext: { allowed_for_long_entries: false },
+    portfolio: { unmarked_positions: 1 },
+    settings: { halted: true },
+    paperMode: false
+  });
+  assert.equal(unsafe.veto, true);
+  assert.deepEqual(unsafe.vetoReasons, [
+    "complete_market_universe",
+    "market_context_allows_long_entries",
+    "owner_stop_not_active",
+    "portfolio_fully_marked",
+    "paper_only_mode"
+  ]);
+});
 test("workforce creates twelve unique deterministic roles and never authorizes execution", () => {
   const result = buildAiWorkforceRun(context());
   assert.equal(result.worker_count, 12);
@@ -157,10 +185,15 @@ test("missing workforce data starts honestly in waiting state and stale runs are
   assert.equal(stale.freshness_status, "stale");
 });
 
-test("production engine persists the workforce and serves it from the existing dashboard API", () => {
+test("production engine enforces Risk Guardian before Paper entries and serves workforce status", () => {
   assert.match(engineSource, /buildAiWorkforceRun/);
-  assert.match(engineSource, /this\.setState\("workforce", workforce\)/);
-  assert.match(engineSource, /readAiWorkforceStatus\(this\.getState\("workforce"\), runtime, nowMs\)/);
+  assert.match(engineSource, /evaluateAiWorkforceRiskVeto/);
+  const riskGateIndex = engineSource.indexOf("const riskGuardianDecision = evaluateAiWorkforceRiskVeto");
+  const openTradeIndex = engineSource.indexOf("this.openPaperTrade(candidates[0]");
+  assert.ok(riskGateIndex >= 0 && openTradeIndex > riskGateIndex, "Risk Guardian must run before a new Paper entry");
+  assert.ok(engineSource.includes("else if (riskGuardianDecision.veto)"));
+  assert.match(engineSource, /this\\.setState\\("workforce", workforce\\)/);
+  assert.match(engineSource, /readAiWorkforceStatus/);
   assert.match(engineSource, /markAiWorkforceFailure/);
   assert.match(dashboardSource, /id="aiWorkforcePanel"/);
   assert.match(dashboardSource, /renderAiWorkforce\(data\.workforce\)/);

@@ -47,6 +47,24 @@ function asSummary(rows, selector, empty = "No verified market data is available
   return values.length ? values.slice(0, 3).join(" · ") : empty;
 }
 
+export function evaluateAiWorkforceRiskVeto({
+  marketFeed = {},
+  marketContext = {},
+  portfolio = {},
+  settings = {},
+  paperMode = false
+} = {}) {
+  const checks = {
+    complete_market_universe: marketFeed.healthy === true,
+    market_context_allows_long_entries: marketContext.allowed_for_long_entries === true,
+    owner_stop_not_active: settings.halted !== true,
+    portfolio_fully_marked: safeNumber(portfolio.unmarked_positions) === 0,
+    paper_only_mode: paperMode === true
+  };
+  const vetoReasons = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name);
+  return { veto: vetoReasons.length > 0, vetoReasons, checks };
+}
+
 function candidateFor(market, id) {
   const candidates = market?.strategy_research?.candidates;
   return Array.isArray(candidates)
@@ -64,7 +82,9 @@ export function buildAiWorkforceRun({
   entryStatus = "not_evaluated",
   source = "scheduled",
   nowMs = Date.now(),
-  startedAtMs = nowMs
+  startedAtMs = nowMs,
+  paperMode = false,
+  riskGuardianDecision = null
 } = {}) {
   const rows = Array.isArray(markets) ? markets : [];
   const live = liveMarkets(rows);
@@ -221,15 +241,12 @@ export function buildAiWorkforceRun({
     { lastRunAtMs: nowMs }
   ));
 
-  const checks = {
-    complete_market_universe: marketFeed.healthy === true,
-    market_context_allows_long_entries: marketContext.allowed_for_long_entries === true,
-    owner_stop_not_active: settings.halted !== true,
-    no_unmarked_positions: Number(portfolio.unmarked_positions || 0) === 0,
-    paper_only_mode: true
-  };
-  const vetoReasons = Object.entries(checks).filter(([, passed]) => !passed).map(([name]) => name);
-  const veto = vetoReasons.length > 0;
+  const guardianDecision = riskGuardianDecision || evaluateAiWorkforceRiskVeto({
+    marketFeed, marketContext, portfolio, settings, paperMode
+  });
+  const checks = guardianDecision.checks;
+  const vetoReasons = guardianDecision.vetoReasons;
+  const veto = guardianDecision.veto;
   workers.push(makeWorker(
     "risk_guardian",
     veto ? "blocked" : "complete",
