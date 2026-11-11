@@ -389,7 +389,7 @@ $("chartTimeframe").addEventListener("change",loadMarketChart);
 $("chartReload").addEventListener("click",loadMarketChart);
 document.addEventListener("visibilitychange",()=>{
   if(document.hidden)closeMarketFeed();
-  else if(token){connectMarketFeed();updateTickerFreshness();}
+  else if(token){connectMarketFeed();updateTickerFreshness();refresh();}
 });
 setInterval(updateTickerFreshness,3000);
 
@@ -938,7 +938,7 @@ async function runTournament(){
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
 $("runTournament").addEventListener("click",runTournament);
-async function boot(){try{const healthResponse=await fetch("/api/worker/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Worker health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},60000);
+async function boot(){try{const healthResponse=await fetch("/api/worker/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Worker health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},30000);
 setInterval(()=>{
   if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true){
     runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
