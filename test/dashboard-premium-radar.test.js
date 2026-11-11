@@ -50,3 +50,9 @@ test("market radar surfaces the cost-adjusted take-profit and net reward-risk fo
   assert.match(html, /dynamic_take_profit_pct/);
   assert.match(html, /round_trip_cost_bps/);
 });
+
+test("dashboard distinguishes expected between-scan book expiry from provider outage", () => {
+  assert.match(html, /BETWEEN-SCAN EXPIRED/);
+  assert.match(html, /each 90s entry scan fetches a fresh Coinbase order book/);
+  assert.match(html, /This is not a provider failure/);
+});
