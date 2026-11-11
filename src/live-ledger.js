@@ -2,7 +2,7 @@ const SCALE = 10n ** 18n;
 
 function decimal(value) {
   const raw = String(value ?? "");
-  if (raw.length > 48 || !/^(?:0|[1-9]\\d*)(?:\\.\\d+)?$/.test(raw)) return null;
+  if (raw.length > 48 || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(raw)) return null;
   const [whole, fraction = ""] = raw.split(".");
   if (fraction.length > 18) return null;
   return BigInt(whole) * SCALE + BigInt((fraction + "0".repeat(18)).slice(0, 18));
