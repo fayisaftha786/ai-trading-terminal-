@@ -61,12 +61,16 @@ test("freshness guard rejects stale, non-Coinbase or incomplete books", () => {
   const market = {
     status: "live",
     market_data_provider: "coinbase_exchange",
-    book_retrieved_at_ms: now - 1000,
-    book_asks: [[101, 1]],
-    book_bids: [[100, 1]]
+    shadow_book_source: "coinbase_advanced_trade_public",
+    shadow_book_retrieved_at_ms: now - 1000,
+    shadow_book_event_time_ms: now - 1200,
+    shadow_book_asks: [[101, 1]],
+    shadow_book_bids: [[100, 1]]
   };
   assert.equal(isFreshShadowBook(market, now), true);
-  assert.equal(isFreshShadowBook({ ...market, book_retrieved_at_ms: now - 16000 }, now), false);
+  assert.equal(isFreshShadowBook({ ...market, shadow_book_retrieved_at_ms: now - 16000 }, now), false);
+  assert.equal(isFreshShadowBook({ ...market, shadow_book_event_time_ms: now - 16000 }, now), false);
   assert.equal(isFreshShadowBook({ ...market, market_data_provider: "bitstamp_spot" }, now), false);
-  assert.equal(isFreshShadowBook({ ...market, book_asks: [] }, now), false);
+  assert.equal(isFreshShadowBook({ ...market, shadow_book_source: "coinbase_exchange" }, now), false);
+  assert.equal(isFreshShadowBook({ ...market, shadow_book_asks: [] }, now), false);
 });
