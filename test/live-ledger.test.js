@@ -41,3 +41,15 @@ test("unmatched sells and mixed quote currencies never produce a global P&L", ()
   assert.equal(mixed.totals.mixed_quote_currencies, true);
   assert.equal(mixed.totals.realized_pnl_quote, null);
 });
+
+test("partial FIFO sells retain the original lot unit cost", () => {
+  const report = buildLiveFillReport([
+    fill(),
+    fill({ entry_id: "sell-1", side: "SELL", trade_time: "2026-11-10T11:00:00.000Z",
+      price: "11000", size: "0.004", commission: "0.44" }),
+    fill({ entry_id: "sell-2", side: "SELL", trade_time: "2026-11-10T12:00:00.000Z",
+      price: "12000", size: "0.003", commission: "0.36" })
+  ]);
+  assert.equal(report.products[0].realized_pnl_quote, "8.5");
+  assert.equal(report.products[0].remaining_bot_inventory_base, "0.003");
+});
