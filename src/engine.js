@@ -597,10 +597,12 @@ export class TradingEngine extends DurableObject {
       if (request.method === "GET" && url.pathname === "/api/live/fills/report") {
         // Only the app's locally recorded Coinbase order IDs are represented
         // in live_fills. Unknown fee currencies and unmatched sells fail closed.
+        const fillCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills").toArray()[0]?.count || 0);
         const rows = this.sql.exec(
           "SELECT entry_id,product_id,side,trade_time,price,size,commission,size_in_quote,raw_json " +
           "FROM live_fills ORDER BY trade_time ASC,entry_id ASC LIMIT 5000"
         ).toArray();
+        const truncated = fillCount > rows.length;
         const fills = rows.map((row) => {
           let audit = {};
           try { audit = JSON.parse(row.raw_json || "{}"); } catch { audit = {}; }
@@ -617,12 +619,18 @@ export class TradingEngine extends DurableObject {
           };
         });
         const report = buildLiveFillReport(fills, Date.now());
+        if (truncated) {
+          report.totals.accounting_complete = false;
+          report.totals.realized_pnl_quote = null;
+          report.totals.status = "incomplete_fill_history_truncated";
+        }
         return jsonResponse({
           ...report,
           source: "coinbase_fills_for_locally_recorded_orders",
           rows_scanned: rows.length,
+          total_rows_available: fillCount,
           row_limit: 5000,
-          truncated: rows.length === 5000
+          truncated
         });
       }
       if (request.method === "POST" && url.pathname === "/api/live/cancel") {
