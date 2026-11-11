@@ -3032,8 +3032,14 @@ export class TradingEngine extends DurableObject {
     if (this.getOpenShadowTrades().length) return finish("position_open", "one_global_shadow_position_limit");
     if (marketFeed?.healthy !== true) return finish("blocked", "complete_fresh_coinbase_market_universe_required");
     const candidates = [];
+    const diagnostics = [];
+    let freshAdvancedBooks = 0;
     for (const market of (Array.isArray(markets) ? markets : [])) {
-      if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) continue;
+      if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) {
+        diagnostics.push({ symbol: market?.symbol || null, eligible: false, reason: "advanced_trade_book_stale_or_missing" });
+        continue;
+      }
+      freshAdvancedBooks += 1;
       const shadowQuote = {
         ...market,
         bid: Number(market.shadow_bid),
@@ -3057,10 +3063,22 @@ export class TradingEngine extends DurableObject {
         stopLossPct: risk.stop_loss_pct,
         minimumNetRewardRisk: 1
       });
+      diagnostics.push({
+        symbol: market.symbol,
+        eligible: assessment.eligible === true,
+        reason: String(assessment.reason || (assessment.eligible ? "eligible" : "strategy_filters_not_aligned")).slice(0, 100)
+      });
       if (assessment.eligible) candidates.push({ market, assessment });
     }
+    runtime.last_entry_diagnostics = diagnostics.slice(0, PRODUCTS.length);
+    runtime.last_fresh_advanced_book_count = freshAdvancedBooks;
+    if (!candidates.length) {
+      const onlyBooksMissing = freshAdvancedBooks === 0;
+      return finish("no_qualified_signal", onlyBooksMissing
+        ? "advanced_trade_books_stale_or_missing"
+        : "strategy_entry_gate_blocked", null);
+    }
     candidates.sort((a,b) => Number(b.market.primary?.score || 0) - Number(a.market.primary?.score || 0));
-    if (!candidates.length) return finish("no_qualified_signal_or_advanced_book_unavailable", "shadow_strategy_gate_not_eligible");
     const { market, assessment } = candidates[0];
     const previous = this.sql.exec(
       "SELECT opened_at_ms,closed_at_ms,status FROM shadow_trades WHERE symbol=? ORDER BY id DESC LIMIT 1",
