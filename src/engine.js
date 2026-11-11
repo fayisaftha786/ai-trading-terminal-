@@ -19,6 +19,7 @@ import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakePr
 import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
+import { buildLiveFillReport } from "./live-ledger.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
@@ -591,6 +592,45 @@ export class TradingEngine extends DurableObject {
           has_more: count > limit,
           mode: "exchange_reported_fill_ledger",
           pnl_status: "not_calculated_fee_currency_and_fifo_accounting_not_yet_verified"
+        });
+      }
+      if (request.method === "GET" && url.pathname === "/api/live/fills/report") {
+        // Only the app's locally recorded Coinbase order IDs are represented
+        // in live_fills. Unknown fee currencies and unmatched sells fail closed.
+        const fillCount = Number(this.sql.exec("SELECT COUNT(*) AS count FROM live_fills").toArray()[0]?.count || 0);
+        const rows = this.sql.exec(
+          "SELECT entry_id,product_id,side,trade_time,price,size,commission,size_in_quote,raw_json " +
+          "FROM live_fills ORDER BY trade_time ASC,entry_id ASC LIMIT 5000"
+        ).toArray();
+        const truncated = fillCount > rows.length;
+        const fills = rows.map((row) => {
+          let audit = {};
+          try { audit = JSON.parse(row.raw_json || "{}"); } catch { audit = {}; }
+          return {
+            entry_id: row.entry_id,
+            product_id: row.product_id,
+            side: row.side,
+            trade_time: row.trade_time,
+            price: row.price,
+            size: row.size,
+            size_in_quote: Number(row.size_in_quote) === 1,
+            commission: row.commission,
+            commission_currency: audit.commission_currency || null
+          };
+        });
+        const report = buildLiveFillReport(fills, Date.now());
+        if (truncated) {
+          report.totals.accounting_complete = false;
+          report.totals.realized_pnl_quote = null;
+          report.totals.status = "incomplete_fill_history_truncated";
+        }
+        return jsonResponse({
+          ...report,
+          source: "coinbase_fills_for_locally_recorded_orders",
+          rows_scanned: rows.length,
+          total_rows_available: fillCount,
+          row_limit: 5000,
+          truncated
         });
       }
       if (request.method === "POST" && url.pathname === "/api/live/cancel") {
