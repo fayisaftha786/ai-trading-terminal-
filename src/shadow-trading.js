@@ -98,12 +98,18 @@ export function simulateShadowMarketSell({ baseQuantity, bids, feeBpsPerSide = 0
 }
 
 export function isFreshShadowBook(market, nowMs = Date.now(), maxAgeMs = 15000) {
-  if (!market || market.status !== "live" || market.market_data_provider !== "coinbase_exchange") return false;
-  const retrievedAt = Number(market.book_retrieved_at_ms);
-  if (!Number.isFinite(retrievedAt) || retrievedAt <= 0 || !Number.isFinite(nowMs) ||
-      !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return false;
-  const age = nowMs - retrievedAt;
-  if (age < -1000 || age > maxAgeMs) return false;
-  return normalizeShadowBookLevels(market.book_asks, "asks") !== null &&
-    normalizeShadowBookLevels(market.book_bids, "bids") !== null;
+  if (!market || market.status !== "live" ||
+      market.market_data_provider !== "coinbase_exchange" ||
+      market.shadow_book_source !== "coinbase_advanced_trade_public") return false;
+  const retrievedAt = Number(market.shadow_book_retrieved_at_ms);
+  const eventAt = Number(market.shadow_book_event_time_ms);
+  if (!Number.isFinite(retrievedAt) || retrievedAt <= 0 ||
+      !Number.isFinite(eventAt) || eventAt <= 0 ||
+      !Number.isFinite(nowMs) || !Number.isFinite(maxAgeMs) || maxAgeMs <= 0) return false;
+  const retrievalAge = nowMs - retrievedAt;
+  const eventAge = nowMs - eventAt;
+  if (retrievalAge < -1000 || retrievalAge > maxAgeMs ||
+      eventAge < -1000 || eventAge > maxAgeMs) return false;
+  return normalizeShadowBookLevels(market.shadow_book_asks, "asks") !== null &&
+    normalizeShadowBookLevels(market.shadow_book_bids, "bids") !== null;
 }
