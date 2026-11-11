@@ -241,6 +241,14 @@ try {
   assert.equal(liveFillLedger.mode, "exchange_reported_fill_ledger");
   assert.equal(liveFillLedger.pnl_status, "not_calculated_fee_currency_and_fifo_accounting_not_yet_verified");
 
+  const liveFifoReportResponse = await request("/api/live/fills/report", { headers: auth });
+  assert.equal(liveFifoReportResponse.status, 200, "read-only verified FIFO report must load without exchange credentials");
+  const liveFifoReport = await liveFifoReportResponse.json();
+  assert.equal(liveFifoReport.mode, "coinbase_exchange_verified_bot_fills");
+  assert.equal(liveFifoReport.totals.status, "no_fills_yet");
+  assert.equal(liveFifoReport.totals.accounting_complete, false);
+  assert.equal(liveFifoReport.totals.realized_pnl_quote, null, "empty fill history must never display a fabricated profit");
+
   const blockedLiveExecute = await request("/api/live/execute", {
     method: "POST", headers: auth,
     body: JSON.stringify({ confirm_real_order: true, client_order_id: "12345678-1234-1234-1234-123456789012", preview_token: "00000000-0000-4000-8000-000000000000", product_id: "BTC-USD", quote_size: "10" })
