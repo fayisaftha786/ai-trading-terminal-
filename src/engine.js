@@ -22,7 +22,6 @@ import { createServerLivePreview, consumeServerLivePreview } from "./live-order-
 import { buildLiveFillReport } from "./live-ledger.js";
 import { isFreshShadowBook, simulateShadowMarketBuy, simulateShadowMarketSell } from "./shadow-trading.js";
 import { buildAiWorkforceRun, evaluateAiWorkforceRiskVeto, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
-import { buildAiWorkforceRun, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
