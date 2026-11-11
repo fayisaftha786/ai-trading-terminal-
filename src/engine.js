@@ -1576,17 +1576,37 @@ export class TradingEngine extends DurableObject {
     // before exits/entry gates. Bitstamp is permitted here only for an open
     // legacy position recorded with that provider; new candidates remain Coinbase-only.
     const finalBookRequestState = createCoinbaseRequestState();
+    let entryBookSuccessCount = 0;
+    let entryBookFailedCount = 0;
+    let entryBookSkippedCount = 0;
+    let lastEntryBookRetrievedAtMs = null;
     for (const market of markets) {
-      if (market.status !== "live") continue;
+      if (market.status !== "live") {
+        market.entry_scan_book_status = "market_unavailable";
+        market.entry_scan_book_retrieved_at_ms = null;
+        entryBookSkippedCount += 1;
+        continue;
+      }
       const provider = market.market_data_provider;
       const legacyBitstampExit = provider === "bitstamp_spot" &&
         legacyBitstampExitSymbols.has(market.symbol);
-      if (provider !== "coinbase_exchange" && !legacyBitstampExit) continue;
+      if (provider !== "coinbase_exchange" && !legacyBitstampExit) {
+        market.entry_scan_book_status = "provider_not_allowed";
+        market.entry_scan_book_retrieved_at_ms = null;
+        entryBookSkippedCount += 1;
+        continue;
+      }
       try {
         const freshBook = provider === "coinbase_exchange"
           ? await fetchCoinbaseOrderBook(market.product, finalBookRequestState)
           : await fetchBitstampOrderBook(market.product, finalBookRequestState);
         Object.assign(market, freshBook);
+        const entryBookRetrievedAtMs = Number(freshBook.book_retrieved_at_ms);
+        market.entry_scan_book_retrieved_at_ms = Number.isFinite(entryBookRetrievedAtMs) && entryBookRetrievedAtMs > 0
+          ? entryBookRetrievedAtMs : Date.now();
+        market.entry_scan_book_status = "available";
+        lastEntryBookRetrievedAtMs = Math.max(lastEntryBookRetrievedAtMs || 0, market.entry_scan_book_retrieved_at_ms);
+        entryBookSuccessCount += 1;
         market.spread_bps = ((freshBook.ask - freshBook.bid) / ((freshBook.ask + freshBook.bid) / 2)) * 10000;
         market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "available", book_error: null,
@@ -1595,6 +1615,9 @@ export class TradingEngine extends DurableObject {
             : "final_post_candle_legacy_bitstamp_exchange_timestamp",
           book_sequence_available: freshBook.book_sequence !== null };
       } catch (error) {
+        market.entry_scan_book_status = "provider_error";
+        market.entry_scan_book_retrieved_at_ms = null;
+        entryBookFailedCount += 1;
         market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "provider_error",
           book_error: String(error?.code || error?.message || "order_book_refresh_failed").slice(0, 100) };
@@ -1767,6 +1790,12 @@ export class TradingEngine extends DurableObject {
       expected_market_count: marketFeed.expected_market_count,
       consecutive_unhealthy_scheduled_scans: consecutiveUnhealthyScans,
       source, schedule_minutes: SCAN_INTERVAL_MS / 60000, last_entry_status: entryStatus,
+      last_entry_scan_book_at_ms: lastEntryBookRetrievedAtMs,
+      last_entry_scan_book_status: entryBookFailedCount > 0 || entryBookSkippedCount > 0
+        ? entryBookSuccessCount > 0 ? "partial" : "unavailable" : "completed",
+      last_entry_scan_book_success_count: entryBookSuccessCount,
+      last_entry_scan_book_failed_count: entryBookFailedCount,
+      last_entry_scan_book_skipped_count: entryBookSkippedCount,
       last_entry_results: entryResults.slice(0, 10),
       market_feed_issues: marketFeed.issues.slice(0, 12),
       provider_failures: markets.filter((market) => market.status !== "live").map((market) => ({
@@ -2806,6 +2835,16 @@ export class TradingEngine extends DurableObject {
       schedule_minutes: SCAN_INTERVAL_MS / 60000,
       schedule_seconds: SCAN_INTERVAL_MS / 1000,
       book_refresh_seconds: BOOK_REFRESH_INTERVAL_MS / 1000,
+      entry_scan_book_refresh_scope: "fresh_order_book_fetched_during_full_scan_before_entry_gates",
+      last_entry_scan_book_at_ms: Number(runtime.last_entry_scan_book_at_ms) > 0
+        ? Number(runtime.last_entry_scan_book_at_ms) : null,
+      last_entry_scan_book_age_ms: Number(runtime.last_entry_scan_book_at_ms) > 0
+        ? Math.max(0, nowMs - Number(runtime.last_entry_scan_book_at_ms)) : null,
+      last_entry_scan_book_status: runtime.last_entry_scan_book_status || "not_started",
+      last_entry_scan_book_success_count: Number(runtime.last_entry_scan_book_success_count) || 0,
+      last_entry_scan_book_failed_count: Number(runtime.last_entry_scan_book_failed_count) || 0,
+      last_entry_scan_book_skipped_count: Number(runtime.last_entry_scan_book_skipped_count) || 0,
+      position_exit_book_refresh_scope: "independent_l2_refresh_for_open_position_exit_marks_only",
       last_book_refresh_at_ms: Number(runtime.last_book_refresh_at_ms) > 0
         ? Number(runtime.last_book_refresh_at_ms) : null,
       last_book_refresh_age_ms: Number(runtime.last_book_refresh_at_ms) > 0
