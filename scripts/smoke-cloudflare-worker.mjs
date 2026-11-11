@@ -101,6 +101,8 @@ try {
   assert.equal(anonymousDashboard.status, 401, "dashboard must require authentication");
   const anonymousResearch = await request("/api/research/history");
   assert.equal(anonymousResearch.status, 401, "research archive must require authentication");
+  const anonymousShadow = await request("/api/shadow");
+  assert.equal(anonymousShadow.status, 401, "shadow ledger must require owner authentication");
   const anonymousTournament = await request("/api/research/tournament");
   assert.equal(anonymousTournament.status, 401, "strategy tournament must require authentication");
 
@@ -137,6 +139,11 @@ try {
   );
   const dashboard = JSON.parse(dashboardBody);
   assert.equal(dashboard.mode, "paper_only");
+  assert.equal(dashboard.shadow.exchange_orders_submitted, false, "shadow mode must never submit exchange orders");
+  assert.equal(dashboard.shadow.data_source.includes("Coinbase Advanced Trade public L2"), true);
+  assert.equal(dashboard.shadow.total_trades, 0);
+  assert.equal(dashboard.shadow.open_trades, 0);
+  assert.equal(dashboard.shadow.enabled, true, "shadow simulation defaults ON independently of PAPER auto-entry");
   assert.equal(dashboard.settings.auto_paper_enabled, false, "automatic PAPER entries must start OFF until the owner explicitly opts in");
   assert.equal(dashboard.settings.paper_initial_capital_usd, 10, "fresh paper profile must use ten dollars");
   assert.equal(dashboard.settings.risk.max_open_positions, 1, "only one sequential paper position is allowed");
@@ -183,6 +190,26 @@ try {
   });
   assert.equal(returnDemoMode.status, 200);
   assert.equal((await returnDemoMode.json()).paper_auto_enabled, false, "switching back to DEMO must not silently re-enable auto-entry");
+
+  const shadowStatusResponse = await request("/api/shadow", { headers: auth });
+  assert.equal(shadowStatusResponse.status, 200, "owner shadow status API must load");
+  const shadowStatus = await shadowStatusResponse.json();
+  assert.equal(shadowStatus.exchange_orders_submitted, false);
+  assert.equal(shadowStatus.enabled, true);
+  const pauseShadow = await request("/api/shadow", {
+    method: "PUT", headers: auth, body: JSON.stringify({ enabled: false })
+  });
+  assert.equal(pauseShadow.status, 200);
+  assert.equal((await pauseShadow.json()).enabled, false);
+  const resumeShadow = await request("/api/shadow", {
+    method: "PUT", headers: auth, body: JSON.stringify({ enabled: true })
+  });
+  assert.equal(resumeShadow.status, 200);
+  assert.equal((await resumeShadow.json()).enabled, true);
+  const invalidShadowToggle = await request("/api/shadow", {
+    method: "PUT", headers: auth, body: JSON.stringify({ enabled: "true" })
+  });
+  assert.equal(invalidShadowToggle.status, 400, "shadow toggle must require a boolean");
 
   const liveStatusResponse = await request("/api/live/status", { headers: auth });
   assert.equal(liveStatusResponse.status, 200, "owner live-readiness API must load");
@@ -302,6 +329,9 @@ try {
   assert.match(staticHtml, /last_scan_error/);
   assert.match(staticHtml, /next_alarm_in_ms/);
   assert.match(staticHtml, /id="researchHistory"/);
+  assert.match(staticHtml, /id="shadowPanel"/);
+  assert.match(staticHtml, /Coinbase Advanced Trade L2 depth simulation/);
+  assert.match(staticHtml, /last_shadow_book_refresh_status/);
   assert.match(staticHtml, /REAL MODE · Coinbase Advanced account connection/);
   assert.match(staticHtml, /id="demoModeBtn"/);
   assert.match(staticHtml, /id="realModeBtn"/);
