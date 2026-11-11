@@ -21,6 +21,7 @@ import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { buildLiveFillReport } from "./live-ledger.js";
 import { isFreshShadowBook, simulateShadowMarketBuy, simulateShadowMarketSell } from "./shadow-trading.js";
+import { buildAiWorkforceRun, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
@@ -1302,6 +1303,7 @@ export class TradingEngine extends DurableObject {
         });
       }
       this.setState("runtime", runtime);
+      this.setState("workforce", markAiWorkforceFailure(this.getState("workforce"), error, nowMs));
       this.logEvent("scheduled_scan_error", "Scheduled market scan failed", {
         error: runtime.last_scan_error,
         consecutive_unhealthy_scheduled_scans: runtime.consecutive_unhealthy_scheduled_scans
@@ -1825,6 +1827,12 @@ export class TradingEngine extends DurableObject {
     };
     const runtime = mergeScanRuntimeState(previousRuntime, runtimeUpdate, source);
     this.setState("runtime", runtime);
+    const workforce = buildAiWorkforceRun({
+      markets, marketFeed, marketContext, portfolio: updatedPortfolio,
+      settings: state, runtime, entryStatus, source,
+      startedAtMs: nowMs, nowMs: Date.now()
+    });
+    this.setState("workforce", workforce);
     this.logEvent("market_scan", "Market scan cycle completed", {
       source, cycle_key: cycleKey, successful_markets: markets.filter((market) => market.status === "live").length,
       healthy_markets: marketFeed.healthy_market_count, expected_markets: marketFeed.expected_market_count,
@@ -1844,7 +1852,7 @@ export class TradingEngine extends DurableObject {
         data_quality: market.data_quality || null, error: market.error || null
       })),
       paper_exits: exits.length, paper_entries: entryResults, entry_status: entryStatus,
-      market_feed: marketFeed, market_context: marketContext,
+      market_feed: marketFeed, market_context: marketContext, workforce,
       portfolio: updatedPortfolio, live_trading_enabled: false
     };
   }
@@ -3231,7 +3239,9 @@ export class TradingEngine extends DurableObject {
       portfolio, markets, trades, open_positions: openPositions,
       shadow: this.shadowStatus(),
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
-      runtime, analytics, research_history: this.researchHistorySummary(),
+      runtime,
+      workforce: readAiWorkforceStatus(this.getState("workforce"), runtime, nowMs),
+      analytics, research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
     };
   }
