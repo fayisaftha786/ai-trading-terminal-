@@ -1600,10 +1600,15 @@ export class TradingEngine extends DurableObject {
         const freshBook = provider === "coinbase_exchange"
           ? await fetchCoinbaseOrderBook(market.product, finalBookRequestState)
           : await fetchBitstampOrderBook(market.product, finalBookRequestState);
-        Object.assign(market, freshBook);
         const entryBookRetrievedAtMs = Number(freshBook.book_retrieved_at_ms);
-        market.entry_scan_book_retrieved_at_ms = Number.isFinite(entryBookRetrievedAtMs) && entryBookRetrievedAtMs > 0
-          ? entryBookRetrievedAtMs : Date.now();
+        if (!Number.isFinite(entryBookRetrievedAtMs) || entryBookRetrievedAtMs <= 0 ||
+            entryBookRetrievedAtMs > Date.now()) {
+          const invalidTimestamp = new Error("invalid_entry_book_retrieval_timestamp");
+          invalidTimestamp.code = "invalid_entry_book_retrieval_timestamp";
+          throw invalidTimestamp;
+        }
+        Object.assign(market, freshBook);
+        market.entry_scan_book_retrieved_at_ms = entryBookRetrievedAtMs;
         market.entry_scan_book_status = "available";
         lastEntryBookRetrievedAtMs = Math.max(lastEntryBookRetrievedAtMs || 0, market.entry_scan_book_retrieved_at_ms);
         entryBookSuccessCount += 1;
