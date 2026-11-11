@@ -81,3 +81,12 @@ test("Coinbase dashboard exposes exchange-side daily order cap diagnostics", () 
   assert.match(dashboard, /exchange_daily_order_count/);
   assert.match(dashboard, /exchange_daily_order_pagination_complete/);
 });
+
+test("Coinbase connection center exposes a read-only verified FIFO P&L report", () => {
+  assert.match(dashboard, /id="liveFillReportButton"/);
+  assert.match(dashboard, /api\("\\/api\\/live\\/fills\\/report"\)/);
+  assert.match(dashboard, /id="liveFillReport"/);
+  assert.match(dashboard, /Unknown fee currency/);
+  assert.match(dashboard, /manual\/external Coinbase trades are excluded/);
+  assert.match(dashboard, /total P&L withheld until the accounting inputs are complete/);
+});
