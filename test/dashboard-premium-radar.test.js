@@ -58,7 +58,7 @@ test("dashboard distinguishes expected between-scan book expiry from provider ou
 });
 
 test("mode summary and automation panel use the same dashboard automation snapshot", () => {
-  assert.match(html, /const a=data\\.automation\\|\\|\\{\\};const modeIsDemo=/);
-  assert.match(html, /const paperState=a\\.halted\\?/);
-  assert.match(html, /\\$\\("modeNote"\\)\\.textContent=modeIsDemo\\?/);
+  assert.ok(html.includes("const a=data.automation||{};const modeIsDemo="));
+  assert.ok(html.includes("const paperState=a.halted?"));
+  assert.ok(html.includes('$("modeNote").textContent=modeIsDemo?'));
 });
