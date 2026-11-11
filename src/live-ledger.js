@@ -117,7 +117,7 @@ export function buildLiveFillReport(input, syncedAtMs = null) {
     accounting_complete: !state.fee_currency_unknown && state.unmatched_sell_base === 0n
   }));
   const currencies = [...new Set(rows.map((row) => row.quote_currency))];
-  const complete = invalid.length === 0 && rows.every((row) => row.accounting_complete);
+  const complete = invalid.length === 0 && rows.length > 0 && rows.every((row) => row.accounting_complete);
   const mixed = currencies.length > 1;
   const total = rows.reduce((sum, row) => sum + (decimal(row.realized_pnl_quote) || 0n), 0n);
   return {
@@ -132,7 +132,7 @@ export function buildLiveFillReport(input, syncedAtMs = null) {
       mixed_quote_currencies: mixed,
       realized_pnl_quote: complete && !mixed ? Number(format(total)) : null,
       accounting_complete: complete && !mixed,
-      status: complete && !mixed ? "complete" : "incomplete_requires_review"
+      status: rows.length === 0 ? "no_fills_yet" : complete && !mixed ? "complete" : "incomplete_requires_review"
     }
   };
 }
