@@ -349,6 +349,9 @@ async function advancedRequest(env, method, path, body, fetchImpl) {
         ? "coinbase_advanced_rate_limited"
         : "coinbase_advanced_provider_rejected_request";
     error.status = status;
+    // Keep only the numeric HTTP status for safe diagnostics; never retain
+    // or return Coinbase response bodies, which may contain sensitive data.
+    error.providerHttpStatus = response.status;
     throw error;
   }
   return payload;
@@ -571,10 +574,19 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
     };
   }
   let feeSummary = { status: "not_checked", reason: "view_permission_not_verified" };
+  let preflightStage = "key_permissions";
+  let verifiedPermissions = null;
+  let portfolioUuid = null;
   try {
     const permissions = await advancedRequest(
       env, "GET", API_PREFIX + "/key_permissions", undefined, fetchImpl
     );
+    verifiedPermissions = {
+      can_view: permissions.can_view === true,
+      can_trade: permissions.can_trade === true,
+      can_transfer: permissions.can_transfer === true
+    };
+    portfolioUuid = typeof permissions.portfolio_uuid === "string" ? permissions.portfolio_uuid : null;
     const blockers = [...staticStatus.blockers];
     if (permissions.can_view === true) {
       // This is a read-only Advanced Trade endpoint requiring View permission.
@@ -601,9 +613,11 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
         }, fee_summary: feeSummary, balances: {}, products: [], blockers: [...new Set(blockers)]
       };
     }
+    preflightStage = "accounts";
     const accounts = await loadAccounts(env, fetchImpl);
     const products = [];
     for (const productId of config.allowedProducts) {
+      preflightStage = "product:" + productId;
       const payload = await advancedRequest(
         env, "GET", API_PREFIX + "/products/" + encodeURIComponent(productId), undefined, fetchImpl
       );
@@ -628,7 +642,9 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       });
       if (!check.eligible) blockers.push(...check.blockers.map((item) => productId + ":" + item));
     }
+    preflightStage = "open_orders";
     const exchangeOrders = await loadActiveExchangeOrders(env, fetchImpl);
+    preflightStage = "daily_orders";
     const dailyExchangeOrders = await loadTodayExchangeOrders(env, fetchImpl);
     if (config.maxOpenOrders < 1 || exchangeOrders.orders.length >= config.maxOpenOrders) {
       blockers.push("maximum_open_exchange_orders_reached");
@@ -690,7 +706,15 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
     return {
       ...staticStatus,
       status: "provider_check_failed",
-      permissions: null,
+      // Preserve only the permission booleans already verified by the
+      // read-only key_permissions call. This makes partial preflight failures
+      // diagnosable without exposing credentials or provider response bodies.
+      permissions: verifiedPermissions,
+      portfolio_uuid: portfolioUuid,
+      preflight_stage: preflightStage,
+      provider_http_status: Number.isInteger(error?.providerHttpStatus) &&
+        error.providerHttpStatus >= 400 && error.providerHttpStatus <= 599
+        ? error.providerHttpStatus : null,
       fee_summary: feeSummary,
       balances: {},
       products: [],
