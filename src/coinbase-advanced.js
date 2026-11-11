@@ -349,8 +349,18 @@ async function advancedRequest(env, method, path, body, fetchImpl) {
         ? "coinbase_advanced_rate_limited"
         : "coinbase_advanced_provider_rejected_request";
     error.status = status;
-    // Keep only the numeric HTTP status for safe diagnostics; never retain
-    // or return Coinbase response bodies, which may contain sensitive data.
+    // Preserve only a strict enum-like provider error identifier. Never retain
+    // arbitrary response text, request URLs, account data, or credential data.
+    const providerCodeCandidates = [
+      payload?.error,
+      payload?.code,
+      payload?.error_response?.error,
+      payload?.error_response?.code
+    ];
+    const providerCode = providerCodeCandidates.find((value) =>
+      typeof value === "string" && /^[A-Z][A-Z0-9_]{1,79}$/.test(value)
+    );
+    if (providerCode) error.providerErrorCode = providerCode;
     error.providerHttpStatus = response.status;
     throw error;
   }
@@ -465,9 +475,15 @@ async function loadActiveExchangeOrders(env, fetchImpl) {
       query.set("product_type", "SPOT");
       query.set("order_status", statusFilter);
       if (cursor) query.set("cursor", cursor);
-      const payload = await advancedRequest(
-        env, "GET", API_PREFIX + "/orders/historical/batch?" + query.toString(), undefined, fetchImpl
-      );
+      let payload;
+      try {
+        payload = await advancedRequest(
+          env, "GET", API_PREFIX + "/orders/historical/batch?" + query.toString(), undefined, fetchImpl
+        );
+      } catch (error) {
+        if (error && typeof error === "object") error.requestedOrderStatus = statusFilter;
+        throw error;
+      }
       if (!Array.isArray(payload.orders)) throw new Error("coinbase_advanced_open_orders_response_invalid");
       totalPages += 1;
       for (const order of payload.orders) {
@@ -724,7 +740,10 @@ export async function preflightCoinbaseAdvanced(env = {}, { fetchImpl = fetch } 
       // diagnosable without exposing credentials or provider response bodies.
       permissions: verifiedPermissions,
       portfolio_uuid: portfolioUuid,
-      preflight_stage: preflightStage,
+      preflight_stage: error?.requestedOrderStatus
+        ? preflightStage + ":" + error.requestedOrderStatus : preflightStage,
+      provider_error_code: typeof error?.providerErrorCode === "string" &&
+        /^[A-Z][A-Z0-9_]{1,79}$/.test(error.providerErrorCode) ? error.providerErrorCode : null,
       provider_http_status: Number.isInteger(error?.providerHttpStatus) &&
         error.providerHttpStatus >= 400 && error.providerHttpStatus <= 599
         ? error.providerHttpStatus : null,

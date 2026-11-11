@@ -769,6 +769,27 @@ test("daily exchange order count fails closed on incomplete pagination", async (
 });
 
 
+test("preflight exposes only sanitized Coinbase error enums and the exact active-order status filter", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env);
+  const fetchImpl = async (url, options) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname.endsWith("/orders/historical/batch") && !parsed.searchParams.has("start_date")) {
+      return Response.json({
+        error: "INVALID_ARGUMENT",
+        error_details: "raw provider text must never be returned"
+      }, { status: 400 });
+    }
+    return fake.fetchImpl(url, options);
+  };
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl });
+  assert.equal(result.status, "provider_check_failed");
+  assert.equal(result.preflight_stage, "open_orders:PENDING");
+  assert.equal(result.provider_http_status, 400);
+  assert.equal(result.provider_error_code, "INVALID_ARGUMENT");
+  assert.equal(JSON.stringify(result).includes("raw provider text"), false);
+});
+
 test("preflight reports the failing read-only stage and retains verified permission booleans safely", async () => {
   const env = makeEnv();
   const fake = mockApi(env);
