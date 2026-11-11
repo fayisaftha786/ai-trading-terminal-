@@ -309,7 +309,7 @@ try {
   assert.match(staticHtml, /id="marketChart"/);
   assert.match(staticHtml, /display-only market prices/);
   assert.match(staticHtml, /api\/market\/candles/);
-  assert.match(staticHtml, /Automatic PAPER entries start OFF/);
+  assert.match(staticHtml, /Automatic PAPER entries are OFF by default/);
   assert.match(staticHtml, /id="capitalReview"/);
   assert.match(staticHtml, /manually confirmed SPOT LIMIT GTC post-only BUY\/SELL orders/);
   assert.match(staticHtml, /id="liveSide"/);
