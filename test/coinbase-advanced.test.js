@@ -107,7 +107,7 @@ function mockApi(env, { permissions, accounts, product, preview, createdOrder, f
     assert.equal(checked.valid, true, "request JWT must be a valid CDP signature");
     assert.equal(checked.header.alg, env._testJwtAlgorithm || "ES256");
     assert.equal(checked.header.kid, env.COINBASE_ADVANCED_API_KEY);
-    assert.equal(checked.payload.uri, options.method + " api.coinbase.com" + parsed.pathname + parsed.search);
+    assert.equal(checked.payload.uri, options.method + " api.coinbase.com" + parsed.pathname, "CDP JWT uri must omit URL query parameters");
     calls.push({ method: options.method, path: parsed.pathname + parsed.search, body: options.body ? JSON.parse(options.body) : null });
     if (parsed.pathname.endsWith("/key_permissions")) {
       return Response.json(permissions || { can_view: true, can_trade: false, can_transfer: false, portfolio_uuid: "portfolio-test" });
@@ -220,7 +220,7 @@ test("guarded order switch remains closed by default and requires strict daily/o
   assert.equal(invalid.max_daily_orders, null);
 });
 
-test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact request URI", async () => {
+test("ES256 JWT from Coinbase SEC1 EC private key signs endpoint path without query parameters", async () => {
   const env = makeEnv();
   const jwt = await createCoinbaseAdvancedJwt({
     apiKey: env.COINBASE_ADVANCED_API_KEY,
@@ -236,7 +236,7 @@ test("ES256 JWT from Coinbase SEC1 EC private key verifies and binds exact reque
   assert.equal(verified.payload.sub, env.COINBASE_ADVANCED_API_KEY);
   assert.equal(verified.payload.nbf, 1800000000);
   assert.equal(verified.payload.exp - verified.payload.nbf, 90);
-  assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions?sample=1");
+  assert.equal(verified.payload.uri, "GET api.coinbase.com/api/v3/brokerage/key_permissions");
 });
 
 test("current Coinbase Ed25519 CDP key completes read-only preflight and verifies SPOT fee tier", async () => {

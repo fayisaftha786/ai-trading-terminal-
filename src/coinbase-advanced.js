@@ -151,7 +151,14 @@ export async function createCoinbaseAdvancedJwt({
     throw new Error("coinbase_jwt_request_invalid");
   }
   const imported = await importPrivateKey(privateKeyPem);
-  const uri = String(method).toUpperCase() + " " + API_HOST + path;
+  // Coinbase CDP REST JWTs bind the HTTP method, host and endpoint path.
+  // Query parameters remain on the actual HTTP request URL, but are not
+  // part of the signed uri claim (matches the official Coinbase SDK).
+  const signedPath = path.split(/[?#]/, 1)[0];
+  if (!signedPath.startsWith(API_PREFIX + "/")) {
+    throw new Error("coinbase_jwt_request_path_invalid");
+  }
+  const uri = String(method).toUpperCase() + " " + API_HOST + signedPath;
   const header = { alg: imported.jwtAlgorithm, kid: apiKey, nonce: nonce(), typ: "JWT" };
   const payload = {
     iss: "cdp",
