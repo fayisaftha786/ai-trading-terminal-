@@ -223,7 +223,8 @@ export async function fetchCoinbaseAdvancedOrderBook(product, requestState = DEF
     book_event_time_ms: eventTimeMs,
     book_age_ms: Math.max(0, eventAgeMs),
     book_sequence: null,
-    book_source: "coinbase_advanced_trade_public"
+    book_source: "coinbase_advanced_trade_public",
+    last: Number(response?.last)
   };
 }
 
