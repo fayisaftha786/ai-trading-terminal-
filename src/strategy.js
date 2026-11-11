@@ -1,3 +1,5 @@
+import { calculateDynamicTakeProfit } from "./paper-automation-profile.js";
+
 // Cloudflare deployment strategy: deterministic research-only PAPER signals.
 
 /**
@@ -679,7 +681,16 @@ export function assessCrossMarketContext(
     : { ...base, status: "verified", mode: "CAUTIOUS", reason: "btc_or_market_breadth_not_confirmed" };
 }
 
-export function assessCandidate({ market, primary, higher, nowMs, costs, marketContext }) {
+export function assessCandidate({
+  market,
+  primary,
+  higher,
+  nowMs,
+  costs,
+  marketContext,
+  stopLossPct = 1,
+  minimumNetRewardRisk = 1
+}) {
   const reject = (reason) => ({ eligible: false, reason, ...(marketContext ? { market_context_mode: marketContext.mode || "BLOCKED" } : {}) });
   if (market?.status !== "live") return reject("market_data_unavailable");
   if (market?.market_data_provider !== "coinbase_exchange") return reject("coinbase_market_data_required_for_new_entry");
@@ -736,5 +747,24 @@ export function assessCandidate({ market, primary, higher, nowMs, costs, marketC
       primary.plus_di14 <= primary.minus_di14) return reject("volatility_or_momentum_guard");
   const roundTripBps = 2 * (costs.feeBpsPerSide + costs.slippageBps) + spreadBps;
   if (primary.atr_pct * 100 < roundTripBps * 2.5) return reject("expected_range_below_cost_multiple");
-  return { eligible: true, reason: "eligible", market_context_mode: marketContext?.mode || "not_checked", spread_bps: Number(spreadBps.toFixed(2)), round_trip_cost_bps: Number(roundTripBps.toFixed(2)) };
+  const dynamicTarget = calculateDynamicTakeProfit({
+    atrPct: primary.atr_pct,
+    roundTripCostBps: roundTripBps,
+    stopLossPct,
+    minimumNetRewardRisk
+  });
+  if (!dynamicTarget.ok) return reject(dynamicTarget.reason);
+  return {
+    eligible: true,
+    reason: "eligible",
+    market_context_mode: marketContext?.mode || "not_checked",
+    spread_bps: Number(spreadBps.toFixed(2)),
+    round_trip_cost_bps: Number(roundTripBps.toFixed(2)),
+    dynamic_take_profit_pct: dynamicTarget.target_pct,
+    dynamic_take_profit_bps: dynamicTarget.target_bps,
+    estimated_net_reward_bps: dynamicTarget.estimated_net_reward_bps,
+    estimated_net_risk_bps: dynamicTarget.estimated_net_risk_bps,
+    net_reward_risk_ratio: dynamicTarget.net_reward_risk_ratio,
+    minimum_net_reward_risk: dynamicTarget.minimum_net_reward_risk
+  };
 }
