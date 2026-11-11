@@ -32,3 +32,15 @@ test("scheduled scan runtime stores entry-book success, failure, and skip counts
   assert.ok(engine.includes("last_entry_scan_book_failed_count: entryBookFailedCount"));
   assert.ok(engine.includes("last_entry_scan_book_skipped_count: entryBookSkippedCount"));
 });
+
+test("invalid entry-book retrieval timestamps fail closed instead of receiving a fabricated fresh timestamp", () => {
+  const start = engine.indexOf("const finalBookRequestState = createCoinbaseRequestState();");
+  const end = engine.indexOf("market.entry_scan_book_status = \"available\"", start);
+  const section = engine.slice(start, end);
+  assert.ok(section.includes("invalid_entry_book_retrieval_timestamp"));
+  assert.match(section, /!Number\.isFinite\(entryBookRetrievedAtMs\)/);
+  assert.match(section, /entryBookRetrievedAtMs <= 0/);
+  assert.match(section, /entryBookRetrievedAtMs > Date\.now\(\)/);
+  assert.ok(section.indexOf("throw invalidTimestamp") < section.indexOf("Object.assign(market, freshBook)"));
+  assert.doesNotMatch(section, /entryBookRetrievedAtMs : Date\.now\(\)/);
+});
