@@ -8,7 +8,7 @@ const INVALID_TIMESTAMP_CODE = "invalid_entry_book_retrieval_timestamp";
 export function validateEntryBookRetrievalTimestamp(value, nowMs = Date.now()) {
   const raw = typeof value === "number"
     ? value
-    : typeof value === "string" && /^\\d+$/.test(value.trim())
+    : typeof value === "string" && /^\d+$/.test(value.trim())
       ? Number(value.trim())
       : Number.NaN;
   if (!Number.isSafeInteger(raw) || raw <= 0 ||
