@@ -21,6 +21,7 @@ import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { buildLiveFillReport } from "./live-ledger.js";
 import { isFreshShadowBook, simulateShadowMarketBuy, simulateShadowMarketSell } from "./shadow-trading.js";
+import { validateEntryBookRetrievalTimestamp } from "./entry-book-validation.js";
 import { buildAiWorkforceRun, evaluateAiWorkforceRiskVeto, markAiWorkforceFailure, readAiWorkforceStatus } from "./ai-workforce.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
@@ -1599,7 +1600,9 @@ export class TradingEngine extends DurableObject {
         const freshBook = provider === "coinbase_exchange"
           ? await fetchCoinbaseOrderBook(market.product, finalBookRequestState)
           : await fetchBitstampOrderBook(market.product, finalBookRequestState);
+        const entryBookRetrievedAtMs = validateEntryBookRetrievalTimestamp(freshBook?.book_retrieved_at_ms);
         Object.assign(market, freshBook);
+        market.book_retrieved_at_ms = entryBookRetrievedAtMs;
         market.spread_bps = ((freshBook.ask - freshBook.bid) / ((freshBook.ask + freshBook.bid) / 2)) * 10000;
         market.data_quality = { ...(market.data_quality || {}), book_provider: provider,
           book_status: "available", book_error: null,
