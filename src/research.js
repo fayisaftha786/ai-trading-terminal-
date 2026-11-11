@@ -72,7 +72,8 @@ export function buildResearchHistorySummary(records, nowMs = Date.now()) {
     const storedQuality = String(record.last_quality_status || "not_started");
     // "clean" describes the validity of the last accepted batch, not the
     // completeness of the retained archive. Surface known gaps explicitly.
-    const quality = aligned && storedQuality === "clean" && retainedMissing > 0
+    const hasKnownGaps = retainedMissing > 0 || Number(record.cumulative_missing_intervals || 0) > 0;
+    const quality = aligned && storedQuality === "clean" && hasKnownGaps
       ? "valid_rows_archive_incomplete"
       : aligned ? storedQuality : "archive_integrity_error";
     return {
