@@ -38,6 +38,6 @@ test("scheduled scan records counts for successful, failed and skipped order boo
 });
 
 test("dashboard makes the fresh per-scan entry book distinct from 10-second exit L2 refresh", () => {
-  assert.match(html, /Entry-scan book \\(fresh per full scan\\)/);
-  assert.match(html, /Position-exit L2 refresh \\(10s while positions are open\\)/);
+  assert.match(html, /Entry-scan book \(fresh per full scan\)/);
+  assert.match(html, /Position-exit L2 refresh \(10s while positions are open\)/);
 });
