@@ -20,6 +20,7 @@ import { normalizeTradingMode, selectTradingMode } from "./trading-mode.js";
 import { summarizePaperExecution } from "./execution-audit.js";
 import { createServerLivePreview, consumeServerLivePreview } from "./live-order-authorization.js";
 import { buildLiveFillReport } from "./live-ledger.js";
+import { isFreshShadowBook, simulateShadowMarketBuy, simulateShadowMarketSell } from "./shadow-trading.js";
 
 const SCAN_INTERVAL_MS = 90 * 1000; // Strategy/candle scan cadence.
 const BOOK_REFRESH_INTERVAL_MS = 10 * 1000;
@@ -64,6 +65,10 @@ export class TradingEngine extends DurableObject {
       "CREATE TABLE IF NOT EXISTS trades(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),entry_price REAL NOT NULL,quantity REAL NOT NULL,notional_usd REAL NOT NULL,stop_loss REAL NOT NULL,take_profit REAL NOT NULL,fees_usd REAL NOT NULL DEFAULT 0,pnl_usd REAL,opened_at_ms INTEGER NOT NULL,closed_at_ms INTEGER,exit_price REAL,metadata_json TEXT NOT NULL DEFAULT '{}')",
       "CREATE UNIQUE INDEX IF NOT EXISTS idx_one_open_trade_per_symbol ON trades(symbol) WHERE status='OPEN'",
       "CREATE INDEX IF NOT EXISTS idx_trades_opened_at ON trades(opened_at_ms)",
+      "CREATE TABLE IF NOT EXISTS shadow_trades(id INTEGER PRIMARY KEY AUTOINCREMENT,symbol TEXT NOT NULL,status TEXT NOT NULL CHECK(status IN ('OPEN','CLOSED')),entry_price REAL NOT NULL,quantity REAL NOT NULL,remaining_quantity REAL NOT NULL,entry_quote_usd REAL NOT NULL,entry_fee_usd REAL NOT NULL,exit_proceeds_usd REAL NOT NULL DEFAULT 0,exit_fees_usd REAL NOT NULL DEFAULT 0,exit_price REAL,net_pnl_usd REAL,stop_loss REAL NOT NULL,take_profit REAL NOT NULL,opened_at_ms INTEGER NOT NULL,closed_at_ms INTEGER,metadata_json TEXT NOT NULL DEFAULT '{}')",
+      "CREATE UNIQUE INDEX IF NOT EXISTS idx_shadow_one_open_per_symbol ON shadow_trades(symbol) WHERE status='OPEN'",
+      "CREATE INDEX IF NOT EXISTS idx_shadow_trades_opened_at ON shadow_trades(opened_at_ms)",
+      "CREATE INDEX IF NOT EXISTS idx_shadow_trades_closed_at ON shadow_trades(closed_at_ms DESC,id DESC) WHERE status='CLOSED'",
       "CREATE INDEX IF NOT EXISTS idx_trades_closed_at_id_pnl ON trades(closed_at_ms DESC,id DESC,pnl_usd) WHERE status='CLOSED'",
       "CREATE TABLE IF NOT EXISTS trade_ledger_summary(id INTEGER PRIMARY KEY CHECK(id=1),total_trades INTEGER NOT NULL,closed_trades INTEGER NOT NULL,realized_pnl_usd REAL NOT NULL)",
       "CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,event_type TEXT NOT NULL,message TEXT NOT NULL,created_at_ms INTEGER NOT NULL,metadata_json TEXT NOT NULL DEFAULT '{}')",
@@ -117,7 +122,7 @@ export class TradingEngine extends DurableObject {
     this.sql.exec(
       "INSERT OR IGNORE INTO app_state(key,value_json) VALUES(?,?)",
       "settings",
-      JSON.stringify({ initial_capital_usd: 10, trading_mode: "demo", risk: DEFAULT_RISK, auto_paper_enabled: false, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
+      JSON.stringify({ initial_capital_usd: 10, trading_mode: "demo", risk: DEFAULT_RISK, auto_paper_enabled: false, shadow_enabled: true, shadow_initial_capital_usd: 100, halted: false, halt_reason: null, peak_equity_usd: 10, paper_automation_profile_version: PAPER_AUTOMATION_PROFILE.version, capital_setup_required: false })
     );
     const currentSettings = this.getState("settings");
     // The profile migration only needs to know whether any historical trade exists.
@@ -129,6 +134,8 @@ export class TradingEngine extends DurableObject {
       ).toArray().length > 0;
       migratedSettings = migratePaperAutomationSettings(currentSettings, hasHistoricalTrades ? 1 : 0);
     }
+    if (typeof migratedSettings.shadow_enabled !== "boolean") migratedSettings.shadow_enabled = true;
+    if (!Number.isFinite(Number(migratedSettings.shadow_initial_capital_usd)) || Number(migratedSettings.shadow_initial_capital_usd) < 10) migratedSettings.shadow_initial_capital_usd = 100;
     if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
       this.setState("settings", migratedSettings);
     }
@@ -851,6 +858,17 @@ export class TradingEngine extends DurableObject {
       }
       if (request.method === "GET" && url.pathname === "/api/analytics") {
         return jsonResponse(this.tradeAnalytics());
+      }
+      if (request.method === "GET" && url.pathname === "/api/shadow") return jsonResponse(this.shadowStatus());
+      if (request.method === "PUT" && url.pathname === "/api/shadow") {
+        let body;
+        try { body = await request.json(); } catch { return jsonResponse({ error: "invalid_json" }, 400); }
+        if (typeof body.enabled !== "boolean") return jsonResponse({ error: "enabled_boolean_required" }, 400);
+        const settings = this.getState("settings") || {};
+        settings.shadow_enabled = body.enabled;
+        this.setState("settings", settings);
+        this.logEvent("shadow_setting", body.enabled ? "Shadow entries enabled; no exchange orders are submitted" : "Shadow entries disabled; open shadow exits remain monitored");
+        return jsonResponse(this.shadowStatus());
       }
       if (request.method === "GET" && url.pathname === "/api/research/history") {
         return jsonResponse({ mode: "read_only", history: this.researchHistorySummary() });
@@ -1620,6 +1638,7 @@ export class TradingEngine extends DurableObject {
     const markBySymbol = this.buildPositionLockedBidMarks(markets, Date.now());
 
     const exits = this.monitorExits(markBySymbol, risk, Date.now());
+    this.runShadowCycle(markets, marketFeed, risk, Date.now());
     const portfolio = this.portfolio(markBySymbol, risk, Date.now());
     const previousRuntime = this.getState("runtime") || {};
     const consecutiveUnhealthyScans = advanceUnhealthyScanStreak(
@@ -2139,6 +2158,8 @@ export class TradingEngine extends DurableObject {
           ? book.book_event_time_ms : null;
         market.book_age_ms = Math.max(0, Date.now() - retrievedAtMs);
         market.book_sequence = Number.isSafeInteger(book.book_sequence) ? book.book_sequence : null;
+        market.book_bids = Array.isArray(book.book_bids) ? book.book_bids : null;
+        market.book_asks = Array.isArray(book.book_asks) ? book.book_asks : null;
         market.quote_received_at_ms = retrievedAtMs;
         market.spread_bps = ((book.ask - book.bid) / ((book.ask + book.bid) / 2)) * 10000;
         market.data_quality = {
@@ -2161,6 +2182,8 @@ export class TradingEngine extends DurableObject {
           : status === 429 ? "provider_rate_limited"
             : status >= 500 ? "provider_server_error"
               : "order_book_refresh_failed";
+        market.book_bids = null;
+        market.book_asks = null;
         market.data_quality = {
           ...(market.data_quality || {}),
           book_provider: provider,
@@ -2190,6 +2213,7 @@ export class TradingEngine extends DurableObject {
     const openTrades = this.getOpenTrades();
     const markBySymbol = this.buildPositionLockedBidMarks(refreshedMarkets, Date.now(), openTrades);
     const exits = this.monitorExits(markBySymbol, risk, Date.now(), openTrades);
+    const shadowExits = this.monitorShadowExits(refreshedMarkets, risk, Date.now());
     // Do not run full-ledger SUM/COUNT risk aggregates on every 10s book refresh.
     // Portfolio/risk baselines are recomputed on the 90s strategy scan and dashboard.
 
@@ -2205,7 +2229,8 @@ export class TradingEngine extends DurableObject {
         symbol: issue.symbol,
         reason: String(issue.reason || "unknown").slice(0, 100)
       })),
-      last_book_refresh_exits: exits
+      last_book_refresh_exits: exits,
+      last_book_refresh_shadow_exits: shadowExits
     };
 
     return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits, telemetry };
@@ -2822,6 +2847,207 @@ export class TradingEngine extends DurableObject {
     };
   }
 
+
+  getOpenShadowTrades() {
+    return this.sql.exec("SELECT * FROM shadow_trades WHERE status='OPEN' ORDER BY opened_at_ms ASC").toArray()
+      .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
+  }
+
+  getShadowTrades(limit = 30) {
+    const safe = Math.max(1, Math.min(100, Math.trunc(Number(limit) || 30)));
+    return this.sql.exec("SELECT * FROM shadow_trades ORDER BY id DESC LIMIT ?", safe).toArray()
+      .map((row) => ({ ...row, metadata: this.parseJson(row.metadata_json) }));
+  }
+
+  monitorShadowExits(markets, risk, nowMs = Date.now()) {
+    const bySymbol = new Map((Array.isArray(markets) ? markets : []).map((m) => [m?.symbol, m]));
+    let closed = 0;
+    let partial = 0;
+    for (const trade of this.getOpenShadowTrades()) {
+      const market = bySymbol.get(trade.symbol);
+      if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) continue;
+      const meta = trade.metadata || {};
+      const reason = meta.exit_triggered ? (meta.exit_trigger_reason || "exit_retry")
+        : Number(market.bid) <= Number(trade.stop_loss) ? "stop_loss"
+        : Number(market.bid) >= Number(trade.take_profit) ? "take_profit" : null;
+      if (!reason) continue;
+      const fill = simulateShadowMarketSell({
+        baseQuantity: Number(trade.remaining_quantity), bids: market.book_bids,
+        feeBpsPerSide: Number(meta.fee_bps_per_side ?? risk.fee_bps_per_side),
+        extraSlippageBps: Number(meta.extra_slippage_bps ?? risk.slippage_bps)
+      });
+      if (!fill.ok || fill.filled_base_quantity <= 0) continue;
+      const remaining = Math.max(0, Number(trade.remaining_quantity) - fill.filled_base_quantity);
+      const done = remaining <= Math.max(1e-12, Number(trade.quantity) * 1e-9);
+      const proceeds = Number(trade.exit_proceeds_usd || 0) + fill.effective_quote_usd;
+      const fees = Number(trade.exit_fees_usd || 0) + fill.fee_usd;
+      const sold = Number(trade.quantity) - remaining;
+      const exitPrice = sold > 0 ? proceeds / sold : null;
+      const nextMeta = { ...meta, exit_triggered: true, exit_trigger_reason: reason,
+        exit_attempts: Number(meta.exit_attempts || 0) + 1,
+        last_exit_fill: { status: fill.status, quantity: fill.filled_base_quantity,
+          quote_usd: fill.effective_quote_usd, fee_usd: fill.fee_usd,
+          vwap: fill.effective_vwap_price, levels_used: fill.levels_used } };
+      const pnl = done ? proceeds - Number(trade.entry_quote_usd) - Number(trade.entry_fee_usd) - fees : null;
+      this.sql.exec(
+        "UPDATE shadow_trades SET remaining_quantity=?,exit_proceeds_usd=?,exit_fees_usd=?,exit_price=?,status=?,closed_at_ms=?,net_pnl_usd=?,metadata_json=? WHERE id=? AND status='OPEN'",
+        remaining, proceeds, fees, exitPrice, done ? "CLOSED" : "OPEN",
+        done ? nowMs : null, pnl, JSON.stringify(nextMeta), trade.id
+      );
+      if (done) {
+        closed += 1;
+        this.logEvent("shadow_exit", "Shadow position closed against fresh Coinbase L2 bids", {
+          shadow_trade_id: trade.id, symbol: trade.symbol, reason, exit_price: exitPrice, net_pnl_usd: pnl
+        });
+      } else {
+        partial += 1;
+        if (Number(meta.exit_attempts || 0) === 0) this.logEvent("shadow_partial_exit",
+          "Shadow exit partially filled; remaining quantity retained for fresh-book retry",
+          { shadow_trade_id: trade.id, symbol: trade.symbol, remaining_quantity: remaining });
+      }
+    }
+    return { closed, partial };
+  }
+
+  runShadowCycle(markets, marketFeed, risk, nowMs = Date.now()) {
+    const exits = this.monitorShadowExits(markets, risk, nowMs);
+    const settings = this.getState("settings") || {};
+    const runtime = { ...(this.getState("shadow_runtime") || {}), last_scan_at_ms: nowMs,
+      last_exit_count: exits.closed, last_partial_exit_count: exits.partial };
+    const finish = (status, reason, symbol = null) => {
+      runtime.last_entry_status = status; runtime.last_entry_reason = reason;
+      runtime.last_entry_symbol = symbol; this.setState("shadow_runtime", runtime); return runtime;
+    };
+    if (settings.shadow_enabled === false) return finish("disabled", "owner_disabled_shadow_entries");
+    if (this.getOpenShadowTrades().length) return finish("position_open", "one_global_shadow_position_limit");
+    if (marketFeed?.healthy !== true) return finish("blocked", "complete_fresh_coinbase_market_universe_required");
+    const candidates = (Array.isArray(markets) ? markets : [])
+      .filter((m) => m?.entry_gate?.eligible === true)
+      .sort((a,b) => Number(b.primary?.score || 0) - Number(a.primary?.score || 0));
+    if (!candidates.length) return finish("no_qualified_signal", "strategy_entry_gate_not_eligible");
+    const market = candidates[0];
+    if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) return finish("blocked", "fresh_coinbase_l2_book_required", market.symbol);
+    const previous = this.sql.exec(
+      "SELECT opened_at_ms,closed_at_ms,status FROM shadow_trades WHERE symbol=? ORDER BY id DESC LIMIT 1",
+      market.symbol
+    ).toArray()[0];
+    if (previous) {
+      const lastAt = Number(previous.status === "OPEN" ? previous.opened_at_ms : previous.closed_at_ms);
+      if (previous.status === "OPEN") return finish("position_open", "symbol_already_open", market.symbol);
+      if (Number.isFinite(lastAt) && nowMs - lastAt < 4 * 60 * 60 * 1000) return finish("blocked", "symbol_cooldown_4h", market.symbol);
+    }
+    const initial = Number(settings.shadow_initial_capital_usd) || 100;
+    const day = new Date(nowMs); day.setUTCHours(0,0,0,0);
+    const dayStats = this.sql.exec(
+      "SELECT COUNT(*) AS trades,COALESCE(SUM(net_pnl_usd),0) AS pnl FROM shadow_trades WHERE opened_at_ms>=?",
+      day.getTime()
+    ).toArray()[0] || {};
+    if (Number(dayStats.trades || 0) >= PAPER_AUTOMATION_PROFILE.max_cycles_per_day) return finish("blocked", "shadow_daily_trade_cap", market.symbol);
+    const dailyLoss = initial * Math.max(0.1, Number(risk.max_daily_loss_pct) || 1) / 100;
+    if (Number(dayStats.pnl || 0) <= -dailyLoss) return finish("blocked", "shadow_daily_loss_limit", market.symbol);
+    const cap = Number(risk.max_position_notional_usd) > 0 ? Number(risk.max_position_notional_usd) : 8;
+    const budget = Math.min(10, cap, initial * 0.1);
+    if (budget < 2) return finish("blocked", "shadow_position_budget_below_minimum", market.symbol);
+    const fee = Math.max(0, Number(risk.fee_bps_per_side) || 0);
+    const slip = Math.max(0, Number(risk.slippage_bps) || 0);
+    const fill = simulateShadowMarketBuy({ quoteBudget: budget, asks: market.book_asks,
+      feeBpsPerSide: fee, extraSlippageBps: slip });
+    if (!fill.ok || fill.effective_quote_usd < 2) return finish("blocked", fill.reason || "shadow_fill_below_minimum", market.symbol);
+    const stopPct = Math.min(10, Math.max(0.25, Number(risk.stop_loss_pct) || 1));
+    const targetPct = Number(market.entry_gate.dynamic_take_profit_pct);
+    if (!Number.isFinite(targetPct) || targetPct <= 0) return finish("blocked", "shadow_take_profit_unavailable", market.symbol);
+    const stop = fill.effective_vwap_price * (1 - stopPct / 100);
+    const target = fill.effective_vwap_price * (1 + targetPct / 100);
+    const meta = {
+      execution_model: "coinbase_visible_l2_book_walk_v1", market_data_provider: "coinbase_exchange",
+      entry_score: Number(market.primary?.score) || 0,
+      market_context_mode: market.market_context?.mode || market.entry_gate.market_context_mode || null,
+      entry_gate_reason: market.entry_gate.reason || "eligible",
+      entry_spread_bps: Number(market.entry_gate.spread_bps) || 0,
+      entry_book_retrieved_at_ms: Number(market.book_retrieved_at_ms),
+      entry_book_sequence: market.book_sequence ?? null,
+      entry_fill_status: fill.status, entry_fill_ratio: fill.fill_ratio,
+      entry_levels_used: fill.levels_used, entry_book_vwap_price: fill.book_vwap_price,
+      entry_effective_vwap_price: fill.effective_vwap_price,
+      fee_bps_per_side: fee, extra_slippage_bps: slip,
+      stop_loss_pct: stopPct, take_profit_pct: targetPct
+    };
+    const created = this.sql.exec(
+      "INSERT INTO shadow_trades(symbol,status,entry_price,quantity,remaining_quantity,entry_quote_usd,entry_fee_usd,stop_loss,take_profit,opened_at_ms,metadata_json) VALUES(?,'OPEN',?,?,?,?,?,?,?,?,?) RETURNING id",
+      market.symbol, fill.effective_vwap_price, fill.filled_base_quantity, fill.filled_base_quantity,
+      fill.effective_quote_usd, fill.fee_usd, stop, target, nowMs, JSON.stringify(meta)
+    ).toArray();
+    const id = Number(created[0]?.id);
+    if (!Number.isSafeInteger(id) || id < 1) return finish("blocked", "shadow_ledger_insert_failed", market.symbol);
+    this.logEvent("shadow_entry", "Shadow BUY simulated from fresh Coinbase L2 asks; no exchange order submitted", {
+      shadow_trade_id: id, symbol: market.symbol, fill_status: fill.status, fill_ratio: fill.fill_ratio,
+      quantity: fill.filled_base_quantity, entry_price: fill.effective_vwap_price,
+      entry_quote_usd: fill.effective_quote_usd, entry_fee_usd: fill.fee_usd,
+      stop_loss: stop, take_profit: target
+    });
+    return finish("opened", fill.status === "partial" ? "partial_depth_fill" : "qualified_signal", market.symbol);
+  }
+
+  shadowStatus() {
+    const settings = this.getState("settings") || {};
+    const runtime = this.getState("shadow_runtime") || {};
+    const risk = { ...DEFAULT_RISK, ...(settings.risk || {}) };
+    const stats = this.sql.exec(
+      "SELECT COUNT(*) AS total, SUM(CASE WHEN status='CLOSED' THEN 1 ELSE 0 END) AS closed," +
+      "SUM(CASE WHEN status='OPEN' THEN 1 ELSE 0 END) AS open," +
+      "SUM(CASE WHEN status='CLOSED' AND net_pnl_usd>0 THEN 1 ELSE 0 END) AS wins," +
+      "SUM(CASE WHEN status='CLOSED' AND net_pnl_usd<0 THEN 1 ELSE 0 END) AS losses," +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' AND net_pnl_usd>0 THEN net_pnl_usd ELSE 0 END),0) AS gross_wins," +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' AND net_pnl_usd<0 THEN net_pnl_usd ELSE 0 END),0) AS gross_losses," +
+      "COALESCE(SUM(CASE WHEN status='CLOSED' THEN net_pnl_usd ELSE 0 END),0) AS realized," +
+      "COALESCE(SUM(entry_fee_usd+exit_fees_usd),0) AS fees," +
+      "AVG(CASE WHEN status='CLOSED' THEN net_pnl_usd END) AS expectancy FROM shadow_trades"
+    ).toArray()[0] || {};
+    const open = this.getOpenShadowTrades();
+    const markets = new Map(this.getMarkets().map((m) => [m.symbol, m]));
+    let unrealized = 0; let markComplete = true;
+    const openPositions = open.map((trade) => {
+      const market = markets.get(trade.symbol);
+      if (!isFreshShadowBook(market, Date.now(), MAX_ORDER_BOOK_AGE_MS)) {
+        markComplete = false; return { ...trade, mark_status: "book_stale_or_missing" };
+      }
+      const fill = simulateShadowMarketSell({ baseQuantity: Number(trade.remaining_quantity),
+        bids: market.book_bids, feeBpsPerSide: Number(trade.metadata?.fee_bps_per_side ?? risk.fee_bps_per_side),
+        extraSlippageBps: Number(trade.metadata?.extra_slippage_bps ?? risk.slippage_bps) });
+      if (!fill.ok || fill.status !== "filled") {
+        markComplete = false; return { ...trade, mark_status: "insufficient_bid_depth" };
+      }
+      const pnl = Number(trade.exit_proceeds_usd || 0) + fill.effective_quote_usd -
+        Number(trade.entry_quote_usd) - Number(trade.entry_fee_usd) -
+        Number(trade.exit_fees_usd || 0) - fill.fee_usd;
+      unrealized += pnl;
+      return { ...trade, mark_status: "estimated_full_depth_exit", mark_to_market_net_pnl_usd: pnl };
+    });
+    const closed = Number(stats.closed || 0); const wins = Number(stats.wins || 0);
+    const grossLoss = Math.abs(Number(stats.gross_losses || 0)); const grossWin = Number(stats.gross_wins || 0);
+    return {
+      enabled: settings.shadow_enabled !== false, mode: "coinbase_l2_shadow",
+      exchange_orders_submitted: false, data_source: "Coinbase Exchange public L2 snapshots",
+      execution_model: "Up to 25 visible levels, configured fee assumption and adverse slippage buffer; partial fills are retained.",
+      limitations: ["Public L2 snapshots do not expose queue position or guaranteed fills.",
+        "Network latency and future book movement are not replayed.", "Simulated fills are not Coinbase-reported executions."],
+      book_freshness_limit_ms: MAX_ORDER_BOOK_AGE_MS,
+      fee_assumption_bps_per_side: risk.fee_bps_per_side,
+      extra_slippage_bps_per_side: risk.slippage_bps,
+      initial_capital_usd: Number(settings.shadow_initial_capital_usd) || 100,
+      total_trades: Number(stats.total || 0), closed_trades: closed, open_trades: Number(stats.open || 0),
+      wins, losses: Number(stats.losses || 0), win_rate_pct: closed ? Number((wins / closed * 100).toFixed(2)) : null,
+      gross_profit_usd: grossWin, gross_loss_usd: grossLoss,
+      profit_factor: grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(4)) : null,
+      profit_factor_unbounded: grossWin > 0 && grossLoss === 0,
+      net_realized_pnl_usd: Number(stats.realized || 0),
+      unrealized_net_pnl_usd: markComplete ? Number(unrealized.toFixed(8)) : null,
+      total_fees_usd: Number(stats.fees || 0),
+      expectancy_per_closed_trade_usd: stats.expectancy == null ? null : Number(stats.expectancy),
+      open_positions: openPositions, recent_trades: this.getShadowTrades(30), runtime
+    };
+  }
+
   dashboard() {
     const settings = this.getState("settings");
     const runtime = this.getState("runtime") || {};
@@ -2866,6 +3092,7 @@ export class TradingEngine extends DurableObject {
       current_market_feed: currentMarketFeedDiagnostics,
       market_context: assessCrossMarketContext(markets, nowMs),
       portfolio, markets, trades, open_positions: openPositions,
+      shadow: this.shadowStatus(),
       risk_protection: this.riskProtectionStatus(portfolio, { ...DEFAULT_RISK, ...(settings.risk || {}) }, nowMs),
       runtime, analytics, research_history: this.researchHistorySummary(),
       recent_events: this.sql.exec("SELECT * FROM events ORDER BY id DESC LIMIT 20").toArray()
