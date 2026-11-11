@@ -134,6 +134,7 @@ export class TradingEngine extends DurableObject {
       ).toArray().length > 0;
       migratedSettings = migratePaperAutomationSettings(currentSettings, hasHistoricalTrades ? 1 : 0);
     }
+    if (migratedSettings === currentSettings) migratedSettings = { ...currentSettings };
     if (typeof migratedSettings.shadow_enabled !== "boolean") migratedSettings.shadow_enabled = true;
     if (!Number.isFinite(Number(migratedSettings.shadow_initial_capital_usd)) || Number(migratedSettings.shadow_initial_capital_usd) < 10) migratedSettings.shadow_initial_capital_usd = 100;
     if (JSON.stringify(currentSettings) !== JSON.stringify(migratedSettings)) {
@@ -2945,6 +2946,9 @@ export class TradingEngine extends DurableObject {
     if (Number(dayStats.trades || 0) >= PAPER_AUTOMATION_PROFILE.max_cycles_per_day) return finish("blocked", "shadow_daily_trade_cap", market.symbol);
     const dailyLoss = initial * Math.max(0.1, Number(risk.max_daily_loss_pct) || 1) / 100;
     if (Number(dayStats.pnl || 0) <= -dailyLoss) return finish("blocked", "shadow_daily_loss_limit", market.symbol);
+    const historical = this.sql.exec("SELECT COALESCE(SUM(net_pnl_usd),0) AS pnl FROM shadow_trades WHERE status='CLOSED'").toArray()[0] || {};
+    const cumulativeLossLimit = initial * Math.max(1, Number(risk.max_total_drawdown_pct) || 5) / 100;
+    if (Number(historical.pnl || 0) <= -cumulativeLossLimit) return finish("blocked", "shadow_cumulative_loss_limit", market.symbol);
     const cap = Number(risk.max_position_notional_usd) > 0 ? Number(risk.max_position_notional_usd) : 8;
     const budget = Math.min(10, cap, initial * 0.1);
     if (budget < 2) return finish("blocked", "shadow_position_budget_below_minimum", market.symbol);
