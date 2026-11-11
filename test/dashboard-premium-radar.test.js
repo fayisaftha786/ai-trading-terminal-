@@ -69,3 +69,12 @@ test("dashboard labels the 10-second L2 refresh as position-exit monitoring, not
   assert.match(html, /Automatic PAPER entries are OFF by default/);
   assert.match(html, /live AUTO status above is authoritative/);
 });
+
+test("dashboard displays entry-scan book telemetry separately from position-exit L2 refresh", () => {
+  assert.match(html, /Entry-scan book \(fresh per full scan\)/);
+  assert.match(html, /last_entry_scan_book_status/);
+  assert.match(html, /last_entry_scan_book_success_count/);
+  assert.match(html, /last_entry_scan_book_failed_count/);
+  assert.match(html, /last_entry_scan_book_skipped_count/);
+  assert.match(html, /Position-exit L2 refresh \(10s while positions are open\)/);
+});
