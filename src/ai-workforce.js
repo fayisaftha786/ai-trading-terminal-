@@ -211,7 +211,7 @@ export function buildAiWorkforceRun({
     count + market.strategy_research.candidates.filter((candidate) => candidate?.eligible_for_research === true).length, 0);
   workers.push(makeWorker(
     "strategy_research",
-    statusForCoverage(researchRows.length, Math.max(1, live.length)),
+    researchRows.length ? statusForCoverage(researchRows.length, Math.max(1, live.length)) : "unavailable",
     researchRows.length
       ? researchEligible + " hypothesis/hypotheses pass transparent research filters; no new production strategy is promoted."
       : "Strategy hypotheses are unavailable because validated candle history is incomplete.",
@@ -263,7 +263,8 @@ export function buildAiWorkforceRun({
     result[worker.status] = (result[worker.status] || 0) + 1;
     return result;
   }, {});
-  const overall = marketFeed.healthy === true && workers.every((worker) => worker.status !== "error")
+  const watchdogHealthy = workers.find((worker) => worker.id === "system_watchdog")?.status === "complete";
+  const overall = marketFeed.healthy === true && watchdogHealthy
     ? "healthy"
     : live.length ? "partial" : "unavailable";
   return {

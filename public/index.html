@@ -882,7 +882,7 @@ function renderAiWorkforce(workforce){
   $("workforceTotal").textContent=String(Number(value.worker_count)||12);
   $("workforceComplete").textContent=String(Number(counts.complete)||0);
   $("workforceBlocked").textContent=String((Number(counts.blocked)||0)+(Number(counts.unavailable)||0)+(Number(counts.error)||0));
-  $("workforceDuration").textContent=Number.isFinite(Number(value.duration_ms))?Number(value.duration_ms).toFixed(0)+" ms":"—";
+  $("workforceDuration").textContent=value.duration_ms!==null&&value.duration_ms!==undefined&&Number.isFinite(Number(value.duration_ms))?Number(value.duration_ms).toFixed(0)+" ms":"—";
   $("workforceRunMeta").textContent=value.run_id
     ?"Run "+String(value.run_id)+" · "+String(value.source||"scan").replaceAll("_"," ")+" · "+workforceClock(value.finished_at_ms)
     :"Waiting for first full scan.";
