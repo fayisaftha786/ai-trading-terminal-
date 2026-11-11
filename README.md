@@ -14,6 +14,9 @@ Coinbase-only crypto market research and paper-trading platform with a Cloudflar
 - Real Coinbase order execution remains locked unless the separate Coinbase Advanced Trade authorization and server-side safeguards are deliberately configured.
 - No profitability or future-return guarantee is made. Backtests and paper results are not evidence of future profits.
 - Keep API credentials in private deployment secrets. Never commit keys or paste them into chat.
+- The Cloudflare server scheduler runs strategy/candle scans on a 90-second cadence and performs a separate L2-only refresh targeted at 10 seconds. Missing, stale or invalid data blocks new entries.
+- Cloud AUTO PAPER entries start disabled and require the owner to enable them after reviewing the health and risk settings. The server-side market scanner can continue collecting and evaluating market data while entries are disabled.
+- The Android cloud app is a thin client for the private Worker; it does not store Coinbase credentials. Its separate on-device PAPER mode uses public BTC-USD data and a local virtual ledger. On-device AUTO DEMO refreshes every five minutes only while that screen remains in the foreground; it is not a 24/7 background service and does not submit real orders.
 
 ## Coinbase L2 Shadow Trading
 
@@ -31,4 +34,4 @@ The Python service defaults to Coinbase USD products (BTC/USD, ETH/USD, SOL/USD)
 
 ## Validation
 
-Run npm test, npm run check, and python -m pytest before deployment. Deploy only after all checks pass and the live Worker is verified against the intended commit. This branch has not been deployed by this change.
+Run `npm test`, `npm run check`, and `python -m pytest` before deployment. Passing CI alone does not prove that production is serving the intended revision. Verify `/api/health` for live market-feed/scheduler diagnostics, and verify `/api/worker/health` reports `status=ok`, `mode=paper_only`, `live_trading_enabled=false`, `deployment_provenance_status=verified`, and the intended `deployment_commit_sha`. Private dashboard and account diagnostics require owner authentication.
