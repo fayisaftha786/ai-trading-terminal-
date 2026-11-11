@@ -1159,27 +1159,11 @@ export class TradingEngine extends DurableObject {
       SCAN_INTERVAL_MS
     );
 
-    // When flat, no position needs 10-second exit marks. Defer the next
-    // alarm to the next full scan; a full scan still fetches fresh books before
-    // it can evaluate new entries. Keep the 10-second cadence while exposed.
+    // Keep L2 snapshots fresh even while flat: the same book-freshness gate
+    // protects new-entry evaluation and the dashboard, not only open-position
+    // exit marks. The refresh path is read-only and never opens or submits orders.
     if (!fullScanDue) {
       const openTrades = this.getOpenTrades();
-      if (openTrades.length === 0) {
-        const lastScanAtMs = Number(startingRuntime.last_scheduled_scan_at_ms);
-        const nextScanAtMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
-          ? lastScanAtMs + SCAN_INTERVAL_MS : invokedAtMs + SCAN_INTERVAL_MS;
-        const nextAt = Math.max(invokedAtMs + 1000, nextScanAtMs);
-        startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
-        startingRuntime.last_book_refresh_status = "deferred_no_open_positions";
-        startingRuntime.last_book_refresh_success_count = 0;
-        startingRuntime.last_book_refresh_failed_count = 0;
-        startingRuntime.last_book_refresh_skipped_count = PRODUCTS.length;
-        startingRuntime.next_alarm_at_ms = nextAt;
-        this.setState("runtime", startingRuntime);
-        await this.ctx.storage.setAlarm(nextAt);
-        return;
-      }
-
       let refreshResult = null;
       let refreshErrorCode = null;
       try {
