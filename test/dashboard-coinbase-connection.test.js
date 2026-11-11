@@ -84,7 +84,7 @@ test("Coinbase dashboard exposes exchange-side daily order cap diagnostics", () 
 
 test("Coinbase connection center exposes a read-only verified FIFO P&L report", () => {
   assert.match(dashboard, /id="liveFillReportButton"/);
-  assert.match(dashboard, /api\("\\/api\\/live\\/fills\\/report"\)/);
+  assert.ok(dashboard.includes('api("/api/live/fills/report")'));
   assert.match(dashboard, /id="liveFillReport"/);
   assert.match(dashboard, /Unknown fee currency/);
   assert.match(dashboard, /manual\/external Coinbase trades are excluded/);
