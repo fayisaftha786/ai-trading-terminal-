@@ -149,22 +149,43 @@ test("legacy capital review blocks missing confirmation, missing history and ope
   }).reason, "capital_review_open_positions_must_be_closed");
 });
 
-test("dynamic take-profit clears estimated round-trip costs with a minimum net buffer", () => {
+test("dynamic take-profit enforces at least 1:1 net reward/risk after all round-trip costs", () => {
   const costDriven = calculateDynamicTakeProfit({ atrPct: 0.5, roundTripCostBps: 140 });
   assert.equal(costDriven.ok, true);
-  assert.equal(costDriven.target_bps, 210);
-  assert.equal(costDriven.estimated_net_edge_bps, 70);
+  assert.equal(costDriven.target_bps, 380);
+  assert.equal(costDriven.estimated_net_edge_bps, 240);
+  assert.equal(costDriven.estimated_net_reward_bps, 240);
+  assert.equal(costDriven.estimated_net_risk_bps, 240);
+  assert.equal(costDriven.net_reward_risk_ratio, 1);
+  assert.equal(costDriven.minimum_net_reward_risk, 1);
 
   const volatilityDriven = calculateDynamicTakeProfit({ atrPct: 3, roundTripCostBps: 100 });
   assert.equal(volatilityDriven.ok, true);
-  assert.equal(volatilityDriven.target_bps, 240);
-  assert.ok(volatilityDriven.estimated_net_edge_bps > 0);
+  assert.equal(volatilityDriven.target_bps, 300);
+  assert.equal(volatilityDriven.net_reward_risk_ratio, 1);
 });
 
-test("dynamic take-profit rejects invalid costs and extreme targets", () => {
+test("dynamic take-profit respects higher configured stop distance and reward/risk floor", () => {
+  const result = calculateDynamicTakeProfit({
+    atrPct: 1,
+    roundTripCostBps: 50,
+    stopLossPct: 1.5,
+    minimumNetRewardRisk: 1.5
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.target_bps, 350);
+  assert.equal(result.estimated_net_reward_bps, 300);
+  assert.equal(result.estimated_net_risk_bps, 200);
+  assert.equal(result.net_reward_risk_ratio, 1.5);
+});
+
+test("dynamic take-profit rejects invalid costs, risk assumptions and unreachable targets", () => {
   assert.equal(calculateDynamicTakeProfit({ atrPct: 1, roundTripCostBps: 0 }).ok, false);
   assert.equal(calculateDynamicTakeProfit({ atrPct: 8, roundTripCostBps: 350 }).ok, false);
   assert.equal(calculateDynamicTakeProfit({ atrPct: 0, roundTripCostBps: 100 }).ok, false);
+  assert.equal(calculateDynamicTakeProfit({ atrPct: 1, roundTripCostBps: 50, stopLossPct: 0 }).ok, false);
+  assert.equal(calculateDynamicTakeProfit({ atrPct: 1, roundTripCostBps: 50, minimumNetRewardRisk: 0.9 }).ok, false);
+  assert.equal(calculateDynamicTakeProfit({ atrPct: 4.9, roundTripCostBps: 151, stopLossPct: 4.5 }).ok, false);
 });
 
 test("daily cycle allowance stops at five completed BUY/SELL cycles and never forces a trade", () => {
