@@ -62,3 +62,10 @@ test("mode summary and automation panel use the same dashboard automation snapsh
   assert.ok(html.includes("const paperState=a.halted?"));
   assert.ok(html.includes('$("modeNote").textContent=modeIsDemo?'));
 });
+
+
+test("dashboard labels the 10-second L2 refresh as position-exit monitoring, not the entry-scan book fetch", () => {
+  assert.match(html, /Position-exit L2 refresh \(10s while positions are open\)/);
+  assert.match(html, /Automatic PAPER entries are OFF by default/);
+  assert.match(html, /live AUTO status above is authoritative/);
+});
