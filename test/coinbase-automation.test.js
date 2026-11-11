@@ -28,3 +28,10 @@ test("scheduled reconciliation prioritizes the oldest order check to avoid starv
   assert.match(engine, /const lastAttemptAt = \(item\) =>/);
   assert.match(engine, /\.sort\(\(left, right\) => lastAttemptAt\(left\) - lastAttemptAt\(right\)\)\.slice\(0, 3\)/);
 });
+
+test("Worker supplies the configured stop distance and rechecks net reward/risk at trade creation", () => {
+  assert.match(engine, /stopLossPct: risk\.stop_loss_pct/);
+  assert.match(engine, /minimumNetRewardRisk: 1/);
+  assert.match(engine, /estimated_net_reward_bps: dynamicTarget\.estimated_net_reward_bps/);
+  assert.match(engine, /net_reward_risk_ratio: dynamicTarget\.net_reward_risk_ratio/);
+});
