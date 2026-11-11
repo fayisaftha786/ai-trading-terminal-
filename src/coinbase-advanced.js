@@ -449,42 +449,55 @@ const ACTIVE_EXCHANGE_ORDER_STATUSES = new Set(["PENDING", "OPEN", "UNKNOWN_ORDE
 const EXCHANGE_ORDER_STATUS_QUERY = ["PENDING", "OPEN", "UNKNOWN_ORDER_STATUS", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 
 async function loadActiveExchangeOrders(env, fetchImpl) {
-  const orders = [];
-  const seenCursors = new Set();
-  let cursor = "";
-  for (let page = 0; page < 5; page += 1) {
-    const query = new URLSearchParams();
-    query.set("limit", "100");
-    query.set("product_type", "SPOT");
-    for (const status of EXCHANGE_ORDER_STATUS_QUERY) query.append("order_status", status);
-    if (cursor) query.set("cursor", cursor);
-    const payload = await advancedRequest(env, "GET", API_PREFIX + "/orders/historical/batch?" + query.toString(), undefined, fetchImpl);
-    if (!Array.isArray(payload.orders)) throw new Error("coinbase_advanced_open_orders_response_invalid");
-    for (const order of payload.orders) {
-      const status = String(order?.status || "").toUpperCase();
-      if (typeof order?.order_id !== "string" || !order.order_id ||
-          typeof order?.product_id !== "string" || !["BUY", "SELL"].includes(order?.side) ||
-          !ACTIVE_EXCHANGE_ORDER_STATUSES.has(status)) {
-        throw new Error("coinbase_advanced_open_order_record_invalid");
+  // Coinbase accepts order_status as a repeated query parameter, but some
+  // account/provider combinations reject a multi-value filter with HTTP 400.
+  // Query each documented active status separately so one malformed filter
+  // cannot hide the other active orders. Fail closed if any status/page fails.
+  const ordersById = new Map();
+  let totalPages = 0;
+  for (const statusFilter of EXCHANGE_ORDER_STATUS_QUERY) {
+    const seenCursors = new Set();
+    let cursor = "";
+    let completedStatus = false;
+    for (let page = 0; page < 5; page += 1) {
+      const query = new URLSearchParams();
+      query.set("limit", "100");
+      query.set("product_type", "SPOT");
+      query.set("order_status", statusFilter);
+      if (cursor) query.set("cursor", cursor);
+      const payload = await advancedRequest(
+        env, "GET", API_PREFIX + "/orders/historical/batch?" + query.toString(), undefined, fetchImpl
+      );
+      if (!Array.isArray(payload.orders)) throw new Error("coinbase_advanced_open_orders_response_invalid");
+      totalPages += 1;
+      for (const order of payload.orders) {
+        const status = String(order?.status || "").toUpperCase();
+        if (typeof order?.order_id !== "string" || !order.order_id ||
+            typeof order?.product_id !== "string" || !["BUY", "SELL"].includes(order?.side) ||
+            !ACTIVE_EXCHANGE_ORDER_STATUSES.has(status)) {
+          throw new Error("coinbase_advanced_open_order_record_invalid");
+        }
+        ordersById.set(order.order_id, {
+          order_id: order.order_id,
+          product_id: order.product_id,
+          side: order.side,
+          status
+        });
       }
-      orders.push({
-        order_id: order.order_id,
-        product_id: order.product_id,
-        side: order.side,
-        status
-      });
+      if (payload.has_next === false) {
+        completedStatus = true;
+        break;
+      }
+      if (payload.has_next !== true || typeof payload.cursor !== "string" ||
+          !payload.cursor || seenCursors.has(payload.cursor)) {
+        throw new Error("coinbase_advanced_open_orders_pagination_invalid");
+      }
+      seenCursors.add(payload.cursor);
+      cursor = payload.cursor;
     }
-    if (payload.has_next === false) {
-      return { orders, pages: page + 1, pagination_complete: true };
-    }
-    if (payload.has_next !== true || typeof payload.cursor !== "string" ||
-        !payload.cursor || seenCursors.has(payload.cursor)) {
-      throw new Error("coinbase_advanced_open_orders_pagination_invalid");
-    }
-    seenCursors.add(payload.cursor);
-    cursor = payload.cursor;
+    if (!completedStatus) throw new Error("coinbase_advanced_open_orders_pagination_incomplete");
   }
-  throw new Error("coinbase_advanced_open_orders_pagination_incomplete");
+  return { orders: [...ordersById.values()], pages: totalPages, pagination_complete: true };
 }
 async function loadTodayExchangeOrders(env, fetchImpl, nowMs = Date.now()) {
   const start = new Date(nowMs);
