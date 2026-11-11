@@ -38,6 +38,7 @@ import java.util.Locale;
 public final class MainActivity extends Activity {
     private static final String KEY_SERVER = "backend_url";
     private static final String DEFAULT_SERVER = "";
+    private static final String DEFAULT_CLOUD_URL = "https://ai-trading-terminal.fayisaftha786.workers.dev";
     private WebView webView;
     private LinearLayout root;
     private String trustedOrigin;
@@ -103,8 +104,8 @@ public final class MainActivity extends Activity {
 
         EditText url = new EditText(this);
         url.setSingleLine(true);
-        url.setText(initial);
-        url.setHint("https://your-service.onrender.com");
+        url.setText(initial == null || initial.trim().isEmpty() ? DEFAULT_CLOUD_URL : initial);
+        url.setHint("Private HTTPS cloud backend URL");
         url.setTextColor(Color.WHITE);
         url.setHintTextColor(Color.GRAY);
         url.setTextSize(14);
