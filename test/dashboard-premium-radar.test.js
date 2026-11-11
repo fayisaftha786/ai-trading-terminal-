@@ -7,7 +7,7 @@ const worker = readFileSync(new URL("../src/index.js", import.meta.url), "utf8")
 
 test("premium terminal navigation links to the main operating surfaces", () => {
   for (const id of [
-    "modePanel", "liveMarketPanel", "marketIntelligencePanel", "exchangeConnections",
+    "modePanel", "liveMarketPanel", "marketIntelligencePanel", "aiWorkforcePanel", "exchangeConnections",
     "automationPanel", "researchArchivePanel", "performancePanel", "paperLedgerPanel"
   ]) assert.ok(html.includes('href="#' + id + '"') || html.includes('id="' + id + '"'), "missing navigation target " + id);
   assert.match(html, /class="app-nav"/);
@@ -61,4 +61,13 @@ test("mode summary and automation panel use the same dashboard automation snapsh
   assert.ok(html.includes("const a=data.automation||{};const modeIsDemo="));
   assert.ok(html.includes("const paperState=a.halted?"));
   assert.ok(html.includes('$("modeNote").textContent=modeIsDemo?'));
+});
+
+test("dashboard labels entry scan and position exit order-book telemetry separately", () => {
+  assert.match(html, /Entry-scan book \(fresh per full scan\)/);
+  assert.match(html, /Position-exit L2 refresh \(10s while positions are open\)/);
+  assert.match(html, /last_entry_scan_book_status/);
+  assert.match(html, /last_entry_scan_book_success_count/);
+  assert.match(html, /last_entry_scan_book_failed_count/);
+  assert.match(html, /last_entry_scan_book_skipped_count/);
 });
