@@ -29,13 +29,14 @@ export function buildLiveFillReport(input, syncedAtMs = null) {
     const product = typeof row?.product_id === "string" ? row.product_id.toUpperCase() : "";
     const [baseCurrency, quoteCurrency, extra] = product.split("-");
     const side = row?.side;
+    const tradeTime = Date.parse(row?.trade_time || "");
     const price = decimal(row?.price);
     const size = decimal(row?.size);
     const commission = decimal(row?.commission ?? "0");
     if (!row || typeof row.entry_id !== "string" || !row.entry_id ||
         !/^[A-Z0-9]{2,12}$/.test(baseCurrency || "") ||
         !/^[A-Z0-9]{2,12}$/.test(quoteCurrency || "") || extra !== undefined ||
-        !["BUY", "SELL"].includes(side) || price === null || price <= 0n ||
+        !["BUY", "SELL"].includes(side) || !Number.isFinite(tradeTime) || price === null || price <= 0n ||
         size === null || size <= 0n || commission === null) {
       invalid.push("invalid_fill_record");
       continue;
