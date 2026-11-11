@@ -56,3 +56,9 @@ test("dashboard distinguishes expected between-scan book expiry from provider ou
   assert.match(html, /each 90s entry scan fetches a fresh Coinbase order book/);
   assert.match(html, /This is not a provider failure/);
 });
+
+test("mode summary and automation panel use the same dashboard automation snapshot", () => {
+  assert.match(html, /const a=data\\.automation\\|\\|\\{\\};const modeIsDemo=/);
+  assert.match(html, /const paperState=a\\.halted\\?/);
+  assert.match(html, /\\$\\("modeNote"\\)\\.textContent=modeIsDemo\\?/);
+});
