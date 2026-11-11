@@ -63,7 +63,9 @@ function buildFill({ side, levels, quantity, quoteBudget, feeBpsPerSide, extraSl
   const effectiveQuote = filledBase * effectiveVwap;
   const feeUsd = effectiveQuote * feeBps / 10000;
   const targetBase = side === "BUY" ? requestedQuote / normalized[0].price : requestedQuantity;
-  const fillRatio = Math.max(0, Math.min(1, filledBase / targetBase));
+  const fillRatio = side === "BUY"
+    ? Math.max(0, Math.min(1, bookQuote / requestedQuote))
+    : Math.max(0, Math.min(1, filledBase / requestedQuantity));
   const complete = remaining <= Math.max(EPSILON, (side === "BUY" ? requestedQuote : requestedQuantity) * 1e-9);
   return {
     ok: true,
@@ -81,7 +83,7 @@ function buildFill({ side, levels, quantity, quoteBudget, feeBpsPerSide, extraSl
     extra_slippage_bps: slippageBps,
     fill_ratio: fillRatio,
     unfilled_quote_usd: side === "BUY" ? Math.max(0, requestedQuote - bookQuote) : null,
-    unfilled_base_quantity: side === "SELL" ? Math.max(0, requestedQuantity - filledBase) : Math.max(0, targetBase - filledBase),
+    unfilled_base_quantity: side === "SELL" ? Math.max(0, requestedQuantity - filledBase) : Math.max(0, remaining / normalized[0].price),
     levels_used: levelsUsed,
     best_book_price: normalized[0].price
   };
