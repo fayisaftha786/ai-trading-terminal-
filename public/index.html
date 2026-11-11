@@ -163,23 +163,89 @@ section[id]{scroll-margin-top:82px}
 @media(max-width:980px){.workforce-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:620px){.workforce-grid{grid-template-columns:1fr}.workforce-card{padding:12px}}
 
+
+/* Compact premium workspace: one focused view at a time, with advanced controls kept accessible. */
+.app-nav{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:6px;overflow:visible;padding:7px;margin:10px 0 14px;border-radius:14px;background:rgba(8,15,28,.92);border-color:#33435f}
+.app-nav a{display:flex;align-items:center;justify-content:center;text-align:center;min-height:38px;padding:8px 9px;font-size:10px;letter-spacing:.08em;border:1px solid transparent;transition:background .16s ease,border-color .16s ease,color .16s ease}
+.app-nav a[aria-current="page"]{color:#fff;background:linear-gradient(135deg,#8a7af0,#437fc4);border-color:#a49aff88;box-shadow:0 5px 16px #7869e633}
+.dashboard-view{display:none;min-width:0}
+.dashboard-view.active{display:block;animation:dashboard-view-in .16s ease-out both}
+.dashboard-view>.panel,.dashboard-view>.grid{margin-top:11px}
+.dashboard-view>.panel:first-child,.dashboard-view>.grid:first-child{margin-top:0}
+.dashboard-view>.panel{padding:clamp(13px,1.45vw,18px);border-radius:16px}
+.dashboard-view .grid{gap:9px}
+#portfolioOverview{margin:11px 0}
+#portfolioOverview .card{padding:12px 14px;border-radius:14px}
+#portfolioOverview .value{font-size:clamp(19px,2vw,24px)}
+#portfolioOverview .label{font-size:10px}
+#modePanel .mode-switch{gap:8px}
+#modePanel .mode-switch button{min-height:40px;padding:9px 13px;font-size:12px}
+#modePanel .mode-note{margin-bottom:0;font-size:12px;line-height:1.5}
+#marketContextPanel .note{margin-bottom:0}
+#realModePanel .coinbase-connect-shell{margin:11px 0;padding:13px;border-radius:15px}
+#realModePanel .coinbase-connect-top{margin-bottom:10px}
+#realModePanel .connection-grid{gap:7px}
+#realModePanel .connection-tile{padding:9px;border-radius:10px}
+#realModePanel .connection-tile strong{font-size:11px}
+#realModePanel .connection-tile small{font-size:9px}
+#realModePanel .connection-data-grid{gap:8px;margin-top:8px}
+#realModePanel .connection-data-card{padding:10px;border-radius:10px}
+#realModePanel .connection-footnote{font-size:10px;line-height:1.5;margin:8px 0 0}
+.advanced-drawer{margin:10px 0;border:1px solid #2b3c58;border-radius:12px;background:linear-gradient(145deg,#101a2e,#0b1424);overflow:hidden}
+.advanced-drawer>summary{cursor:pointer;list-style:none;padding:11px 13px;color:#c7d4ec;font-size:11px;font-weight:800;letter-spacing:.025em;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.advanced-drawer>summary::-webkit-details-marker{display:none}
+.advanced-drawer>summary:after{content:"＋";color:#a79aff;font-size:15px}
+.advanced-drawer[open]>summary:after{content:"−"}
+.advanced-drawer[open]>summary{border-bottom:1px solid #263650;background:#121e33}
+.advanced-drawer .drawer-content{padding:11px 12px}
+.advanced-drawer .drawer-content>.note:first-child{margin-top:0}
+#liveAdvancedControls .drawer-content>.controls{align-items:flex-end}
+#liveDetails,#liveFillReport{max-height:260px;overflow:auto}
+#automationPanel .controls{gap:7px}
+#automationPanel .advanced-drawer{margin-top:10px}
+#shadowPanel>.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+#shadowPanel .card{padding:11px;border-radius:13px}
+#shadowPanel .value{font-size:21px}
+#performancePanel>.grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+#performancePanel .card{padding:12px;border-radius:13px}
+#performancePanel .value{font-size:22px}
+#performancePanel .performance-chart{margin:10px 0 12px;padding:12px;border-radius:14px}
+.dashboard-view .note{font-size:11px;line-height:1.55}
+.dashboard-view .row{gap:9px}
+.dashboard-view .panel h2{font-size:16px}
+#aiWorkforcePanel .ai-brain-kpi{padding:11px}
+#aiWorkforcePanel .ai-brain-kpi strong{font-size:22px}
+#aiWorkforcePanel .workforce-card{padding:11px}
+#paperLedgerPanel .table-wrap,#performancePanel .table-wrap,#shadowPanel .table-wrap{max-height:420px;overflow:auto}
+#paperLedgerPanel table,#performancePanel table,#shadowPanel table{min-width:720px}
+#app .footer{margin-top:15px;padding-top:12px;border-top:1px solid #263650;font-size:10px;line-height:1.5}
+@keyframes dashboard-view-in{from{opacity:.82;transform:translateY(3px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:760px){
+  .app-nav{grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:6px;top:4px}
+  .app-nav a{min-height:36px;font-size:9px;padding:7px 5px}
+  .dashboard-view>.panel{padding:12px}
+  #portfolioOverview .card{padding:10px}
+  #portfolioOverview .value{font-size:19px}
+  #realModePanel .connection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #realModePanel .connection-data-grid{grid-template-columns:1fr}
+  #shadowPanel>.grid,#performancePanel>.grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #performancePanel .performance-chart svg{min-height:150px}
+}
+@media(prefers-reduced-motion:reduce){.dashboard-view.active{animation:none}}
+
 </style></head>
 <body><main>
 <section id="login" class="panel login hidden"><div class="eyebrow">PRIVATE INSTANCE</div><h1>AI Trading Terminal</h1><p class="muted">Sign in to your private paper-trading dashboard. API keys are not used here.</p>
 <form id="loginForm"><label>Username<input id="username" autocomplete="username" value="admin" required maxlength="128"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="primary" type="submit">Sign in</button><p id="loginError" class="status"></p></form></section>
 <section id="app" class="hidden">
-<header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Coinbase public market data · virtual ledger · live execution locked</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
+<header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Coinbase live market feed · paper ledger · live execution locked</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
 <nav class="app-nav" aria-label="Trading terminal sections">
-  <a href="#modePanel">OVERVIEW</a>
-  <a href="#liveMarketPanel">MARKETS</a>
-  <a href="#marketIntelligencePanel">INTELLIGENCE</a>
-  <a href="#aiWorkforcePanel">AI WORKFORCE</a>
-  <a href="#exchangeConnections">EXCHANGES</a>
-  <a href="#automationPanel">AUTOMATION</a>
-  <a href="#researchArchivePanel">RESEARCH LAB</a>
-  <a href="#shadowPanel">SHADOW</a>
-  <a href="#performancePanel">PERFORMANCE</a>
-  <a href="#paperLedgerPanel">LEDGER</a>
+  <a href="#modePanel" data-view-target="overview" aria-current="page">OVERVIEW</a>
+  <a href="#liveMarketPanel" data-view-target="markets">MARKETS</a>
+  <a href="#realModePanel" data-view-target="coinbase">COINBASE</a>
+  <a href="#automationPanel" data-view-target="automation">AUTOMATION</a>
+  <a href="#marketIntelligencePanel" data-view-target="intelligence">INTELLIGENCE</a>
+  <a href="#performancePanel" data-view-target="performance">PERFORMANCE</a>
 </nav>
 <section class="panel" id="modePanel">
   <div class="row"><h2>Trading mode</h2><span id="modeBadge" class="tag good">DEMO ACTIVE</span></div>
@@ -201,16 +267,18 @@ section[id]{scroll-margin-top:82px}
   <div class="chart-foot"><span id="chartSource">Source: Coinbase Exchange archived closed candles</span><span id="chartUpdated">Waiting for chart data</span></div>
   <p class="note">Streaming ticker prices are display-only and do not feed the strategy or execute trades. The chart uses validated, closed Coinbase candles from the research archive. WebSocket disconnection, stale timestamps or missing candles are shown explicitly; no synthetic prices are generated.</p>
 </section>
-<section class="panel"><div class="row"><h2>BTC-led market regime</h2><span id="marketContextMode" class="tag">WAITING</span></div><p id="marketContextSummary" class="note">Waiting for fresh BTC, ETH and SOL closed-candle regimes. Long entries remain blocked until BTC trend and market breadth align.</p></section>
+<section class="panel" id="marketContextPanel"><div class="row"><h2>BTC-led market regime</h2><span id="marketContextMode" class="tag">WAITING</span></div><p id="marketContextSummary" class="note">Waiting for fresh BTC, ETH and SOL closed-candle regimes. Long entries remain blocked until BTC trend and market breadth align.</p></section>
 <div class="grid" id="portfolioOverview">
 <article class="card"><div class="label">PAPER EQUITY</div><div class="value" id="equity">$10.00</div><div class="muted">Simulated USD</div></article>
-<article class="card"><div class="label">NET REALIZED P&amp;L</div><div class="value" id="realized">$0.00</div><div class="muted">Closed paper trades</div></article>
+<article class="card"><div class="label">PAPER NET REALIZED P&amp;L</div><div class="value" id="realized">$0.00</div><div class="muted">Closed paper trades</div></article>
 <article class="card"><div class="label">OPEN POSITIONS</div><div class="value" id="positions">0</div><div class="muted" id="exposure">$0 exposure</div></article>
 <article class="card"><div class="label">DRAWDOWN FROM PEAK</div><div class="value" id="drawdown">0.00%</div><div class="muted">Paper-only circuit breaker</div></article></div>
 <section class="panel" id="riskPanel"><div class="row"><h2>Risk protection engine</h2><span class="tag good">PAPER ONLY</span></div><p class="note" id="riskProtection">Adaptive risk sizing, loss cooldowns, daily guardrails and cost-aware trailing exits are active in the PAPER engine.</p><p class="note" id="riskPeriodDetails">Daily and weekly risk baselines will appear after the first verified portfolio valuation.</p><p class="note">The trailing stop now activates before the cost-aware take-profit target when the estimated round-trip cost model allows it, then ratchets upward to protect a small net-profit buffer. Loss and profit locks pause new entries; scheduled exit monitoring continues. These simulated controls reduce risk but cannot prevent all losses or guarantee profit.</p></section>
 
 <section class="panel" id="realModePanel"><span id="exchangeConnections" class="anchor-target"></span><div class="row"><h2>REAL MODE · Coinbase Advanced account connection</h2><span id="liveState" class="tag bad">LIVE LOCKED</span></div>
-<p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View permission; Trade is optional and only needed for explicitly confirmed manual limit orders. Keep Transfer disabled. The connector supports current Ed25519 Base64 keys (32/64-byte forms), Ed25519 PKCS#8 PEM and legacy ECDSA P-256 PEM. Add only these to Cloudflare Worker Secrets: COINBASE_ADVANCED_API_KEY (the full CDP API Key Name), COINBASE_ADVANCED_API_SECRET (the private key), COINBASE_ADVANCED_ALLOWED_PRODUCTS (for example BTC-USD,ETH-USD), and COINBASE_ADVANCED_MAX_ORDER_QUOTE (a small quote cap). Keep COINBASE_ADVANCED_ORDER_ENABLED=false while testing the connection; no live orders are created by the account sync.</p><p class="note">Every preview is bound server-side to its exact product, side, size, limit price and fee. It expires after 60 seconds and can authorize only one manual confirmation; the submit request cannot change the previewed order details. Real-money auto-entry is not enabled.</p>
+<p class="note">Connect your Coinbase Advanced account using the credentials already stored in Cloudflare Worker Secrets. This screen verifies the account read-only; live orders and withdrawals remain locked.</p>
+<details class="advanced-drawer"><summary>Setup, permissions &amp; execution safety</summary><div class="drawer-content"><p class="note">REAL mode supports Coinbase account preflight and manually confirmed SPOT LIMIT GTC post-only BUY/SELL orders only when the owner enables the guarded execution secret. Every order requires a fresh preview and a separate confirmation. Automatic live entries and withdrawals are never enabled. Store CDP credentials only as Cloudflare Worker secrets; never enter them in this page or chat. Keep Transfer permission OFF.</p><p class="note">Setup: create a Coinbase CDP API key with View permission; Trade is optional and only needed for explicitly confirmed manual limit orders. Keep Transfer disabled. The connector supports current Ed25519 Base64 keys (32/64-byte forms), Ed25519 PKCS#8 PEM and legacy ECDSA P-256 PEM. Add only these to Cloudflare Worker Secrets: COINBASE_ADVANCED_API_KEY (the full CDP API Key Name), COINBASE_ADVANCED_API_SECRET (the private key), COINBASE_ADVANCED_ALLOWED_PRODUCTS (for example BTC-USD,ETH-USD), and COINBASE_ADVANCED_MAX_ORDER_QUOTE (a small quote cap). Keep COINBASE_ADVANCED_ORDER_ENABLED=false while testing the connection; no live orders are created by the account sync.</p><p class="note">Every preview is bound server-side to its exact product, side, size, limit price and fee. It expires after 60 seconds and can authorize only one manual confirmation; the submit request cannot change the previewed order details. Real-money auto-entry is not enabled.</p>
+</div></details>
 <div class="coinbase-connect-shell">
 <div class="coinbase-connect-top"><div><div class="eyebrow">SECURE EXCHANGE LINK</div><h3>Coinbase connection center</h3><p class="muted">Server-side CDP authentication · read-only account sync · guarded manual orders</p></div><div class="connection-sync"><span class="feed-pill" id="coinbaseSyncState">NOT CHECKED</span><small id="coinbaseLastSync">No authenticated account check yet</small></div></div>
 <div class="connection-grid" id="coinbaseConnectionGrid">
@@ -224,12 +292,13 @@ section[id]{scroll-margin-top:82px}
 <div class="connection-tile"><span class="connection-dot pending"></span><div><strong>Manual execution guard</strong><small>Locked until every check passes</small></div></div>
 </div>
 <div class="connection-data-grid"><div class="connection-data-card"><div class="label">AVAILABLE EXCHANGE BALANCES</div><div id="coinbaseBalances" class="balance-grid"><span class="muted">Run account preflight to retrieve spendable balances.</span></div></div><div class="connection-data-card"><div class="label">APPROVED SPOT PRODUCTS</div><div id="coinbaseProducts" class="product-list">Products appear after successful account and market checks.</div><div class="muted" id="coinbaseLimits">Order cap and daily/open-order limits are not verified.</div></div></div>
-<p class="connection-footnote">Account and balance status refresh automatically every 5 minutes while you are signed in and the dashboard is open, in both DEMO and REAL modes. The Worker also reconciles up to 3 open/ambiguous Coinbase orders on its 90-second scheduler and retries incomplete terminal fill syncs every 5 minutes. These are read-only checks: the scheduler never places or cancels orders. API keys stay in Cloudflare Worker Secrets; this page never asks for your private key. Current CDP Ed25519 keys are supported alongside ECDSA P-256. A successful connection must still pass the authenticated View permission check, account pagination, allowed Spot product checks and Transfer-OFF verification.</p>
+<p class="connection-footnote">Read-only balance and permission sync every 5 minutes while signed in. Background order/fill reconciliation runs on the 90-second scheduler. Transfer permission must remain OFF.</p>
+<details class="advanced-drawer"><summary>Background sync &amp; key security details</summary><div class="drawer-content"><p class="connection-footnote">Account and balance status refresh automatically every 5 minutes while you are signed in and the dashboard is open, in both DEMO and REAL modes. The Worker also reconciles up to 3 open/ambiguous Coinbase orders on its 90-second scheduler and retries incomplete terminal fill syncs every 5 minutes. These are read-only checks: the scheduler never places or cancels orders. API keys stay in Cloudflare Worker Secrets; this page never asks for your private key. Current CDP Ed25519 keys are supported alongside ECDSA P-256. A successful connection must still pass the authenticated View permission check, account pagination, allowed Spot product checks and Transfer-OFF verification.</p></div></details>
 </div>
 <div class="controls"><button id="livePreflight" type="button">Verify / refresh Coinbase account</button><span id="liveSummary" class="status">CDP credentials not configured · live orders OFF</span></div>
-<div class="controls"><label>SPOT product<br><select class="live-input" id="liveProduct"><option value="">Run account preflight first</option></select></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveFillReportButton" type="button">View verified FIFO P&amp;L report</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
-<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Configure CDP credentials only through Cloudflare Worker secrets; never paste them into chat or the browser.</pre><p class="note">Verified FIFO report uses only Coinbase fills linked to orders recorded by this app. Unknown fee currency, unmatched opening inventory, mixed quote currencies or truncated history keeps total P&amp;L unavailable; manual/external Coinbase trades are excluded.</p><pre id="liveFillReport" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No verified actual-fill report has been loaded.</pre></section>
-<section class="panel" id="automationPanel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><p class="note">Automatic PAPER entries are OFF by default. The live AUTO status above is authoritative and changes after the owner explicitly enables or disables entries. Enable only after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></section>
+<details class="advanced-drawer" id="liveAdvancedControls"><summary>Advanced order preview, order history &amp; P&amp;L reports</summary><div class="drawer-content"><div class="controls"><label>SPOT product<br><select class="live-input" id="liveProduct"><option value="">Run account preflight first</option></select></label><label>Order side<br><select class="live-input" id="liveSide"><option value="BUY">BUY</option><option value="SELL">SELL</option></select></label><label>BUY quote amount<br><input class="live-input" id="liveQuoteSize" inputmode="decimal" maxlength="40" placeholder="e.g. 5.00"></label><label>SELL base amount<br><input class="live-input" id="liveBaseSize" inputmode="decimal" maxlength="40" placeholder="e.g. 0.00005"></label><label>Limit price<br><input class="live-input" id="liveLimitPrice" inputmode="decimal" maxlength="40" placeholder="e.g. 90000.00"></label><button id="livePreview" type="button" disabled>Preview LIMIT order</button><button id="liveSubmit" class="danger" type="button" disabled>Confirm &amp; submit REAL order</button><button id="liveOrders" type="button">View prior order records &amp; fills</button><button id="liveFillReportButton" type="button">View verified FIFO P&amp;L report</button><button id="liveReconcile" type="button">Reconcile orders &amp; sync fills</button></div>
+<pre id="liveDetails" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No account preflight has been run. Configure CDP credentials only through Cloudflare Worker secrets; never paste them into chat or the browser.</pre><p class="note">Verified FIFO report uses only Coinbase fills linked to orders recorded by this app. Unknown fee currency, unmatched opening inventory, mixed quote currencies or truncated history keeps total P&amp;L unavailable; manual/external Coinbase trades are excluded.</p><pre id="liveFillReport" class="note" style="white-space:pre-wrap;overflow-wrap:anywhere">No verified actual-fill report has been loaded.</pre></div></details></section>
+<section class="panel" id="automationPanel"><div class="row"><h2>Automation controls</h2><span id="autoState" class="tag">AUTO OFF</span></div><div class="controls"><button id="autoToggle" class="primary">Enable paper auto-entry</button><button id="capitalReview" class="hidden" type="button">Review existing PAPER balance</button><button id="stop" class="danger">Emergency stop</button><button id="reset">Reset stop lock</button><span id="runtime" class="status">Waiting for first scan</span></div><details class="advanced-drawer"><summary>Automation rules, limits &amp; watchdog safety</summary><div class="drawer-content"><p class="note">Automatic PAPER entries are OFF by default. The live AUTO status above is authoritative and changes after the owner explicitly enables or disables entries. Enable only after a recent complete scheduled scan confirms all configured markets, fresh same-provider quotes/books/candles and the risk gates. Once enabled, the Durable Object alarm monitors approximately every 90 seconds while the service and public providers are available. It permits one open position at a time and up to five completed BUY→SELL cycles per UTC day; five is a ceiling, not a target. Per-position notional is capped at $8 with $2 kept unallocated. Entry sizing uses a 60 bps/side paper-fee assumption, 10 bps/side slippage and observed spread; dynamic take-profit must clear estimated round-trip costs. Daily loss guard is 1% ($0.10 at starting equity), with a 0.75% soft pause. Watchdog recovery restores auto-entry only when the owner’s prior opt-in permission is still recorded. Owner emergency stop and drawdown halt never auto-resume. This is periodic paper monitoring, not tick-level real-time execution or a guaranteed uptime service. Live order execution remains hard-locked.</p></div></details></section>
 <section class="panel" id="marketIntelligencePanel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
 <section class="panel ai-brain-panel" id="aiWorkforcePanel">
   <div class="row ai-brain-header">
@@ -266,7 +335,7 @@ section[id]{scroll-margin-top:82px}
   <div class="row"><h2>Live Market Shadow Trading · Coinbase L2</h2><div class="actions"><span id="shadowEnabledState" class="tag good">SHADOW ON</span><button id="shadowToggle" type="button">Pause shadow entries</button></div></div>
   <div class="grid">
     <article class="card"><div class="label">CLOSED SHADOW TRADES</div><div class="value" id="shadowClosed">0</div><div class="muted" id="shadowTradeCount">0 total · 0 open</div></article>
-    <article class="card"><div class="label">NET REALIZED P&amp;L</div><div class="value" id="shadowPnl">$0.00</div><div class="muted">After modeled fees and slippage</div></article>
+    <article class="card"><div class="label">SHADOW NET P&amp;L</div><div class="value" id="shadowPnl">$0.00</div><div class="muted">After modeled fees and slippage</div></article>
     <article class="card"><div class="label">WIN RATE</div><div class="value" id="shadowWinRate">—</div><div class="muted">Closed shadow trades only</div></article>
     <article class="card"><div class="label">PROFIT FACTOR</div><div class="value" id="shadowPF">—</div><div class="muted">Gross wins ÷ gross losses</div></article>
   </div>
@@ -1047,7 +1116,59 @@ async function runTournament(){
   finally{button.disabled=false;button.textContent="Run strategy tournament";}
 }
 $("runTournament").addEventListener("click",runTournament);
-async function boot(){try{const healthResponse=await fetch("/api/worker/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Worker health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}boot();setInterval(()=>{if(!document.hidden&&token)refresh();},30000);
+function initCompactDashboardViews(){
+  const app=$("app");
+  const nav=app?.querySelector(".app-nav");
+  if(!app||!nav||nav.dataset.compactReady==="true")return;
+  const groups={
+    overview:["modePanel","portfolioOverview","riskPanel"],
+    markets:["liveMarketPanel","marketContextPanel"],
+    coinbase:["realModePanel"],
+    automation:["automationPanel","shadowPanel"],
+    intelligence:["marketIntelligencePanel","aiWorkforcePanel","microScalpPanel","researchArchivePanel","strategyLabPanel"],
+    performance:["performancePanel","paperLedgerPanel","eventLogPanel"]
+  };
+  const fragment=document.createDocumentFragment();
+  const views=new Map();
+  for(const [name,ids] of Object.entries(groups)){
+    const view=document.createElement("div");
+    view.className="dashboard-view";
+    view.id="view-"+name;
+    view.dataset.dashboardView=name;
+    view.setAttribute("aria-label",name+" dashboard");
+    for(const id of ids){
+      const element=$(id);
+      if(element)view.appendChild(element);
+    }
+    fragment.appendChild(view);
+    views.set(name,view);
+  }
+  const footer=app.querySelector(".footer");
+  app.insertBefore(fragment,footer||null);
+  const activate=(name)=>{
+    if(!views.has(name))name="overview";
+    for(const [key,view] of views)view.classList.toggle("active",key===name);
+    nav.querySelectorAll("[data-view-target]").forEach(link=>{
+      const active=link.dataset.viewTarget===name;
+      if(active)link.setAttribute("aria-current","page");
+      else link.removeAttribute("aria-current");
+    });
+    try{sessionStorage.setItem("att_dashboard_view",name);}catch{}
+  };
+  nav.addEventListener("click",event=>{
+    const link=event.target.closest("a[data-view-target]");
+    if(!link)return;
+    event.preventDefault();
+    activate(link.dataset.viewTarget);
+  });
+  let initial="overview";
+  try{
+    const saved=sessionStorage.getItem("att_dashboard_view");
+    if(saved&&views.has(saved))initial=saved;
+  }catch{}
+  activate(initial);
+}
+async function boot(){try{const healthResponse=await fetch("/api/worker/health",{cache:"no-store"});if(!healthResponse.ok)throw new Error("Worker health check failed");const health=await healthResponse.json();if(health.mode!=="paper_only"||health.live_trading_enabled!==false)throw new Error("Unexpected backend safety mode");const statusResponse=await fetch("/api/auth/status");if(!statusResponse.ok)throw new Error("Authentication status unavailable");const status=await statusResponse.json();if(status.required&&!token){showLogin();return;}showApp();await refresh();}catch{showLogin();}}initCompactDashboardViews();boot();setInterval(()=>{if(!document.hidden&&token)refresh();},30000);
 setInterval(()=>{
   if(!document.hidden&&token&&coinbaseStaticStatus?.credentials_configured===true){
     runCoinbasePreflight({silent:true,force:true}).catch((error)=>{
