@@ -1119,15 +1119,33 @@ export class TradingEngine extends DurableObject {
       SCAN_INTERVAL_MS
     );
 
-    // Frequent alarms maintain L2 freshness independently from the heavier
-    // strategy/candle scan. They do not alter scheduled-scan health counters.
+    // When flat, no position needs 10-second exit marks. Defer the next
+    // alarm to the next full scan; a full scan still fetches fresh books before
+    // it can evaluate new entries. Keep the 10-second cadence while exposed.
     if (!fullScanDue) {
+      const openTrades = this.getOpenTrades();
+      if (openTrades.length === 0) {
+        const lastScanAtMs = Number(startingRuntime.last_scheduled_scan_at_ms);
+        const nextScanAtMs = Number.isFinite(lastScanAtMs) && lastScanAtMs > 0
+          ? lastScanAtMs + SCAN_INTERVAL_MS : invokedAtMs + SCAN_INTERVAL_MS;
+        const nextAt = Math.max(invokedAtMs + 1000, nextScanAtMs);
+        startingRuntime.last_scheduled_alarm_at_ms = invokedAtMs;
+        startingRuntime.last_book_refresh_status = "deferred_no_open_positions";
+        startingRuntime.last_book_refresh_success_count = 0;
+        startingRuntime.last_book_refresh_failed_count = 0;
+        startingRuntime.last_book_refresh_skipped_count = PRODUCTS.length;
+        startingRuntime.next_alarm_at_ms = nextAt;
+        this.setState("runtime", startingRuntime);
+        await this.ctx.storage.setAlarm(nextAt);
+        return;
+      }
+
       let refreshResult = null;
       let refreshErrorCode = null;
       try {
         refreshResult = await runAfterActiveScan(
           () => this.scanPromise,
-          () => this.refreshOrderBooksOnly()
+          () => this.refreshOrderBooksOnly(openTrades)
         );
       } catch (error) {
         refreshErrorCode = typeof error?.code === "string" && /^[a-z0-9_]{1,80}$/.test(error.code)
@@ -2037,14 +2055,14 @@ export class TradingEngine extends DurableObject {
    * never recalculates entry signals or opens positions. Each book must come
    * from the exact provider already selected for that market.
    */
-  async refreshOrderBooksOnly() {
+  async refreshOrderBooksOnly(initialOpenTrades = null) {
     const markets = this.getMarkets();
     const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
     const coinbaseState = createCoinbaseRequestState();
     const requestState = coinbaseState;
-    const initialOpenTrades = this.getOpenTrades();
+    const openTradesAtStart = Array.isArray(initialOpenTrades) ? initialOpenTrades : this.getOpenTrades();
     const legacyBitstampExitSymbols = new Set(
-      initialOpenTrades
+      openTradesAtStart
         .filter((trade) => trade.metadata?.market_data_provider === "bitstamp_spot")
         .map((trade) => trade.symbol)
     );
