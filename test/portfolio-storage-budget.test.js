@@ -61,3 +61,18 @@ test("equity snapshot retention uses a covering timestamp index and prunes once 
   assert.ok(engine.includes("DELETE FROM equity_snapshots WHERE id NOT IN (SELECT id FROM equity_snapshots ORDER BY at_ms DESC,id DESC LIMIT 2000)"));
   assert.ok(!engine.includes("DELETE FROM equity_snapshots WHERE at_ms NOT IN"));
 });
+
+
+test("flat portfolios defer short book-refresh alarms until the next full scan", () => {
+  const alarmStart = engine.indexOf("  async alarm()");
+  const alarmEnd = engine.indexOf("  async runCycle(", alarmStart);
+  const alarm = engine.slice(alarmStart, alarmEnd);
+  assert.ok(alarm.includes("if (!fullScanDue)"));
+  assert.ok(alarm.includes("const openTrades = this.getOpenTrades()"));
+  assert.ok(alarm.includes("if (openTrades.length === 0)"));
+  assert.ok(alarm.includes('last_book_refresh_status = "deferred_no_open_positions"'));
+  assert.ok(alarm.includes("lastScanAtMs + SCAN_INTERVAL_MS"));
+  assert.ok(alarm.includes("this.refreshOrderBooksOnly(openTrades)"));
+  assert.ok(engine.includes("async refreshOrderBooksOnly(initialOpenTrades = null)"));
+  assert.ok(engine.includes("Array.isArray(initialOpenTrades) ? initialOpenTrades : this.getOpenTrades()"));
+});
