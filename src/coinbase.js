@@ -146,6 +146,8 @@ export async function fetchCoinbaseOrderBook(product, requestState = DEFAULT_REQ
     const error = new Error("coinbase_order_book_failed_validation"); error.status = 502; throw error;
   }
   return { bid: bestBid, ask: bestAsk, bid_depth_quote: bidDepth, ask_depth_quote: askDepth,
+    book_bids: bids.slice(0, 25).map((level) => [Number(level[0]), Number(level[1])]),
+    book_asks: asks.slice(0, 25).map((level) => [Number(level[0]), Number(level[1])]),
     book_retrieved_at_ms: Date.now(), book_age_ms: 0,
     book_sequence: book?.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence) };
 }
