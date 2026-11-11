@@ -1,6 +1,7 @@
 import { auditCandles } from "./strategy.js";
 
 const BASE_URL = "https://api.exchange.coinbase.com";
+const ADVANCED_PUBLIC_BASE_URL = "https://api.coinbase.com/api/v3/brokerage";
 const MIN_PUBLIC_REQUEST_GAP_MS = 350;
 const MAX_RETRY_ATTEMPTS = 3;
 // Avoid sleeping through most of a scheduled scan when a provider asks for a long cooldown.
@@ -55,7 +56,7 @@ export function shouldRefreshCandleHistory(rows, intervalMs, nowMs = Date.now(),
   return nowMs >= lastTime + (2 * intervalMs);
 }
 
-export async function getJson(path, requestState = DEFAULT_REQUEST_STATE) {
+export async function getJson(path, requestState = DEFAULT_REQUEST_STATE, baseUrl = BASE_URL) {
   const state = requestState && typeof requestState === "object" ? requestState : DEFAULT_REQUEST_STATE;
   for (let attempt = 0; attempt < MAX_RETRY_ATTEMPTS; attempt += 1) {
     const now = Date.now();
@@ -74,7 +75,7 @@ export async function getJson(path, requestState = DEFAULT_REQUEST_STATE) {
     state.lastPublicRequestAt = Date.now();
     let response;
     try {
-      response = await fetch(BASE_URL + path, {
+      response = await fetch(baseUrl + path, {
         method: "GET",
         headers: {
           "Accept": "application/json",
@@ -150,6 +151,80 @@ export async function fetchCoinbaseOrderBook(product, requestState = DEFAULT_REQ
     book_asks: asks.slice(0, 25).map((level) => [Number(level[0]), Number(level[1])]),
     book_retrieved_at_ms: Date.now(), book_age_ms: 0,
     book_sequence: book?.sequence == null || !Number.isSafeInteger(Number(book.sequence)) ? null : Number(book.sequence) };
+}
+
+/**
+ * Fetch the public Coinbase Advanced Trade L2 book used by the separate
+ * Shadow simulator. This is deliberately not substituted for the existing
+ * Coinbase Exchange book used by the PAPER strategy/ledger.
+ */
+export async function fetchCoinbaseAdvancedOrderBook(product, requestState = DEFAULT_REQUEST_STATE) {
+  const productId = typeof product === "string" ? product : product?.product;
+  if (typeof productId !== "string" || !/^[A-Z0-9]+-[A-Z0-9]+$/.test(productId)) {
+    const error = new Error("invalid_coinbase_advanced_product_for_order_book");
+    error.code = "invalid_product";
+    error.status = 400;
+    throw error;
+  }
+  const path = "/market/product_book?product_id=" + encodeURIComponent(productId) + "&limit=25";
+  const response = await getJson(path, requestState, ADVANCED_PUBLIC_BASE_URL);
+  const pricebook = response?.pricebook;
+  if (pricebook?.product_id !== productId) {
+    const error = new Error("coinbase_advanced_order_book_product_mismatch");
+    error.code = "product_mismatch";
+    error.status = 502;
+    throw error;
+  }
+  const bids = Array.isArray(pricebook?.bids)
+    ? pricebook.bids.slice(0, 25).map((level) => [Number(level?.price), Number(level?.size)]) : [];
+  const asks = Array.isArray(pricebook?.asks)
+    ? pricebook.asks.slice(0, 25).map((level) => [Number(level?.price), Number(level?.size)]) : [];
+  const bestBid = Number(bids[0]?.[0]);
+  const bestAsk = Number(asks[0]?.[0]);
+  const bidDepth = parseBookSide(bids);
+  const askDepth = parseBookSide(asks);
+  const retrievedAtMs = Date.now();
+  const eventTimeMs = Date.parse(pricebook?.time || "");
+  const eventAgeMs = retrievedAtMs - eventTimeMs;
+  if (![bestBid, bestAsk, bidDepth, askDepth, eventTimeMs].every(Number.isFinite) ||
+      bestBid <= 0 || bestAsk < bestBid || bidDepth < 0 || askDepth < 0 ||
+      eventAgeMs < -1000 || eventAgeMs > 15000 ||
+      bids.some((level) => !level.every(Number.isFinite) || level[0] <= 0 || level[1] <= 0) ||
+      asks.some((level) => !level.every(Number.isFinite) || level[0] <= 0 || level[1] <= 0)) {
+    const error = new Error("coinbase_advanced_order_book_failed_validation_or_stale");
+    error.code = "invalid_or_stale_advanced_book";
+    error.status = 502;
+    throw error;
+  }
+  for (let index = 1; index < bids.length; index += 1) {
+    if (bids[index][0] > bids[index - 1][0]) {
+      const error = new Error("coinbase_advanced_bid_levels_out_of_order");
+      error.code = "advanced_book_levels_out_of_order";
+      error.status = 502;
+      throw error;
+    }
+  }
+  for (let index = 1; index < asks.length; index += 1) {
+    if (asks[index][0] < asks[index - 1][0]) {
+      const error = new Error("coinbase_advanced_ask_levels_out_of_order");
+      error.code = "advanced_book_levels_out_of_order";
+      error.status = 502;
+      throw error;
+    }
+  }
+  return {
+    bid: bestBid,
+    ask: bestAsk,
+    bid_depth_quote: bidDepth,
+    ask_depth_quote: askDepth,
+    book_bids: bids,
+    book_asks: asks,
+    book_retrieved_at_ms: retrievedAtMs,
+    book_event_time_ms: eventTimeMs,
+    book_age_ms: Math.max(0, eventAgeMs),
+    book_sequence: null,
+    book_source: "coinbase_advanced_trade_public"
+  };
 }
 
 /**
