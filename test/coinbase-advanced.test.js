@@ -745,3 +745,29 @@ test("daily exchange order count fails closed on incomplete pagination", async (
   assert.equal(result.status, 'provider_check_failed');
   assert.ok(result.blockers.includes('coinbase_advanced_daily_orders_pagination_invalid'));
 });
+
+
+test("preflight reports the failing read-only stage and retains verified permission booleans safely", async () => {
+  const env = makeEnv();
+  const fake = mockApi(env);
+  const fetchImpl = async (url, options) => {
+    if (new URL(String(url)).pathname.endsWith("/accounts")) {
+      return Response.json({ error: "provider-detail-must-not-be-exposed" }, { status: 400 });
+    }
+    return fake.fetchImpl(url, options);
+  };
+  const result = await preflightCoinbaseAdvanced(env, { fetchImpl });
+  assert.equal(result.status, "provider_check_failed");
+  assert.equal(result.preflight_stage, "accounts");
+  assert.deepEqual(result.permissions, {
+    can_view: true,
+    can_trade: false,
+    can_transfer: false
+  });
+  assert.equal(result.provider_http_status, 400);
+  assert.equal(result.fee_summary.status, "verified");
+  assert.equal(JSON.stringify(result).includes("provider-detail-must-not-be-exposed"), false);
+  assert.equal(result.order_submission_available, false);
+  assert.equal(result.live_trading_enabled, false);
+  assert.equal(result.automatic_live_entries_enabled, false);
+});
