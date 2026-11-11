@@ -192,9 +192,9 @@ test("production engine enforces Risk Guardian before Paper entries and serves w
   const openTradeIndex = engineSource.indexOf("this.openPaperTrade(candidates[0]");
   assert.ok(riskGateIndex >= 0 && openTradeIndex > riskGateIndex, "Risk Guardian must run before a new Paper entry");
   assert.ok(engineSource.includes("else if (riskGuardianDecision.veto)"));
-  assert.match(engineSource, /this\\.setState\\("workforce", workforce\\)/);
-  assert.match(engineSource, /readAiWorkforceStatus/);
-  assert.match(engineSource, /markAiWorkforceFailure/);
-  assert.match(dashboardSource, /id="aiWorkforcePanel"/);
-  assert.match(dashboardSource, /renderAiWorkforce\(data\.workforce\)/);
+  assert.ok(engineSource.includes('this.setState("workforce", workforce)'));
+  assert.ok(engineSource.includes('readAiWorkforceStatus(this.getState("workforce"), runtime, nowMs)'));
+  assert.ok(engineSource.includes("markAiWorkforceFailure"));
+  assert.ok(dashboardSource.includes('id="aiWorkforcePanel"'));
+  assert.ok(dashboardSource.includes("renderAiWorkforce(data.workforce)"));
 });
