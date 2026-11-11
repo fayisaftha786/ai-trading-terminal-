@@ -35,7 +35,7 @@ test("premium Coinbase connection center exposes each independent account readin
 test("Coinbase UI treats authenticated preflight as the source of account connection truth", () => {
   assert.match(dashboard, /api\("\/api\/live\/status"\)/);
   assert.match(dashboard, /api\("\/api\/live\/preflight",\{method:"POST",body:"\{\}"\}\)/);
-  assert.match(dashboard, /const hasPreflight=!!permissions&&result\?\.status!=="provider_check_failed"/);
+  assert.match(dashboard, /const hasPreflight=hasVerifiedPermissions&&result\?\.status!=="provider_check_failed"/);
   assert.match(dashboard, /const hasVerifiedPermissions=!!permissions/);
   assert.match(dashboard, /title:"Latest preflight result"/);
   assert.match(dashboard, /ok:ready,known:!!result\?\.status/);
