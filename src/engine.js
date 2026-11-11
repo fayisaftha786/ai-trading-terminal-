@@ -1582,7 +1582,9 @@ export class TradingEngine extends DurableObject {
           higher: market.higher || {},
           nowMs: Date.now(),
           costs: { feeBpsPerSide: risk.fee_bps_per_side, slippageBps: risk.slippage_bps },
-          marketContext
+          marketContext,
+          stopLossPct: risk.stop_loss_pct,
+          minimumNetRewardRisk: 1
         });
       }
       this.saveMarket(market, market.status === "live" ? "live" : "error");
@@ -2582,7 +2584,9 @@ export class TradingEngine extends DurableObject {
     const roundTripCostRate = roundTripCostBps / 10000;
     const dynamicTarget = calculateDynamicTakeProfit({
       atrPct: market.primary?.atr_pct,
-      roundTripCostBps
+      roundTripCostBps,
+      stopLossPct: risk.stop_loss_pct,
+      minimumNetRewardRisk: 1
     });
     if (!dynamicTarget.ok) return { ok: false, reason: dynamicTarget.reason };
     const effectiveStopRate = risk.stop_loss_pct / 100 + roundTripCostRate;
@@ -2610,6 +2614,10 @@ export class TradingEngine extends DurableObject {
         dynamic_take_profit_pct: dynamicTarget.target_pct,
         dynamic_take_profit_bps: dynamicTarget.target_bps,
         estimated_net_edge_bps: dynamicTarget.estimated_net_edge_bps,
+        estimated_net_reward_bps: dynamicTarget.estimated_net_reward_bps,
+        estimated_net_risk_bps: dynamicTarget.estimated_net_risk_bps,
+        net_reward_risk_ratio: dynamicTarget.net_reward_risk_ratio,
+        minimum_net_reward_risk: dynamicTarget.minimum_net_reward_risk,
         fee_bps_per_side: risk.fee_bps_per_side, slippage_bps: risk.slippage_bps,
         configured_risk_per_trade_pct: risk.risk_per_trade_pct,
         adaptive_risk_multiplier: adaptiveRisk.multiplier,
