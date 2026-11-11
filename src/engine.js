@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PRODUCTS, createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot } from "./coinbase.js";
+import { PRODUCTS, createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchCoinbaseAdvancedOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
 import {
   coinbaseAdvancedErrorStatus,
@@ -2116,6 +2116,9 @@ export class TradingEngine extends DurableObject {
     let refreshed = 0;
     let failed = 0;
     let skipped = 0;
+    let shadowRefreshed = 0;
+    let shadowFailed = 0;
+    const shadowIssues = [];
 
     for (const product of PRODUCTS) {
       const market = bySymbol.get(product.symbol);
@@ -2173,6 +2176,55 @@ export class TradingEngine extends DurableObject {
             : "coinbase_local_l2_retrieval_time",
           quote_freshness_source: "local_order_book_response_time_for_exit_marking"
         };
+        if (provider === "coinbase_exchange") {
+          try {
+            const shadowBook = await fetchCoinbaseAdvancedOrderBook(market.product, requestState);
+            market.shadow_bid = shadowBook.bid;
+            market.shadow_ask = shadowBook.ask;
+            market.shadow_bid_depth_quote = shadowBook.bid_depth_quote;
+            market.shadow_ask_depth_quote = shadowBook.ask_depth_quote;
+            market.shadow_book_bids = shadowBook.book_bids;
+            market.shadow_book_asks = shadowBook.book_asks;
+            market.shadow_book_retrieved_at_ms = shadowBook.book_retrieved_at_ms;
+            market.shadow_book_event_time_ms = shadowBook.book_event_time_ms;
+            market.shadow_book_age_ms = shadowBook.book_age_ms;
+            market.shadow_book_source = shadowBook.book_source;
+            market.shadow_last = shadowBook.last;
+            market.shadow_book_status = "available";
+            market.shadow_book_error = null;
+            shadowRefreshed += 1;
+          } catch (shadowError) {
+            market.shadow_bid = null;
+            market.shadow_ask = null;
+            market.shadow_bid_depth_quote = null;
+            market.shadow_ask_depth_quote = null;
+            market.shadow_book_bids = null;
+            market.shadow_book_asks = null;
+            market.shadow_book_retrieved_at_ms = null;
+            market.shadow_book_event_time_ms = null;
+            market.shadow_book_age_ms = null;
+            market.shadow_book_source = null;
+            market.shadow_last = null;
+            market.shadow_book_status = "provider_error";
+            market.shadow_book_error = String(shadowError?.code || shadowError?.message || "advanced_public_book_failed").slice(0, 100);
+            shadowFailed += 1;
+            shadowIssues.push({ symbol: product.symbol, reason: market.shadow_book_error });
+          }
+        } else {
+          market.shadow_bid = null;
+          market.shadow_ask = null;
+          market.shadow_bid_depth_quote = null;
+          market.shadow_ask_depth_quote = null;
+          market.shadow_book_bids = null;
+          market.shadow_book_asks = null;
+          market.shadow_book_retrieved_at_ms = null;
+          market.shadow_book_event_time_ms = null;
+          market.shadow_book_age_ms = null;
+          market.shadow_book_source = null;
+          market.shadow_last = null;
+          market.shadow_book_status = "unsupported_market_source";
+          market.shadow_book_error = "coinbase_exchange_market_data_required";
+        }
         this.saveMarket(market, "live");
         refreshed += 1;
       } catch (error) {
@@ -2185,6 +2237,16 @@ export class TradingEngine extends DurableObject {
               : "order_book_refresh_failed";
         market.book_bids = null;
         market.book_asks = null;
+        market.shadow_bid = null;
+        market.shadow_ask = null;
+        market.shadow_bid_depth_quote = null;
+        market.shadow_ask_depth_quote = null;
+        market.shadow_book_bids = null;
+        market.shadow_book_asks = null;
+        market.shadow_book_retrieved_at_ms = null;
+        market.shadow_book_source = null;
+        market.shadow_book_status = "blocked_by_exchange_book_failure";
+        market.shadow_book_error = errorCode;
         market.data_quality = {
           ...(market.data_quality || {}),
           book_provider: provider,
@@ -2231,7 +2293,13 @@ export class TradingEngine extends DurableObject {
         reason: String(issue.reason || "unknown").slice(0, 100)
       })),
       last_book_refresh_exits: exits,
-      last_book_refresh_shadow_exits: shadowExits
+      last_book_refresh_shadow_exits: shadowExits,
+      last_shadow_book_refresh_at_ms: Date.now(),
+      last_shadow_book_refresh_status: shadowFailed === 0 && shadowRefreshed === PRODUCTS.length ? "completed"
+        : shadowRefreshed > 0 ? "partial" : "unavailable",
+      last_shadow_book_refresh_success_count: shadowRefreshed,
+      last_shadow_book_refresh_failed_count: shadowFailed,
+      last_shadow_book_refresh_issues: shadowIssues.slice(0, PRODUCTS.length)
     };
 
     return { status, refreshed, failed, skipped, market_feed: feed, paper_exits: exits, telemetry };
@@ -2869,11 +2937,11 @@ export class TradingEngine extends DurableObject {
       if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) continue;
       const meta = trade.metadata || {};
       const reason = meta.exit_triggered ? (meta.exit_trigger_reason || "exit_retry")
-        : Number(market.bid) <= Number(trade.stop_loss) ? "stop_loss"
-        : Number(market.bid) >= Number(trade.take_profit) ? "take_profit" : null;
+        : Number(market.shadow_bid) <= Number(trade.stop_loss) ? "stop_loss"
+        : Number(market.shadow_bid) >= Number(trade.take_profit) ? "take_profit" : null;
       if (!reason) continue;
       const fill = simulateShadowMarketSell({
-        baseQuantity: Number(trade.remaining_quantity), bids: market.book_bids,
+        baseQuantity: Number(trade.remaining_quantity), bids: market.shadow_book_bids,
         feeBpsPerSide: Number(meta.fee_bps_per_side ?? risk.fee_bps_per_side),
         extraSlippageBps: Number(meta.extra_slippage_bps ?? risk.slippage_bps)
       });
@@ -2919,15 +2987,41 @@ export class TradingEngine extends DurableObject {
       runtime.last_entry_status = status; runtime.last_entry_reason = reason;
       runtime.last_entry_symbol = symbol; this.setState("shadow_runtime", runtime); return runtime;
     };
+    if (settings.halted === true) return finish("halted", "global_emergency_stop_active");
     if (settings.shadow_enabled === false) return finish("disabled", "owner_disabled_shadow_entries");
     if (this.getOpenShadowTrades().length) return finish("position_open", "one_global_shadow_position_limit");
     if (marketFeed?.healthy !== true) return finish("blocked", "complete_fresh_coinbase_market_universe_required");
-    const candidates = (Array.isArray(markets) ? markets : [])
-      .filter((m) => m?.entry_gate?.eligible === true)
-      .sort((a,b) => Number(b.primary?.score || 0) - Number(a.primary?.score || 0));
-    if (!candidates.length) return finish("no_qualified_signal", "strategy_entry_gate_not_eligible");
-    const market = candidates[0];
-    if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) return finish("blocked", "fresh_coinbase_l2_book_required", market.symbol);
+    const candidates = [];
+    for (const market of (Array.isArray(markets) ? markets : [])) {
+      if (!isFreshShadowBook(market, nowMs, MAX_ORDER_BOOK_AGE_MS)) continue;
+      const shadowQuote = {
+        ...market,
+        bid: Number(market.shadow_bid),
+        ask: Number(market.shadow_ask),
+        last: Number(market.shadow_last),
+        bid_depth_quote: Number(market.shadow_bid_depth_quote),
+        ask_depth_quote: Number(market.shadow_ask_depth_quote),
+        book_retrieved_at_ms: Number(market.shadow_book_retrieved_at_ms),
+        quote_received_at_ms: Number(market.shadow_book_retrieved_at_ms)
+      };
+      const assessment = assessCandidate({
+        market: shadowQuote,
+        primary: market.primary || {},
+        higher: market.higher || {},
+        nowMs,
+        costs: {
+          feeBpsPerSide: Math.max(0, Number(risk.fee_bps_per_side) || 0),
+          slippageBps: Math.max(0, Number(risk.slippage_bps) || 0)
+        },
+        marketContext: market.market_context,
+        stopLossPct: risk.stop_loss_pct,
+        minimumNetRewardRisk: 1
+      });
+      if (assessment.eligible) candidates.push({ market, assessment });
+    }
+    candidates.sort((a,b) => Number(b.market.primary?.score || 0) - Number(a.market.primary?.score || 0));
+    if (!candidates.length) return finish("no_qualified_signal_or_advanced_book_unavailable", "shadow_strategy_gate_not_eligible");
+    const { market, assessment } = candidates[0];
     const previous = this.sql.exec(
       "SELECT opened_at_ms,closed_at_ms,status FROM shadow_trades WHERE symbol=? ORDER BY id DESC LIMIT 1",
       market.symbol
@@ -2940,12 +3034,16 @@ export class TradingEngine extends DurableObject {
     const initial = Number(settings.shadow_initial_capital_usd) || 100;
     const day = new Date(nowMs); day.setUTCHours(0,0,0,0);
     const dayStats = this.sql.exec(
-      "SELECT COUNT(*) AS trades,COALESCE(SUM(net_pnl_usd),0) AS pnl FROM shadow_trades WHERE opened_at_ms>=?",
+      "SELECT COUNT(*) AS trades FROM shadow_trades WHERE opened_at_ms>=?",
       day.getTime()
     ).toArray()[0] || {};
     if (Number(dayStats.trades || 0) >= PAPER_AUTOMATION_PROFILE.max_cycles_per_day) return finish("blocked", "shadow_daily_trade_cap", market.symbol);
+    const dailyRealized = this.sql.exec(
+      "SELECT COALESCE(SUM(net_pnl_usd),0) AS pnl FROM shadow_trades WHERE status='CLOSED' AND closed_at_ms>=?",
+      day.getTime()
+    ).toArray()[0] || {};
     const dailyLoss = initial * Math.max(0.1, Number(risk.max_daily_loss_pct) || 1) / 100;
-    if (Number(dayStats.pnl || 0) <= -dailyLoss) return finish("blocked", "shadow_daily_loss_limit", market.symbol);
+    if (Number(dailyRealized.pnl || 0) <= -dailyLoss) return finish("blocked", "shadow_daily_loss_limit", market.symbol);
     const historical = this.sql.exec("SELECT COALESCE(SUM(net_pnl_usd),0) AS pnl FROM shadow_trades WHERE status='CLOSED'").toArray()[0] || {};
     const cumulativeLossLimit = initial * Math.max(1, Number(risk.max_total_drawdown_pct) || 5) / 100;
     if (Number(historical.pnl || 0) <= -cumulativeLossLimit) return finish("blocked", "shadow_cumulative_loss_limit", market.symbol);
@@ -2954,22 +3052,23 @@ export class TradingEngine extends DurableObject {
     if (budget < 2) return finish("blocked", "shadow_position_budget_below_minimum", market.symbol);
     const fee = Math.max(0, Number(risk.fee_bps_per_side) || 0);
     const slip = Math.max(0, Number(risk.slippage_bps) || 0);
-    const fill = simulateShadowMarketBuy({ quoteBudget: budget, asks: market.book_asks,
+    const fill = simulateShadowMarketBuy({ quoteBudget: budget, asks: market.shadow_book_asks,
       feeBpsPerSide: fee, extraSlippageBps: slip });
     if (!fill.ok || fill.effective_quote_usd < 2) return finish("blocked", fill.reason || "shadow_fill_below_minimum", market.symbol);
     const stopPct = Math.min(10, Math.max(0.25, Number(risk.stop_loss_pct) || 1));
-    const targetPct = Number(market.entry_gate.dynamic_take_profit_pct);
+    const targetPct = Number(assessment.dynamic_take_profit_pct);
     if (!Number.isFinite(targetPct) || targetPct <= 0) return finish("blocked", "shadow_take_profit_unavailable", market.symbol);
     const stop = fill.effective_vwap_price * (1 - stopPct / 100);
     const target = fill.effective_vwap_price * (1 + targetPct / 100);
     const meta = {
       execution_model: "coinbase_visible_l2_book_walk_v1", market_data_provider: "coinbase_exchange",
       entry_score: Number(market.primary?.score) || 0,
-      market_context_mode: market.market_context?.mode || market.entry_gate.market_context_mode || null,
-      entry_gate_reason: market.entry_gate.reason || "eligible",
-      entry_spread_bps: Number(market.entry_gate.spread_bps) || 0,
-      entry_book_retrieved_at_ms: Number(market.book_retrieved_at_ms),
-      entry_book_sequence: market.book_sequence ?? null,
+      market_context_mode: market.market_context?.mode || assessment.market_context_mode || null,
+      entry_gate_reason: assessment.reason || "eligible",
+      entry_spread_bps: Number(assessment.spread_bps) || 0,
+      entry_book_source: market.shadow_book_source,
+      entry_book_retrieved_at_ms: Number(market.shadow_book_retrieved_at_ms),
+      entry_book_event_time_ms: Number(market.shadow_book_event_time_ms),
       entry_fill_status: fill.status, entry_fill_ratio: fill.fill_ratio,
       entry_levels_used: fill.levels_used, entry_book_vwap_price: fill.book_vwap_price,
       entry_effective_vwap_price: fill.effective_vwap_price,
@@ -3031,7 +3130,7 @@ export class TradingEngine extends DurableObject {
     const grossLoss = Math.abs(Number(stats.gross_losses || 0)); const grossWin = Number(stats.gross_wins || 0);
     return {
       enabled: settings.shadow_enabled !== false, mode: "coinbase_l2_shadow",
-      exchange_orders_submitted: false, data_source: "Coinbase Exchange public L2 snapshots",
+      exchange_orders_submitted: false, data_source: "Coinbase Advanced Trade public L2 snapshots; strategy indicators use Coinbase Exchange candles and ticker",
       execution_model: "Up to 25 visible levels, configured fee assumption and adverse slippage buffer; partial fills are retained.",
       limitations: ["Public L2 snapshots do not expose queue position or guaranteed fills.",
         "Network latency and future book movement are not replayed.",
