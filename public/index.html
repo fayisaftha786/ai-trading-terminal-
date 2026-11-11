@@ -467,7 +467,11 @@ const COINBASE_ACCOUNT_SYNC_INTERVAL_MS=5*60*1000;
 
 function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePreflightResult,checkedAtMs=coinbasePreflightAtMs){
   const permissions=result?.permissions||null;
-  const hasPreflight=!!permissions&&result?.status!=="provider_check_failed";
+  const hasVerifiedPermissions=!!permissions;
+  const hasPreflight=hasVerifiedPermissions&&result?.status!=="provider_check_failed";
+  const preflightFailed=result?.status==="provider_check_failed";
+  const preflightStage=typeof result?.preflight_stage==="string"?result.preflight_stage.replace(/_/g," "):"unknown stage";
+  const providerHttpStatus=Number.isInteger(result?.provider_http_status)?result.provider_http_status:null;
   const ready=result?.status==="preflight_ready_for_manual_order_preview";
   const products=Array.isArray(result?.products)?result.products:[];
   const eligible=Array.isArray(result?.eligible_products)?result.eligible_products:[];
@@ -485,13 +489,14 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
             :"Waiting for first scheduled read-only reconciliation";
   const checks=[
     {title:"Worker credentials",detail:configured?"CDP key present · "+String(status?.credential_key_format_hint||"private-key format unverified"):"Add CDP credentials only in Cloudflare Worker Secrets",ok:configured&&status?.credential_key_format_hint!=="unknown_format",known:true},
-    {title:"API authentication",detail:hasPreflight?"Coinbase key authenticated successfully":configured?"Authenticated preflight not completed":"Waiting for secure credentials",ok:hasPreflight,known:configured},
-    {title:"View permission",detail:hasPreflight?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasPreflight},
-    {title:"Trade permission",detail:hasPreflight?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasPreflight},
-    {title:"Transfer disabled",detail:hasPreflight?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasPreflight},
+    {title:"API authentication",detail:hasVerifiedPermissions?"Authenticated · Coinbase key-permissions endpoint verified":preflightFailed?"Provider preflight failed before permissions were verified":configured?"Authenticated preflight not completed":"Waiting for secure credentials",ok:hasVerifiedPermissions,known:configured},
+    {title:"View permission",detail:hasVerifiedPermissions?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasVerifiedPermissions},
+    {title:"Trade permission",detail:hasVerifiedPermissions?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasVerifiedPermissions},
+    {title:"Transfer disabled",detail:hasVerifiedPermissions?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasVerifiedPermissions},
+    {title:"Latest preflight result",detail:preflightFailed?"Failed at "+preflightStage+(providerHttpStatus?" · Coinbase HTTP "+providerHttpStatus:" · provider HTTP status unavailable"):result?.status?String(result.status).replace(/_/g," "):"Not run",ok:!!result?.status&&!preflightFailed,known:!!result?.status},
     {title:"SPOT fee tier",detail:feeVerified
       ?String(feeSummary.pricing_tier||"tier unlabelled")+" · maker "+String(feeSummary.maker_fee_bps)+" bps / taker "+String(feeSummary.taker_fee_bps)+" bps"
-      :String(feeSummary.reason||"Fee tier not checked").replace(/_/g," "),ok:feeVerified,known:hasPreflight&&feeSummary.status!=="not_checked"},
+      :String(feeSummary.reason||"Fee tier not checked").replace(/_/g," "),ok:feeVerified,known:hasVerifiedPermissions&&feeSummary.status!=="not_checked"},
     {title:"Spot products",detail:hasPreflight?(eligible.length?eligible.length+" eligible product(s)":products.length+" checked · none eligible"):"Not verified",ok:ready&&eligible.length>0,known:hasPreflight},
     {title:"Available balances",detail:hasPreflight?(Object.keys(balances).length?Object.keys(balances).length+" currency balance(s) loaded":"No eligible balances returned"):"Not verified",ok:hasPreflight&&Object.keys(balances).length>0,known:hasPreflight},
     {title:"Manual execution guard",detail:result?.order_submission_available===true?"Manual order path passed dynamic preflight":"Locked until Trade permission, Worker switch, allowlist, quote cap and order limits pass",ok:result?.order_submission_available===true,known:hasPreflight},
@@ -518,8 +523,8 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
   const syncState=$("coinbaseSyncState");
   const syncTime=$("coinbaseLastSync");
   if(syncState){
-    syncState.textContent=!configured?"NOT CONFIGURED":!hasPreflight?"PREFLIGHT REQUIRED":ready?"ACCOUNT VERIFIED": "CHECKS BLOCKED";
-    syncState.className="feed-pill "+(!configured||!hasPreflight?"stale":ready?"live":"offline");
+    syncState.textContent=!configured?"NOT CONFIGURED":preflightFailed?"PREFLIGHT FAILED · "+preflightStage+(providerHttpStatus?" · HTTP "+providerHttpStatus:""):!hasPreflight?"PREFLIGHT REQUIRED":ready?"ACCOUNT VERIFIED":"CHECKS BLOCKED";
+    syncState.className="feed-pill "+(!configured?"stale":preflightFailed?"offline":!hasPreflight?"stale":ready?"live":"offline");
   }
   if(syncTime){
     syncTime.textContent=checkedAtMs?("Last read-only sync · "+new Date(checkedAtMs).toLocaleString()):"No authenticated account check yet";
@@ -582,13 +587,14 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
   summary.push(configured?"Server-side credentials configured":"Server-side credentials missing");
   summary.push(status?.allowed_products_configured?"product allowlist set":"product allowlist missing");
   summary.push(status?.max_order_quote_configured?"quote cap "+String(status.max_order_quote):"quote cap missing");
-  if(hasPreflight&&Array.isArray(result.blockers)&&result.blockers.length)summary.push(...result.blockers);
+  if(Array.isArray(result?.blockers)&&result.blockers.length)summary.push(...result.blockers);
   else if(ready)summary.push(eligible.join(", "));
   $("liveSummary").textContent=summary.join(" · ");
   const submitReady=result?.order_submission_available===true&&permissions?.can_trade===true&&ready;
   $("liveState").textContent=submitReady?"ACCOUNT VERIFIED · MANUAL ORDER PREVIEW READY"
     :ready?"ACCOUNT READ-ONLY VERIFIED · ORDER GUARD LOCKED"
-      :hasPreflight?"COINBASE CHECKS BLOCKED":configured?"ACCOUNT PREFLIGHT REQUIRED":"LIVE ORDERS LOCKED · SETUP REQUIRED";
+      :preflightFailed?"COINBASE PREFLIGHT FAILED · "+preflightStage+(providerHttpStatus?" · HTTP "+providerHttpStatus:"")
+        :hasPreflight?"COINBASE CHECKS BLOCKED":configured?"ACCOUNT PREFLIGHT REQUIRED":"LIVE ORDERS LOCKED · SETUP REQUIRED";
   $("liveState").className="tag "+(submitReady?"good":"bad");
   $("livePreview").disabled=!ready||eligible.length===0;
   $("liveSubmit").disabled=true;
@@ -635,6 +641,8 @@ async function runCoinbasePreflight({silent=false,force=false}={}){
       renderCoinbaseConnection(coinbaseStaticStatus,result,coinbasePreflightAtMs);
       $("liveDetails").textContent=JSON.stringify({
         status:result.status,
+        preflight_stage:result.preflight_stage||null,
+        provider_http_status:result.provider_http_status??null,
         permissions:result.permissions,
         eligible_products:result.eligible_products||[],
         products:result.products||[],
