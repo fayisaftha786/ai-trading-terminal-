@@ -29,14 +29,6 @@ services:
       - key: SCAN_INTERVAL_SECONDS
         value: "60"
       - key: CEX_EXCHANGE
-        value: binance
+        value: coinbase
       - key: CEX_SYMBOLS
-        value: BTC/USDT,ETH/USDT,SOL/USDT
-      - key: BINANCE_TESTNET_ENABLED
-        value: "false"
-      - key: BINANCE_TESTNET_ORDER_ENABLED
-        value: "false"
-      - key: BINANCE_TESTNET_API_KEY
-        value: ""
-      - key: BINANCE_TESTNET_API_SECRET
-        value: ""
+        value: BTC/USD,ETH/USD,SOL/USD
