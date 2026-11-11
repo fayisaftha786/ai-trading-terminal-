@@ -47,6 +47,8 @@ Both timeframes must classify as range/transition, primary ADX must be low, RSI 
 - Malformed rows, duplicate timestamps, off-grid candles, missing intervals and future higher-timeframe closes block the research result.
 - Heuristic scores are transparent rule counts, not calibrated probabilities or model confidence.
 - Every returned candidate carries `execution_authorized=false`.
+- The Cloudflare PAPER entry gate now requires a dynamically calculated target that can deliver at least 1:1 net reward/risk after estimated round-trip fees, slippage and spread. The same calculation is repeated at trade creation; a target beyond the safe 5% cap is rejected.
+- This net reward/risk floor is a trade-quality constraint, not a win-probability estimate or profitability guarantee. The strategy still requires real-candle walk-forward validation and forward PAPER evidence.
 - The lab is not connected to `AutoPaperEngine`, any exchange order route, wallet or signing key.
 - A candidate does not become a trading strategy merely because the heuristic filters are satisfied.
 
