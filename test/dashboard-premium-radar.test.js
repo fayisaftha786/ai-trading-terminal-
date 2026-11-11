@@ -44,3 +44,9 @@ test("paper automation remains distinct from guarded manual Coinbase execution",
   assert.match(html, /Confirm &amp; submit REAL order/);
   assert.match(html, /live execution locked/);
 });
+
+test("market radar surfaces the cost-adjusted take-profit and net reward-risk for qualified entries", () => {
+  assert.match(html, /Net R:R/);
+  assert.match(html, /dynamic_take_profit_pct/);
+  assert.match(html, /round_trip_cost_bps/);
+});

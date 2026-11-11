@@ -96,6 +96,57 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   assert.equal(assessCandidate({ market: { ...market, ask: 101 }, primary, higher, nowMs: now, costs }).reason, "spread_too_wide");
 });
 
+test("candidate gate reports at least 1:1 net reward/risk after fees, slippage and spread", () => {
+  const now = Date.now();
+  const market = {
+    status: "live", market_data_provider: "coinbase_exchange",
+    ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
+    bid: 100, ask: 100.01, last: 100,
+    quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000,
+    book_retrieved_at_ms: now - 1000
+  };
+  const primary = {
+    signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000, atr_pct: 2, rsi14: 55,
+    adx14: 30, plus_di14: 40, minus_di14: 10
+  };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const result = assessCandidate({
+    market, primary, higher, nowMs: now,
+    costs: { feeBpsPerSide: 15, slippageBps: 10 },
+    stopLossPct: 1,
+    minimumNetRewardRisk: 1
+  });
+  assert.equal(result.eligible, true);
+  assert.ok(result.dynamic_take_profit_bps >= result.round_trip_cost_bps + 100 + result.round_trip_cost_bps);
+  assert.ok(result.net_reward_risk_ratio >= 1);
+  assert.equal(result.minimum_net_reward_risk, 1);
+});
+
+test("candidate gate rejects an unreachable net reward/risk target instead of opening the trade", () => {
+  const now = Date.now();
+  const market = {
+    status: "live", market_data_provider: "coinbase_exchange",
+    ticker_time: new Date(now).toISOString(), quote_received_at_ms: now - 1000,
+    bid: 100, ask: 100.01, last: 100,
+    quote_volume_usd: 5000000, bid_depth_quote: 10000, ask_depth_quote: 10000,
+    book_retrieved_at_ms: now - 1000
+  };
+  const primary = {
+    signal: "BUY_CANDIDATE", score: 90, regime: "UPTREND",
+    last_closed_candle_ms: now - 3600000, atr_pct: 4.9, rsi14: 55,
+    adx14: 30, plus_di14: 40, minus_di14: 10
+  };
+  const higher = { regime: "UPTREND", last_closed_candle_ms: now - 21600000 };
+  const result = assessCandidate({
+    market, primary, higher, nowMs: now,
+    costs: { feeBpsPerSide: 50, slippageBps: 25 },
+    stopLossPct: 4.5
+  });
+  assert.equal(result.eligible, false);
+  assert.equal(result.reason, "dynamic_target_outside_safe_bounds");
+});
+
 test("candidate gate rejects stale timeframe candles and invalid execution assumptions", () => {
   const now = Date.now();
   const market = { status: "live", market_data_provider: "coinbase_exchange", ticker_time: new Date(now).toISOString(), bid: 100, ask: 100.01,
