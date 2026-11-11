@@ -34,21 +34,21 @@ APK="$ROOT/android/app/build/outputs/apk/debug/app-debug.apk"
 "$APKSIGNER" verify --verbose "$APK"
 # Verify package/version/minSdk/targetSdk with aapt dump badging.
 BADGING="$("$AAPT" dump badging "$APK")"
-printf '%s\n' "$BADGING" | grep -Fq "package: name='app.aitradingterminal.debug' versionCode='48' versionName='0.7.1-debug'" || fail "APK package/version metadata does not match v0.7.1 debug build."
+printf '%s\n' "$BADGING" | grep -Fq "package: name='app.aitradingterminal.debug' versionCode='49' versionName='0.7.2-debug'" || fail "APK package/version metadata does not match v0.7.2 debug build."
 printf '%s\n' "$BADGING" | grep -Fq "sdkVersion:'26'" || fail "APK minSdk is not 26."
 printf '%s\n' "$BADGING" | grep -Fq "targetSdkVersion:'35'" || fail "APK targetSdk is not 35."
 
 mkdir -p "$ROOT/dist"
-OUT="$ROOT/dist/AITradingTerminal-Android-v0.7.1-debug.apk"
+OUT="$ROOT/dist/AITradingTerminal-Android-v0.7.2-debug.apk"
 cp "$APK" "$OUT"
 (cd "$ROOT/dist" && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
-python - "$OUT" "$ROOT/dist/AITradingTerminal-Android-v0.7.1-build-info.txt" "$GRADLE_VERSION" "$JAVA_VERSION" <<'PY'
+python - "$OUT" "$ROOT/dist/AITradingTerminal-Android-v0.7.2-build-info.txt" "$GRADLE_VERSION" "$JAVA_VERSION" <<'PY'
 import hashlib, pathlib, sys
 apk = pathlib.Path(sys.argv[1])
 digest = hashlib.sha256(apk.read_bytes()).hexdigest()
 pathlib.Path(sys.argv[2]).write_text(
     "AI Trading Terminal Android debug build\n"
-    "Version: 0.7.1\n"
+    "Version: 0.7.2\n"
     f"Gradle: {sys.argv[3]}\nJava: {sys.argv[4]}\n"
     f"APK bytes: {apk.stat().st_size}\nSHA-256: {digest}\n"
     "Signing: Android debug key (testing only)\n"
