@@ -38,6 +38,7 @@ test("Coinbase UI treats authenticated preflight as the source of account connec
   assert.match(dashboard, /const hasPreflight=!!permissions&&result\?\.status!=="provider_check_failed"/);
   assert.match(dashboard, /const hasVerifiedPermissions=!!permissions/);
   assert.match(dashboard, /title:"Latest preflight result"/);
+  assert.match(dashboard, /ok:ready,known:!!result\?\.status/);
   assert.match(dashboard, /preflight_stage:result\.preflight_stage\|\|null/);
   assert.match(dashboard, /provider_http_status:result\.provider_http_status\?\?null/);
   assert.match(dashboard, /Authenticated · Coinbase key-permissions endpoint verified/);
