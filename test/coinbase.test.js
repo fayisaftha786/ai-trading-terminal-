@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
+import { createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchCoinbaseAdvancedOrderBook, fetchProductSnapshot, getJson, parseRetryAfterMs, shouldRefreshCandleHistory } from "../src/coinbase.js";
 
 test("Retry-After parses seconds and HTTP dates without truncating the provider delay", () => {
   assert.equal(parseRetryAfterMs("2", 1000), 2000);
@@ -153,6 +153,82 @@ test("final Coinbase order-book refresh rejects malformed or crossed books", asy
     globalThis.fetch = originalFetch;
   }
 });
+function makeAdvancedBook(overrides = {}) {
+  const time = new Date().toISOString();
+  const { pricebook: pricebookOverrides, ...responseOverrides } = overrides;
+  return {
+    pricebook: {
+      product_id: "BTC-USD",
+      time,
+      bids: Array.from({ length: 25 }, (_, index) => ({
+        price: String(100 - index * 0.01), size: "10"
+      })),
+      asks: Array.from({ length: 25 }, (_, index) => ({
+        price: String(100.01 + index * 0.01), size: "10"
+      })),
+      ...(pricebookOverrides || {})
+    },
+    last: "100.005",
+    ...responseOverrides
+  };
+}
+
+test("Advanced Trade public product book returns fresh bounded L2 execution data", async () => {
+  const originalFetch = globalThis.fetch;
+  let requested = "";
+  globalThis.fetch = async (url) => {
+    requested = String(url);
+    return jsonResponse(makeAdvancedBook());
+  };
+  try {
+    const result = await fetchCoinbaseAdvancedOrderBook("BTC-USD", createCoinbaseRequestState());
+    assert.match(requested, /^https:\/\/api\.coinbase\.com\/api\/v3\/brokerage\/market\/product_book\?product_id=BTC-USD&limit=25$/);
+    assert.equal(result.bid, 100);
+    assert.equal(result.ask, 100.01);
+    assert.equal(result.book_source, "coinbase_advanced_trade_public");
+    assert.equal(result.book_bids.length, 25);
+    assert.equal(result.book_asks.length, 25);
+    assert.equal(result.book_sequence, null);
+    assert.equal(result.last, 100.005);
+    assert.ok(Date.now() - result.book_retrieved_at_ms < 1000);
+    assert.ok(Date.now() - result.book_event_time_ms < 2000);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Advanced Trade public product book rejects stale, mismatched and crossed books", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => jsonResponse(makeAdvancedBook({
+    pricebook: { time: new Date(Date.now() - 16000).toISOString() }
+  }));
+  try {
+    await assert.rejects(
+      fetchCoinbaseAdvancedOrderBook("BTC-USD", createCoinbaseRequestState()),
+      (error) => error.code === "invalid_or_stale_advanced_book"
+    );
+    globalThis.fetch = async () => jsonResponse(makeAdvancedBook({
+      pricebook: { product_id: "ETH-USD" }
+    }));
+    await assert.rejects(
+      fetchCoinbaseAdvancedOrderBook("BTC-USD", createCoinbaseRequestState()),
+      (error) => error.code === "product_mismatch"
+    );
+    globalThis.fetch = async () => jsonResponse(makeAdvancedBook({
+      pricebook: {
+        bids: [{ price: "100.02", size: "10" }],
+        asks: [{ price: "100.01", size: "10" }]
+      }
+    }));
+    await assert.rejects(
+      fetchCoinbaseAdvancedOrderBook("BTC-USD", createCoinbaseRequestState()),
+      (error) => error.code === "invalid_or_stale_advanced_book"
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Bitstamp order-book refresh returns fresh same-venue L2 evidence", async () => {
   const originalFetch = globalThis.fetch;
   let requested = "";
