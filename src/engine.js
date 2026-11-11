@@ -1604,6 +1604,38 @@ export class TradingEngine extends DurableObject {
         market.book_retrieved_at_ms = null; market.book_age_ms = null;
         market.bid_depth_quote = null; market.ask_depth_quote = null;
       }
+      if (provider === "coinbase_exchange") {
+        try {
+          const shadowBook = await fetchCoinbaseAdvancedOrderBook(market.product, finalBookRequestState);
+          market.shadow_bid = shadowBook.bid;
+          market.shadow_ask = shadowBook.ask;
+          market.shadow_bid_depth_quote = shadowBook.bid_depth_quote;
+          market.shadow_ask_depth_quote = shadowBook.ask_depth_quote;
+          market.shadow_book_bids = shadowBook.book_bids;
+          market.shadow_book_asks = shadowBook.book_asks;
+          market.shadow_book_retrieved_at_ms = shadowBook.book_retrieved_at_ms;
+          market.shadow_book_event_time_ms = shadowBook.book_event_time_ms;
+          market.shadow_book_age_ms = shadowBook.book_age_ms;
+          market.shadow_book_source = shadowBook.book_source;
+          market.shadow_last = shadowBook.last;
+          market.shadow_book_status = "available";
+          market.shadow_book_error = null;
+        } catch (shadowError) {
+          market.shadow_bid = null;
+          market.shadow_ask = null;
+          market.shadow_bid_depth_quote = null;
+          market.shadow_ask_depth_quote = null;
+          market.shadow_book_bids = null;
+          market.shadow_book_asks = null;
+          market.shadow_book_retrieved_at_ms = null;
+          market.shadow_book_event_time_ms = null;
+          market.shadow_book_age_ms = null;
+          market.shadow_book_source = null;
+          market.shadow_last = null;
+          market.shadow_book_status = "provider_error";
+          market.shadow_book_error = String(shadowError?.code || shadowError?.message || "advanced_public_book_failed").slice(0, 100);
+        }
+      }
     }
     // Read the latest owner settings after public fetches complete so a concurrent
     // disable action cannot be hidden by a stale pre-fetch automation setting.
@@ -3115,7 +3147,7 @@ export class TradingEngine extends DurableObject {
         markComplete = false; return { ...trade, mark_status: "book_stale_or_missing" };
       }
       const fill = simulateShadowMarketSell({ baseQuantity: Number(trade.remaining_quantity),
-        bids: market.book_bids, feeBpsPerSide: Number(trade.metadata?.fee_bps_per_side ?? risk.fee_bps_per_side),
+        bids: market.shadow_book_bids, feeBpsPerSide: Number(trade.metadata?.fee_bps_per_side ?? risk.fee_bps_per_side),
         extraSlippageBps: Number(trade.metadata?.extra_slippage_bps ?? risk.slippage_bps) });
       if (!fill.ok || fill.status !== "filled") {
         markComplete = false; return { ...trade, mark_status: "insufficient_bid_depth" };
