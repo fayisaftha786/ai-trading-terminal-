@@ -112,7 +112,7 @@ test("research candle cache reads only the 150 closed bars required by audit gat
 });
 
 test("10-second book refresh reuses loaded markets and avoids full-ledger portfolio aggregation", () => {
-  const start = engineSource.indexOf("async refreshOrderBooksOnly()");
+  const start = engineSource.indexOf("async refreshOrderBooksOnly(");
   const end = engineSource.indexOf("  getOpenTrades() {", start);
   const refresh = engineSource.slice(start, end);
   assert.equal(refresh.split("this.getMarkets()").length - 1, 1);
