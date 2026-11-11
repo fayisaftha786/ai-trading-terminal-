@@ -64,8 +64,8 @@ test("mode summary and automation panel use the same dashboard automation snapsh
 });
 
 test("dashboard labels entry scan and position exit order-book telemetry separately", () => {
-  assert.match(html, /Entry-scan book \\(fresh per full scan\\)/);
-  assert.match(html, /Position-exit L2 refresh \\(10s while positions are open\\)/);
+  assert.match(html, /Entry-scan book \(fresh per full scan\)/);
+  assert.match(html, /Position-exit L2 refresh \(10s while positions are open\)/);
   assert.match(html, /last_entry_scan_book_status/);
   assert.match(html, /last_entry_scan_book_success_count/);
   assert.match(html, /last_entry_scan_book_failed_count/);
