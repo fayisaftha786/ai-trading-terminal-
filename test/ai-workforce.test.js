@@ -116,6 +116,19 @@ test("unsupported providers are excluded from the Coinbase workforce analysis un
   assert.equal(result.workers.find((worker) => worker.id === "microstructure").status, "blocked");
 });
 
+test("null volume and order-book fields remain unavailable instead of becoming numeric zero", () => {
+  const markets = context().markets.map((item) => ({
+    ...item,
+    spread_bps: null,
+    bid_depth_quote: null,
+    ask_depth_quote: null,
+    book_retrieved_at_ms: null,
+    primary: { ...item.primary, volume_ratio_20: null }
+  }));
+  const result = buildAiWorkforceRun(context({ markets }));
+  assert.equal(result.workers.find((worker) => worker.id === "volume").status, "blocked");
+  assert.equal(result.workers.find((worker) => worker.id === "microstructure").status, "blocked");
+});
 test("watchdog exposes a missing or stale scheduler heartbeat", () => {
   const result = buildAiWorkforceRun(context({
     runtime: { last_scheduled_alarm_at_ms: 1_000 },
