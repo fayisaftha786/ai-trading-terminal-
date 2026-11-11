@@ -456,7 +456,8 @@ async function loadAccounts(env, fetchImpl) {
 }
 
 const ACTIVE_EXCHANGE_ORDER_STATUSES = new Set(["PENDING", "OPEN", "UNKNOWN_ORDER_STATUS", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"]);
-const EXCHANGE_ORDER_STATUS_QUERY = ["PENDING", "OPEN", "UNKNOWN_ORDER_STATUS", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
+// UNKNOWN_ORDER_STATUS is a response sentinel, not a concrete status filter.
+const EXCHANGE_ORDER_STATUS_QUERY = ["PENDING", "OPEN", "QUEUED", "CANCEL_QUEUED", "EDIT_QUEUED"];
 
 async function loadActiveExchangeOrders(env, fetchImpl) {
   // Coinbase accepts order_status as a repeated query parameter, but some
