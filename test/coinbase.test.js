@@ -155,6 +155,7 @@ test("final Coinbase order-book refresh rejects malformed or crossed books", asy
 });
 function makeAdvancedBook(overrides = {}) {
   const time = new Date().toISOString();
+  const { pricebook: pricebookOverrides, ...responseOverrides } = overrides;
   return {
     pricebook: {
       product_id: "BTC-USD",
@@ -165,10 +166,10 @@ function makeAdvancedBook(overrides = {}) {
       asks: Array.from({ length: 25 }, (_, index) => ({
         price: String(100.01 + index * 0.01), size: "10"
       })),
-      ...(overrides.pricebook || {})
+      ...(pricebookOverrides || {})
     },
     last: "100.005",
-    ...overrides
+    ...responseOverrides
   };
 }
 
