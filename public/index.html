@@ -493,7 +493,7 @@ function renderCoinbaseConnection(status=coinbaseStaticStatus,result=coinbasePre
     {title:"View permission",detail:hasVerifiedPermissions?(permissions.can_view?"Enabled":"Missing required View permission"):"Not verified",ok:permissions?.can_view===true,known:hasVerifiedPermissions},
     {title:"Trade permission",detail:hasVerifiedPermissions?(permissions.can_trade?"Enabled for manually confirmed orders":"Not enabled; preview/account reads may still work"):"Not verified",ok:permissions?.can_trade===true,known:hasVerifiedPermissions},
     {title:"Transfer disabled",detail:hasVerifiedPermissions?(permissions.can_transfer===false?"Transfer permission is OFF":"Transfer permission must be OFF"):"Not verified",ok:permissions?.can_transfer===false,known:hasVerifiedPermissions},
-    {title:"Latest preflight result",detail:preflightFailed?"Failed at "+preflightStage+(providerHttpStatus?" · Coinbase HTTP "+providerHttpStatus:" · provider HTTP status unavailable"):result?.status?String(result.status).replace(/_/g," "):"Not run",ok:!!result?.status&&!preflightFailed,known:!!result?.status},
+    {title:"Latest preflight result",detail:preflightFailed?"Failed at "+preflightStage+(providerHttpStatus?" · Coinbase HTTP "+providerHttpStatus:" · provider HTTP status unavailable"):result?.status?String(result.status).replace(/_/g," "):"Not run",ok:ready,known:!!result?.status},
     {title:"SPOT fee tier",detail:feeVerified
       ?String(feeSummary.pricing_tier||"tier unlabelled")+" · maker "+String(feeSummary.maker_fee_bps)+" bps / taker "+String(feeSummary.taker_fee_bps)+" bps"
       :String(feeSummary.reason||"Fee tier not checked").replace(/_/g," "),ok:feeVerified,known:hasVerifiedPermissions&&feeSummary.status!=="not_checked"},
