@@ -3093,7 +3093,7 @@ export class TradingEngine extends DurableObject {
     const stop = fill.effective_vwap_price * (1 - stopPct / 100);
     const target = fill.effective_vwap_price * (1 + targetPct / 100);
     const meta = {
-      execution_model: "coinbase_visible_l2_book_walk_v1", market_data_provider: "coinbase_exchange",
+      execution_model: "coinbase_advanced_trade_visible_l2_book_walk_v1", strategy_data_provider: "coinbase_exchange",
       entry_score: Number(market.primary?.score) || 0,
       market_context_mode: market.market_context?.mode || assessment.market_context_mode || null,
       entry_gate_reason: assessment.reason || "eligible",
@@ -3114,7 +3114,7 @@ export class TradingEngine extends DurableObject {
     ).toArray();
     const id = Number(created[0]?.id);
     if (!Number.isSafeInteger(id) || id < 1) return finish("blocked", "shadow_ledger_insert_failed", market.symbol);
-    this.logEvent("shadow_entry", "Shadow BUY simulated from fresh Coinbase L2 asks; no exchange order submitted", {
+    this.logEvent("shadow_entry", "Shadow BUY simulated from fresh Coinbase Advanced Trade L2 asks; no exchange order submitted", {
       shadow_trade_id: id, symbol: market.symbol, fill_status: fill.status, fill_ratio: fill.fill_ratio,
       quantity: fill.filled_base_quantity, entry_price: fill.effective_vwap_price,
       entry_quote_usd: fill.effective_quote_usd, entry_fee_usd: fill.fee_usd,
@@ -3163,7 +3163,7 @@ export class TradingEngine extends DurableObject {
     return {
       enabled: settings.shadow_enabled !== false, mode: "coinbase_l2_shadow",
       exchange_orders_submitted: false, data_source: "Coinbase Advanced Trade public L2 snapshots; strategy indicators use Coinbase Exchange candles and ticker",
-      execution_model: "Up to 25 visible levels, configured fee assumption and adverse slippage buffer; partial fills are retained.",
+      execution_model: "Coinbase Advanced Trade public L2: up to 25 visible levels, configured taker-fee assumption and adverse slippage buffer; partial fills are retained.",
       limitations: ["Public L2 snapshots do not expose queue position or guaranteed fills.",
         "Network latency and future book movement are not replayed.",
         "Stop/target conditions are sampled on scheduled scans and 10-second L2 refreshes; brief crossings between samples can be missed.",
