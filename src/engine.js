@@ -12,7 +12,7 @@ import {
   listCoinbaseAdvancedFills
 } from "./coinbase-advanced.js";
 import { analyzeTimeframe, assessCandidate, assessCrossMarketContext, buildFreshBidMarks, evaluateResearchCandidates, isFreshBidQuote, resolveRiskBaseline } from "./strategy.js";
-import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, shouldRunScheduledMarketScan, summarizeCurrentProviderFailures, updateTrailingStop } from "./automation-guards.js";
+import { assessMarketUniverse, hasRecentHealthyScheduledScan, advanceUnhealthyScanStreak, assessAdaptiveRisk, assessLossCooldown, buildMarketDataProviderDiagnostics, classifyMarketFeedFreshness, deriveSchedulerStatus, normalizeProviderFailureRows, normalizeScanIssueRows, mergeScanRuntimeState, runAfterActiveScan, shouldHaltPaperAutomation, shouldRunScheduledMarketScan, summarizeCurrentProviderFailures, buildMarketBookDepthDiagnostics, updateTrailingStop } from "./automation-guards.js";
 import { buildResearchHistorySummary, countMissingArchiveBars, normalizeResearchCandleWindow, selectNewClosedCandles } from "./research.js";
 import { runRecursiveWarmupAnalysis, runStrategyTournament, runWalkForwardResearch } from "./strategy-tournament.js";
 import { PAPER_AUTOMATION_PROFILE, PAPER_AUTOMATION_RISK, calculateDynamicTakeProfit, getDailyCycleAllowance, countCompletedPaperCyclesInWindow, migratePaperAutomationSettings, shouldAutoResumeWatchdog, shouldResumePaperAutomationAfterWatchdog, reviewLegacyPaperCapital } from "./paper-automation-profile.js";
@@ -399,7 +399,9 @@ export class TradingEngine extends DurableObject {
                 ? failure.backup_error_code.slice(0, 80) : null,
               inferred_from_scan_summary: failure?.inferred_from_scan_summary === true
             })),
-          market_data_providers: marketDataProviders
+          market_data_providers: marketDataProviders,
+          // Exact per-side L2 depth used by the market-universe liquidity veto.
+          market_book_depth: buildMarketBookDepthDiagnostics(currentMarkets, PRODUCTS.length)
         };
         return jsonResponse({
           status: "ok", mode: "paper_only", engine: "cloudflare_durable_object_sqlite",

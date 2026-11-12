@@ -7,6 +7,7 @@ import {
   hasRecentHealthyScheduledScan,
   advanceUnhealthyScanStreak,
   buildMarketDataProviderDiagnostics,
+  buildMarketBookDepthDiagnostics,
   assessAdaptiveRisk,
   assessLossCooldown,
   deriveSchedulerStatus, shouldRunScheduledMarketScan,
@@ -542,6 +543,30 @@ test("legacy Bitstamp exit diagnostics preserve provider and future timestamp ev
   delete missing.one_hour_audit_summary.last_closed_candle_ms;
   const missingRows = buildMarketDataProviderDiagnostics([missing], NOW);
   assert.equal(missingRows[0].one_hour_closed_age_ms, null);
+});
+
+test("explicit market book depth health diagnostics expose each side and unchanged floor", () => {
+  const btc = healthyMarket("BTC/USD");
+  const eth = healthyMarket("ETH/USD");
+  eth.bid_depth_quote = null;
+  eth.ask_depth_quote = undefined;
+  const rows = buildMarketBookDepthDiagnostics([btc, eth], 3);
+  assert.deepEqual(rows, [
+    {
+      symbol: "BTC/USD",
+      bid_depth_quote: 8000,
+      ask_depth_quote: 9000,
+      minimum_depth_quote_per_side: 5000,
+      depth_levels: 50
+    },
+    {
+      symbol: "ETH/USD",
+      bid_depth_quote: null,
+      ask_depth_quote: null,
+      minimum_depth_quote_per_side: 5000,
+      depth_levels: 50
+    }
+  ]);
 });
 
 test("current provider failure diagnostics include selected endpoint failures, not just scan errors", () => {

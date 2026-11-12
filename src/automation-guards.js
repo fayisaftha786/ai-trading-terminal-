@@ -470,6 +470,23 @@ export function buildMarketDataProviderDiagnostics(markets, nowMs = Date.now(), 
   });
 }
 
+/**
+ * Publish the actual per-side L2 quote depth separately from the broader
+ * provider diagnostic row. This makes the market-universe liquidity veto
+ * observable without exposing raw order-book levels or changing any gate.
+ */
+export function buildMarketBookDepthDiagnostics(markets, limit = 3) {
+  const rows = Array.isArray(markets) ? markets : [];
+  const safeLimit = Number.isSafeInteger(limit) ? Math.max(0, Math.min(3, limit)) : 3;
+  return rows.slice(0, safeLimit).map((market) => ({
+    symbol: typeof market?.symbol === "string" ? market.symbol.slice(0, 24) : null,
+    bid_depth_quote: diagnosticNumber(market?.bid_depth_quote),
+    ask_depth_quote: diagnosticNumber(market?.ask_depth_quote),
+    minimum_depth_quote_per_side: 5000,
+    depth_levels: 50
+  }));
+}
+
 /** Return only actionable selected-provider failures from the current snapshots. */
 export function summarizeCurrentProviderFailures(markets) {
   const rows = Array.isArray(markets) ? markets : [];
