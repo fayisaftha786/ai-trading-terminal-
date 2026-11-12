@@ -259,6 +259,20 @@ test("dashboard walk-forward requirement matches the strict research implementat
 });
 
 
+test("production watchdog verifies current 3-market feed and per-side 50-level liquidity", () => {
+  const workflow = readFileSync(
+    new URL("../.github/workflows/production-paper-watchdog.yml", import.meta.url),
+    "utf8"
+  );
+  assert.match(workflow, /currentMarketFeedHealthy:\s*currentFeed\.status === "healthy"/);
+  assert.match(workflow, /currentMarketUniverseComplete:/);
+  assert.match(workflow, /currentBidAskDepthComplete:\s*depthComplete/);
+  assert.match(workflow, /row\.bid_depth_quote >= 5000/);
+  assert.match(workflow, /row\.ask_depth_quote >= 5000/);
+  assert.match(workflow, /row\.depth_levels === 50/);
+  assert.match(workflow, /current_market_book_depth: depthRows/);
+});
+
 test("walk-forward evidence requires broad out-of-sample consistency and stressed costs", () => {
   const fold = (net, profitFactor = 1.4, drawdown = 3, trades = 10) => ({
     ok: true,
