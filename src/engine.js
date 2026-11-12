@@ -1,6 +1,7 @@
 import { DurableObject } from "cloudflare:workers";
 import { PRODUCTS, createCoinbaseRequestState, fetchBitstampOrderBook, fetchCoinbaseOrderBook, fetchCoinbaseAdvancedOrderBook, fetchProductSnapshot } from "./coinbase.js";
 import { evaluateMicroScalpResearch } from "./micro-scalp.js";
+import { refreshCoinbaseShadowBooks } from "./shadow-book-refresh.js";
 import {
   coinbaseAdvancedErrorStatus,
   coinbaseAdvancedStatus,
@@ -1592,6 +1593,10 @@ export class TradingEngine extends DurableObject {
     // before exits/entry gates. Bitstamp is permitted here only for an open
     // legacy position recorded with that provider; new candidates remain Coinbase-only.
     const finalBookRequestState = createCoinbaseRequestState();
+    await refreshCoinbaseShadowBooks(markets, {
+      fetchBook: fetchCoinbaseAdvancedOrderBook,
+      requestState: createCoinbaseRequestState()
+    });
     let entryBookSuccessCount = 0;
     let entryBookFailedCount = 0;
     let entryBookSkippedCount = 0;
@@ -1639,38 +1644,6 @@ export class TradingEngine extends DurableObject {
           book_error: String(error?.code || error?.message || "order_book_refresh_failed").slice(0, 100) };
         market.book_retrieved_at_ms = null; market.book_age_ms = null;
         market.bid_depth_quote = null; market.ask_depth_quote = null;
-      }
-      if (provider === "coinbase_exchange") {
-        try {
-          const shadowBook = await fetchCoinbaseAdvancedOrderBook(market.product, finalBookRequestState);
-          market.shadow_bid = shadowBook.bid;
-          market.shadow_ask = shadowBook.ask;
-          market.shadow_bid_depth_quote = shadowBook.bid_depth_quote;
-          market.shadow_ask_depth_quote = shadowBook.ask_depth_quote;
-          market.shadow_book_bids = shadowBook.book_bids;
-          market.shadow_book_asks = shadowBook.book_asks;
-          market.shadow_book_retrieved_at_ms = shadowBook.book_retrieved_at_ms;
-          market.shadow_book_event_time_ms = shadowBook.book_event_time_ms;
-          market.shadow_book_age_ms = shadowBook.book_age_ms;
-          market.shadow_book_source = shadowBook.book_source;
-          market.shadow_last = shadowBook.last;
-          market.shadow_book_status = "available";
-          market.shadow_book_error = null;
-        } catch (shadowError) {
-          market.shadow_bid = null;
-          market.shadow_ask = null;
-          market.shadow_bid_depth_quote = null;
-          market.shadow_ask_depth_quote = null;
-          market.shadow_book_bids = null;
-          market.shadow_book_asks = null;
-          market.shadow_book_retrieved_at_ms = null;
-          market.shadow_book_event_time_ms = null;
-          market.shadow_book_age_ms = null;
-          market.shadow_book_source = null;
-          market.shadow_last = null;
-          market.shadow_book_status = "provider_error";
-          market.shadow_book_error = String(shadowError?.code || shadowError?.message || "advanced_public_book_failed").slice(0, 100);
-        }
       }
     }
     // Read the latest owner settings after public fetches complete so a concurrent
@@ -2198,6 +2171,13 @@ export class TradingEngine extends DurableObject {
     const bySymbol = new Map(markets.map((market) => [market?.symbol, market]));
     const coinbaseState = createCoinbaseRequestState();
     const requestState = coinbaseState;
+    const shadowRefresh = await refreshCoinbaseShadowBooks(markets, {
+      fetchBook: fetchCoinbaseAdvancedOrderBook,
+      requestState: createCoinbaseRequestState()
+    });
+    const shadowRefreshed = shadowRefresh.refreshed;
+    const shadowFailed = shadowRefresh.failed;
+    const shadowIssues = shadowRefresh.issues;
     const openTradesAtStart = Array.isArray(initialOpenTrades) ? initialOpenTrades : this.getOpenTrades();
     const legacyBitstampExitSymbols = new Set(
       openTradesAtStart
@@ -2208,9 +2188,7 @@ export class TradingEngine extends DurableObject {
     let refreshed = 0;
     let failed = 0;
     let skipped = 0;
-    let shadowRefreshed = 0;
-    let shadowFailed = 0;
-    const shadowIssues = [];
+
 
     for (const product of PRODUCTS) {
       const market = bySymbol.get(product.symbol);
@@ -2223,100 +2201,6 @@ export class TradingEngine extends DurableObject {
       const provider = market.market_data_provider;
       try {
         let book;
-        if (provider === "coinbase_exchange") {
-          book = await fetchCoinbaseOrderBook(market.product, requestState);
-        } else if (provider === "bitstamp_spot" &&
-                   legacyBitstampExitSymbols.has(product.symbol)) {
-          // Transitional read-only mark refresh for a pre-existing Bitstamp paper
-          // position. New entries are Coinbase-only and cannot use this branch.
-          book = await fetchBitstampOrderBook(market.product, requestState);
-        } else {
-          skipped += 1;
-          issues.push({ symbol: product.symbol, reason: "market_data_provider_unsupported" });
-          continue;
-        }
-
-        const retrievedAtMs = Number(book?.book_retrieved_at_ms);
-        if (!Number.isFinite(retrievedAtMs) || retrievedAtMs <= 0 ||
-            retrievedAtMs > Date.now() + 1000 ||
-            ![book.bid, book.ask, book.bid_depth_quote, book.ask_depth_quote].every(Number.isFinite) ||
-            book.bid <= 0 || book.ask < book.bid ||
-            book.bid_depth_quote < 0 || book.ask_depth_quote < 0) {
-          throw new Error("order_book_failed_validation");
-        }
-
-        market.bid = book.bid;
-        market.ask = book.ask;
-        market.bid_depth_quote = book.bid_depth_quote;
-        market.ask_depth_quote = book.ask_depth_quote;
-        market.book_retrieved_at_ms = retrievedAtMs;
-        market.book_event_time_ms = Number.isFinite(book.book_event_time_ms)
-          ? book.book_event_time_ms : null;
-        market.book_age_ms = Math.max(0, Date.now() - retrievedAtMs);
-        market.book_sequence = Number.isSafeInteger(book.book_sequence) ? book.book_sequence : null;
-        market.book_bids = Array.isArray(book.book_bids) ? book.book_bids : null;
-        market.book_asks = Array.isArray(book.book_asks) ? book.book_asks : null;
-        market.quote_received_at_ms = retrievedAtMs;
-        market.spread_bps = ((book.ask - book.bid) / ((book.ask + book.bid) / 2)) * 10000;
-        market.data_quality = {
-          ...(market.data_quality || {}),
-          book_provider: provider,
-          book_status: "available",
-          book_error: null,
-          book_freshness_source: provider === "bitstamp_spot"
-            ? "bitstamp_exchange_order_book_timestamp"
-            : "coinbase_local_l2_retrieval_time",
-          quote_freshness_source: "local_order_book_response_time_for_exit_marking"
-        };
-        if (provider === "coinbase_exchange") {
-          try {
-            const shadowBook = await fetchCoinbaseAdvancedOrderBook(market.product, requestState);
-            market.shadow_bid = shadowBook.bid;
-            market.shadow_ask = shadowBook.ask;
-            market.shadow_bid_depth_quote = shadowBook.bid_depth_quote;
-            market.shadow_ask_depth_quote = shadowBook.ask_depth_quote;
-            market.shadow_book_bids = shadowBook.book_bids;
-            market.shadow_book_asks = shadowBook.book_asks;
-            market.shadow_book_retrieved_at_ms = shadowBook.book_retrieved_at_ms;
-            market.shadow_book_event_time_ms = shadowBook.book_event_time_ms;
-            market.shadow_book_age_ms = shadowBook.book_age_ms;
-            market.shadow_book_source = shadowBook.book_source;
-            market.shadow_last = shadowBook.last;
-            market.shadow_book_status = "available";
-            market.shadow_book_error = null;
-            shadowRefreshed += 1;
-          } catch (shadowError) {
-            market.shadow_bid = null;
-            market.shadow_ask = null;
-            market.shadow_bid_depth_quote = null;
-            market.shadow_ask_depth_quote = null;
-            market.shadow_book_bids = null;
-            market.shadow_book_asks = null;
-            market.shadow_book_retrieved_at_ms = null;
-            market.shadow_book_event_time_ms = null;
-            market.shadow_book_age_ms = null;
-            market.shadow_book_source = null;
-            market.shadow_last = null;
-            market.shadow_book_status = "provider_error";
-            market.shadow_book_error = String(shadowError?.code || shadowError?.message || "advanced_public_book_failed").slice(0, 100);
-            shadowFailed += 1;
-            shadowIssues.push({ symbol: product.symbol, reason: market.shadow_book_error });
-          }
-        } else {
-          market.shadow_bid = null;
-          market.shadow_ask = null;
-          market.shadow_bid_depth_quote = null;
-          market.shadow_ask_depth_quote = null;
-          market.shadow_book_bids = null;
-          market.shadow_book_asks = null;
-          market.shadow_book_retrieved_at_ms = null;
-          market.shadow_book_event_time_ms = null;
-          market.shadow_book_age_ms = null;
-          market.shadow_book_source = null;
-          market.shadow_last = null;
-          market.shadow_book_status = "unsupported_market_source";
-          market.shadow_book_error = "coinbase_exchange_market_data_required";
-        }
         this.saveMarket(market, "live");
         refreshed += 1;
       } catch (error) {
