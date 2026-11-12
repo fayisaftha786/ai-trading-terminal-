@@ -1,8 +1,9 @@
 import { TradingEngine } from "./engine.js";
 import { AuthRateLimiter } from "./auth-rate-limiter.js";
 import { checkEdgeLoginRateLimit } from "./edge-login-rate-limit.js";
+import { ReelAutomation } from "./reel-automation.js";
 
-export { TradingEngine, AuthRateLimiter };
+export { TradingEngine, AuthRateLimiter, ReelAutomation };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -201,6 +202,10 @@ async function routeApi(request, env) {
     if (scheme?.toLowerCase() !== "bearer" || !(await verify(token, env.SESSION_SECRET))) {
       return json({ error: "authentication_required" }, 401);
     }
+  }
+  if (url.pathname.startsWith("/api/reels/")) {
+    const id = env.REEL_AUTOMATION.idFromName("single-owner-reel-automation");
+    return env.REEL_AUTOMATION.get(id).fetch(request);
   }
   const id = env.TRADING_ENGINE.idFromName("single-owner-paper-ledger");
   const stub = env.TRADING_ENGINE.get(id);

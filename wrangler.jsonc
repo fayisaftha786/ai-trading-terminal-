@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "ai-trading-terminal",
+  "ai": { "binding": "AI" },
   "main": "src/index.js",
   "compatibility_date": "2026-11-07",
   "observability": { "enabled": true },
@@ -13,12 +14,14 @@
   "durable_objects": {
     "bindings": [
       { "name": "TRADING_ENGINE", "class_name": "TradingEngine" },
-      { "name": "AUTH_RATE_LIMITER", "class_name": "AuthRateLimiter" }
+      { "name": "AUTH_RATE_LIMITER", "class_name": "AuthRateLimiter" },
+      { "name": "REEL_AUTOMATION", "class_name": "ReelAutomation" }
     ]
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TradingEngine"] },
-    { "tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"] }
+    { "tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"] },
+    { "tag": "v3", "new_sqlite_classes": ["ReelAutomation"] }
   ],
   "ratelimits": [
     {
