@@ -1,6 +1,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { refreshCoinbaseShadowBooks } from "../src/shadow-book-refresh.js";
+
+const engineSource = readFileSync(new URL("../src/engine.js", import.meta.url), "utf8");
+
+test("scheduled and 10-second refresh paths fetch Shadow books before final primary L2 books", () => {
+  const finalScanPass = engineSource.indexOf("const finalBookRequestState");
+  const scanShadowRefresh = engineSource.indexOf("await refreshCoinbaseShadowBooks(markets", finalScanPass);
+  const scanPrimaryBook = engineSource.indexOf(
+    "await fetchCoinbaseOrderBook(market.product, finalBookRequestState)",
+    finalScanPass
+  );
+  assert.ok(finalScanPass >= 0 && scanShadowRefresh > finalScanPass);
+  assert.ok(scanPrimaryBook > scanShadowRefresh);
+
+  const refreshMethod = engineSource.indexOf("async refreshOrderBooksOnly(");
+  const refreshShadow = engineSource.indexOf("const shadowRefresh = await refreshCoinbaseShadowBooks", refreshMethod);
+  const refreshPrimary = engineSource.indexOf(
+    "book = await fetchCoinbaseOrderBook(market.product, requestState)",
+    refreshMethod
+  );
+  assert.ok(refreshMethod >= 0 && refreshShadow > refreshMethod);
+  assert.ok(refreshPrimary > refreshShadow);
+});
 
 function market(symbol, provider = "coinbase_exchange") {
   return {
