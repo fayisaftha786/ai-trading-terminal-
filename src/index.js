@@ -1,8 +1,9 @@
 import { TradingEngine } from "./engine.js";
 import { AuthRateLimiter } from "./auth-rate-limiter.js";
 import { checkEdgeLoginRateLimit } from "./edge-login-rate-limit.js";
+import { ReelAutomation } from "./reel-automation.js";
 
-export { TradingEngine, AuthRateLimiter };
+export { TradingEngine, AuthRateLimiter, ReelAutomation };
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -182,7 +183,7 @@ async function login(request, env) {
   });
 }
 
-async function routeApi(request, env) {
+async function routeApi(request, env) {\n  const url = new URL(request.url);\n  if (url.pathname.startsWith("/api/reels/")) {\n    const id = env.REEL_AUTOMATION.idFromName("single-owner-reel-automation");\n    return env.REEL_AUTOMATION.get(id).fetch(request);\n  }
   const url = new URL(request.url);
   if (url.pathname === "/api/worker/health" && request.method === "GET") {
     return json({
