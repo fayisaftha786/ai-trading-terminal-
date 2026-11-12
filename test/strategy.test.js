@@ -88,7 +88,7 @@ test("candidate gate rejects crossed, wide, stale and shallow markets", () => {
   const costs = { feeBpsPerSide: 15, slippageBps: 10 };
   assert.equal(assessCandidate({ market, primary, higher, nowMs: now, costs }).eligible, true);
   assert.equal(assessCandidate({ market: { ...market, ask: 99 }, primary, higher, nowMs: now, costs }).reason, "invalid_or_crossed_quote");
-  assert.equal(assessCandidate({ market: { ...market, bid_depth_quote: 10 }, primary, higher, nowMs: now, costs }).reason, "top10_orderbook_depth_unavailable_or_low");
+  assert.equal(assessCandidate({ market: { ...market, bid_depth_quote: 10 }, primary, higher, nowMs: now, costs }).reason, "top50_orderbook_depth_unavailable_or_low");
   assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: now - 20000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
   assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: undefined }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
   assert.equal(assessCandidate({ market: { ...market, book_retrieved_at_ms: now + 2000 }, primary, higher, nowMs: now, costs }).reason, "orderbook_snapshot_retrieval_stale_or_missing");
