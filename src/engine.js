@@ -2201,6 +2201,51 @@ export class TradingEngine extends DurableObject {
       const provider = market.market_data_provider;
       try {
         let book;
+        if (provider === "coinbase_exchange") {
+          book = await fetchCoinbaseOrderBook(market.product, requestState);
+        } else if (provider === "bitstamp_spot" &&
+                   legacyBitstampExitSymbols.has(product.symbol)) {
+          // Transitional read-only mark refresh for a pre-existing Bitstamp paper
+          // position. New entries are Coinbase-only and cannot use this branch.
+          book = await fetchBitstampOrderBook(market.product, requestState);
+        } else {
+          skipped += 1;
+          issues.push({ symbol: product.symbol, reason: "market_data_provider_unsupported" });
+          continue;
+        }
+
+        const retrievedAtMs = Number(book?.book_retrieved_at_ms);
+        if (!Number.isFinite(retrievedAtMs) || retrievedAtMs <= 0 ||
+            retrievedAtMs > Date.now() + 1000 ||
+            ![book.bid, book.ask, book.bid_depth_quote, book.ask_depth_quote].every(Number.isFinite) ||
+            book.bid <= 0 || book.ask < book.bid ||
+            book.bid_depth_quote < 0 || book.ask_depth_quote < 0) {
+          throw new Error("order_book_failed_validation");
+        }
+
+        market.bid = book.bid;
+        market.ask = book.ask;
+        market.bid_depth_quote = book.bid_depth_quote;
+        market.ask_depth_quote = book.ask_depth_quote;
+        market.book_retrieved_at_ms = retrievedAtMs;
+        market.book_event_time_ms = Number.isFinite(book.book_event_time_ms)
+          ? book.book_event_time_ms : null;
+        market.book_age_ms = Math.max(0, Date.now() - retrievedAtMs);
+        market.book_sequence = Number.isSafeInteger(book.book_sequence) ? book.book_sequence : null;
+        market.book_bids = Array.isArray(book.book_bids) ? book.book_bids : null;
+        market.book_asks = Array.isArray(book.book_asks) ? book.book_asks : null;
+        market.quote_received_at_ms = retrievedAtMs;
+        market.spread_bps = ((book.ask - book.bid) / ((book.ask + book.bid) / 2)) * 10000;
+        market.data_quality = {
+          ...(market.data_quality || {}),
+          book_provider: provider,
+          book_status: "available",
+          book_error: null,
+          book_freshness_source: provider === "bitstamp_spot"
+            ? "bitstamp_exchange_order_book_timestamp"
+            : "coinbase_local_l2_retrieval_time",
+          quote_freshness_source: "local_order_book_response_time_for_exit_marking"
+        };
         this.saveMarket(market, "live");
         refreshed += 1;
       } catch (error) {
