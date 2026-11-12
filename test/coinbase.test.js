@@ -144,6 +144,29 @@ test("final Coinbase order-book refresh returns fresh top-of-book and validated 
   }
 });
 
+test("Coinbase depth aggregates 50 price levels when the first ten are fragmented", async () => {
+  const originalFetch = globalThis.fetch;
+  const bids = Array.from({ length: 50 }, (_, index) => [
+    String(100 - index * 0.01), index < 10 ? "0.1" : "2"
+  ]);
+  const asks = Array.from({ length: 50 }, (_, index) => [
+    String(100.01 + index * 0.01), index < 10 ? "0.1" : "2"
+  ]);
+  globalThis.fetch = async () => jsonResponse({ bids, asks });
+  try {
+    const result = await fetchCoinbaseOrderBook("BTC-USD", createCoinbaseRequestState());
+    const quoteDepth = levels => levels.reduce((sum, level) => sum + Number(level[0]) * Number(level[1]), 0);
+    assert.ok(quoteDepth(bids.slice(0, 10)) < 5000);
+    assert.ok(quoteDepth(asks.slice(0, 10)) < 5000);
+    assert.ok(result.bid_depth_quote > 5000);
+    assert.ok(result.ask_depth_quote > 5000);
+    assert.equal(result.book_bids.length, 25, "retain the bounded 25-level execution snapshot");
+    assert.equal(result.book_asks.length, 25, "retain the bounded 25-level execution snapshot");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("final Coinbase order-book refresh rejects malformed or crossed books", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => jsonResponse({ bids: [["101", "2"]], asks: [["100", "2"]] });
