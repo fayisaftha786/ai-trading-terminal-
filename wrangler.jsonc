@@ -18,7 +18,9 @@
   },
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TradingEngine"] },
-    { "tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"] }
+    { "tag": "v2", "new_sqlite_classes": ["AuthRateLimiter"] },
+    { "tag": "v3", "new_sqlite_classes": ["ReelAutomation"] },
+    { "tag": "v4", "deleted_classes": ["ReelAutomation"] }
   ],
   "ratelimits": [
     {
