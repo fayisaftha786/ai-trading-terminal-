@@ -66,6 +66,16 @@ jobs:
                 const scheduledExpected = Number(diagnostics.last_scheduled_scan_expected_market_count);
                 const scheduledAge = scheduler.last_scheduled_scan_age_ms ??
                   diagnostics.last_scheduled_scan_age_ms;
+                const depthRows = Array.isArray(diagnostics.market_book_depth)
+                  ? diagnostics.market_book_depth : [];
+                const currentHealthy = Number(currentFeed.healthy_market_count);
+                const currentExpected = Number(currentFeed.expected_market_count);
+                const depthComplete = depthRows.length === 3 && depthRows.every(row =>
+                  typeof row.symbol === "string" &&
+                  Number.isFinite(row.bid_depth_quote) && row.bid_depth_quote >= 5000 &&
+                  Number.isFinite(row.ask_depth_quote) && row.ask_depth_quote >= 5000 &&
+                  row.minimum_depth_quote_per_side === 5000 && row.depth_levels === 50
+                );
                 const checks = {
                   statusOk: health.status === "ok",
                   paperOnly: health.mode === "paper_only",
@@ -79,6 +89,12 @@ jobs:
                   lastScheduledUniverseComplete: Number.isInteger(scheduledHealthy) &&
                     Number.isInteger(scheduledExpected) && scheduledExpected === 3 &&
                     scheduledHealthy === scheduledExpected,
+                  currentMarketFeedHealthy: currentFeed.status === "healthy" &&
+                    currentFeed.freshness_state === "fresh",
+                  currentMarketUniverseComplete: Number.isInteger(currentHealthy) &&
+                    Number.isInteger(currentExpected) && currentExpected === 3 &&
+                    currentHealthy === currentExpected,
+                  currentBidAskDepthComplete: depthComplete,
                   lastHealthyScanFresh: validAge(scheduler.last_healthy_scan_age_ms)
                 };
                 console.log(JSON.stringify({
@@ -96,6 +112,7 @@ jobs:
                     expected_market_count: Number.isFinite(scheduledExpected) ? scheduledExpected : null,
                     issues: diagnostics.last_scheduled_scan_issues ?? []
                   },
+                  current_market_book_depth: depthRows,
                   current_market_snapshots: {
                     status: currentFeed.status ?? health.market_data_status ?? "unknown",
                     freshness_state: currentFeed.freshness_state ?? "not_reported",
