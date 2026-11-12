@@ -183,8 +183,12 @@ async function login(request, env) {
   });
 }
 
-async function routeApi(request, env) {\n  const url = new URL(request.url);\n  if (url.pathname.startsWith("/api/reels/")) {\n    const id = env.REEL_AUTOMATION.idFromName("single-owner-reel-automation");\n    return env.REEL_AUTOMATION.get(id).fetch(request);\n  }
+async function routeApi(request, env) {
   const url = new URL(request.url);
+  if (url.pathname.startsWith("/api/reels/")) {
+    const id = env.REEL_AUTOMATION.idFromName("single-owner-reel-automation");
+    return env.REEL_AUTOMATION.get(id).fetch(request);
+  }
   if (url.pathname === "/api/worker/health" && request.method === "GET") {
     return json({
       status: "ok",
