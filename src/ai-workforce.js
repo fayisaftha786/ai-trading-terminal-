@@ -203,9 +203,9 @@ export function buildAiWorkforceRun({
   workers.push(makeWorker(
     "microstructure",
     statusForCoverage(freshBookRows.length, Math.max(1, live.length)),
-    freshBookRows.length + " of " + live.length + " live Coinbase books passed the freshness and minimum-depth checks.",
+    freshBookRows.length + " of " + live.length + " live Coinbase books passed freshness and 50-level minimum-depth checks.",
     bookRows.slice(0, 3).map((market) => market.symbol + " spread " + Number(market.spread_bps).toFixed(1) + " bps · depth " + Math.min(Number(market.bid_depth_quote), Number(market.ask_depth_quote)).toFixed(0) + " USD"),
-    { fresh_books: freshBookRows.length, observed_books: bookRows.length, max_book_age_ms: 15_000, minimum_depth_usd_per_side: 5_000 },
+    { fresh_books: freshBookRows.length, observed_books: bookRows.length, max_book_age_ms: 15_000, depth_levels: 50, minimum_depth_usd_per_side: 5_000 },
     { lastRunAtMs: nowMs }
   ));
 

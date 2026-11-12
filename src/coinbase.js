@@ -115,10 +115,18 @@ export async function getJson(path, requestState = DEFAULT_REQUEST_STATE, baseUr
   throw new Error("Coinbase public API retry attempts exhausted");
 }
 
+const ORDER_BOOK_DEPTH_LEVELS = 50;
+
+/**
+ * Aggregate quote notional across the first 50 available price levels.
+ * Coinbase Exchange L2 can contain thousands of fragmented price levels;
+ * using only the first ten made the $5,000 market-liquidity gate fail on
+ * otherwise deep books. Keep the existing dollar floor and freshness gates.
+ */
 function parseBookSide(levels) {
   if (!Array.isArray(levels)) return null;
   let total = 0;
-  for (const level of levels.slice(0, 10)) {
+  for (const level of levels.slice(0, ORDER_BOOK_DEPTH_LEVELS)) {
     const price = Number(level?.[0]);
     const size = Number(level?.[1]);
     if (!Number.isFinite(price) || !Number.isFinite(size) || price <= 0 || size < 0) return null;

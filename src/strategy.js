@@ -721,7 +721,7 @@ export function assessCandidate({
   if (spreadBps > 25) return reject("spread_too_wide");
   if (!Number.isFinite(market.bid_depth_quote) || !Number.isFinite(market.ask_depth_quote) ||
       Math.min(market.bid_depth_quote, market.ask_depth_quote) < 5000) {
-    return reject("top10_orderbook_depth_unavailable_or_low");
+    return reject("top50_orderbook_depth_unavailable_or_low");
   }
   if (!Number.isFinite(market.book_retrieved_at_ms) || market.book_retrieved_at_ms > nowMs + 1000 ||
       nowMs - market.book_retrieved_at_ms < -1000 || nowMs - market.book_retrieved_at_ms > 15000) {
