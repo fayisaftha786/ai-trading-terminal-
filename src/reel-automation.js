@@ -152,6 +152,7 @@ export class ReelAutomation extends DurableObject {
       if (statusData.status_code === "IN_PROGRESS" || statusData.status_code === "PUBLISHED") {
         if (statusData.status_code === "PUBLISHED") {
           this.sql.exec("UPDATE reel_jobs SET status='published',updated_at_ms=? WHERE id=?", Date.now(), job.id);
+          await this.ctx.storage.setAlarm(Date.now() + 1000);
         } else {
           await this.ctx.storage.setAlarm(Date.now() + 20_000);
         }
