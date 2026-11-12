@@ -512,6 +512,10 @@ test("legacy Bitstamp exit diagnostics preserve provider and future timestamp ev
   assert.equal(rows[0].quote_age_ms, 1000);
   assert.equal(rows[0].book_age_ms, 500);
   assert.equal(rows[0].book_event_age_ms, -1000, "future book event timestamps must remain visible");
+  assert.equal(rows[0].bid_depth_quote, 8000);
+  assert.equal(rows[0].ask_depth_quote, 9000);
+  assert.equal(rows[0].minimum_depth_quote_per_side, 5000);
+  assert.equal(rows[0].depth_levels, 50);
   assert.equal(rows[0].one_hour_closed_age_ms, 0);
   assert.equal(rows[0].six_hour_closed_age_ms, 0);
   assert.equal(rows[0].market_candidate_eligible, false);
