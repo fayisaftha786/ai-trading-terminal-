@@ -453,10 +453,45 @@ export function analyzeTimeframe(audit, intervalMs = 3600000) {
   score = Math.max(0, Math.min(100, score));
   const signal = score >= 75 && regime === "UPTREND" && atrPct < 8 &&
     adx >= 18 && plusDi > minusDi && rsi < 68 ? "BUY_CANDIDATE" : "HOLD";
+
+  // Reversal diagnostics are deliberately observational: they never change
+  // the production signal, candidate score, or execution eligibility.
+  const previousRsi = rsiWilder(closes.slice(0, -1));
+  const previousDirectional = atrAdx(rows.slice(0, -1), 14);
+  const rsiChange = previousRsi === null ? null : rsi - previousRsi;
+  const currentDiSpread = plusDi - minusDi;
+  const previousDiSpread = previousDirectional
+    ? previousDirectional.plusDi - previousDirectional.minusDi : null;
+  const diSpreadChange = previousDiSpread === null
+    ? null : currentDiSpread - previousDiSpread;
+  const reversalEvidence = [];
+  if (rsiChange !== null && rsiChange >= 1.5) reversalEvidence.push("rsi_rising");
+  if (diSpreadChange !== null && diSpreadChange >= 1) reversalEvidence.push("directional_pressure_improving");
+  if (closes.at(-1) > fast.at(-1)) reversalEvidence.push("close_above_ema20");
+  const reversalStatus = regime === "UPTREND"
+    ? "uptrend_confirmed"
+    : regime === "DOWNTREND" && reversalEvidence.length >= 2
+      ? "bearish_momentum_weakening"
+      : regime === "DOWNTREND"
+        ? "bearish_trend_intact"
+        : reversalEvidence.length >= 2
+          ? "bullish_reversal_watch"
+          : "no_confirmed_reversal";
+  const reversalWatch = {
+    status: reversalStatus,
+    evidence: reversalEvidence,
+    evidence_count: reversalEvidence.length,
+    rsi_change: rsiChange === null ? null : Number(rsiChange.toFixed(3)),
+    di_spread_change: diSpreadChange === null ? null : Number(diSpreadChange.toFixed(3)),
+    close_above_ema20: closes.at(-1) > fast.at(-1),
+    execution_authorized: false,
+    caveat: "Observation only; not a BUY signal, forecast, or execution authorization."
+  };
   return {
     signal,
     score,
     regime,
+    reversal_watch: reversalWatch,
     rsi14: Number(rsi.toFixed(2)),
     atr14: atr,
     atr_pct: Number(atrPct.toFixed(4)),

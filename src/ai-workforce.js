@@ -4,6 +4,7 @@ const DEFINITIONS = Object.freeze([
   ["market_feed", "Market data integrity", "MARKET DATA", "Checks Coinbase ticker, order-book depth and closed-candle integrity."],
   ["market_regime", "BTC-led market regime", "MARKET CONTEXT", "Reads the BTC anchor and cross-market breadth classification."],
   ["trend", "Trend structure", "TECHNICAL", "Compares 1H and 6H directional structure and EMA slope."],
+  ["reversal_watch", "Reversal watch", "TECHNICAL", "Observes RSI and directional-pressure changes; never creates or authorizes an entry."],
   ["momentum", "Momentum quality", "TECHNICAL", "Inspects RSI, ADX and directional movement without inventing probabilities."],
   ["volume", "Volume confirmation", "TECHNICAL", "Compares closed-bar volume against its historical baseline."],
   ["breakout", "Breakout monitor", "STRATEGY", "Checks validated 20-bar breakout and volume-expansion hypotheses."],
@@ -133,6 +134,30 @@ export function buildAiWorkforceRun({
     asSummary(trendRows, (market) => market.symbol + " " + market.primary.regime + " / " + (market.higher?.regime || "UNKNOWN")),
     trendRows.map((market) => market.symbol + " EMA20 slope " + (safeNumber(market.primary?.ema20_slope_pct)?.toFixed(4) ?? "n/a") + "%"),
     { analyzed_markets: trendRows.length, expected_markets: live.length },
+    { lastRunAtMs: nowMs }
+  ));
+
+  const reversalRows = live.filter((market) =>
+    market.primary?.reversal_watch &&
+    typeof market.primary.reversal_watch.status === "string" &&
+    Array.isArray(market.primary.reversal_watch.evidence)
+  );
+  const reversalCounts = reversalRows.reduce((counts, market) => {
+    const status = market.primary.reversal_watch.status;
+    counts[status] = (counts[status] || 0) + 1;
+    return counts;
+  }, {});
+  workers.push(makeWorker(
+    "reversal_watch",
+    statusForCoverage(reversalRows.length, Math.max(1, live.length)),
+    reversalRows.length
+      ? asSummary(reversalRows, (market) => market.symbol + " " + market.primary.reversal_watch.status)
+      : "Reversal diagnostics are unavailable until validated timeframe analysis completes.",
+    reversalRows.slice(0, 3).map((market) => {
+      const watch = market.primary.reversal_watch;
+      return market.symbol + ": " + (watch.evidence.length ? watch.evidence.join(", ") : "no confirmed reversal evidence");
+    }),
+    { analyzed_markets: reversalRows.length, expected_markets: live.length, status_counts: reversalCounts, execution_authorized: false },
     { lastRunAtMs: nowMs }
   ));
 

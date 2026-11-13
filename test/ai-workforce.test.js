@@ -25,7 +25,8 @@ function market(symbol, overrides = {}) {
       regime: "UPTREND", signal: "HOLD", score: 70, rsi14: 56,
       adx14: 24, plus_di14: 28, minus_di14: 12,
       ema20_slope_pct: 0.08, volume_ratio_20: 1.3,
-      breakout_20: false
+      breakout_20: false,
+      reversal_watch: { status: "bearish_trend_intact", evidence: [], execution_authorized: false }
     },
     higher: { regime: "UPTREND" },
     strategy_research: {
@@ -94,17 +95,37 @@ test("Risk Guardian requires the full market, eligible regime, marked portfolio 
     "paper_only_mode"
   ]);
 });
-test("workforce creates twelve unique deterministic roles and never authorizes execution", () => {
+test("workforce creates thirteen unique deterministic roles and never authorizes execution", () => {
   const result = buildAiWorkforceRun(context());
-  assert.equal(result.worker_count, 12);
-  assert.equal(result.workers.length, 12);
-  assert.equal(new Set(result.workers.map((worker) => worker.id)).size, 12);
+  assert.equal(result.worker_count, 13);
+  assert.equal(result.workers.length, 13);
+  assert.equal(new Set(result.workers.map((worker) => worker.id)).size, 13);
   assert.equal(result.mode, "paper_only_read_only");
   assert.equal(result.execution_authorized, false);
   assert.equal(result.paper_auto_entry_eligible, false);
   assert.equal(result.live_trading_enabled, false);
   assert.ok(result.workers.every((worker) => worker.execution_authorized === false));
   assert.equal(result.workers.find((worker) => worker.id === "risk_guardian").veto, false);
+});
+
+test("reversal watch reports diagnostic-only evidence and never authorizes execution", () => {
+  const markets = context().markets.map((item, index) => ({
+    ...item,
+    primary: {
+      ...item.primary,
+      reversal_watch: {
+        status: index === 0 ? "bearish_momentum_weakening" : "bearish_trend_intact",
+        evidence: index === 0 ? ["rsi_rising", "directional_pressure_improving"] : [],
+        execution_authorized: false
+      }
+    }
+  }));
+  const result = buildAiWorkforceRun(context({ markets }));
+  const worker = result.workers.find((item) => item.id === "reversal_watch");
+  assert.equal(worker.status, "complete");
+  assert.match(worker.summary, /bearish_momentum_weakening/);
+  assert.equal(worker.metrics.execution_authorized, false);
+  assert.equal(worker.execution_authorized, false);
 });
 
 test("market-universe failure is surfaced and Risk Guardian vetoes", () => {
@@ -170,7 +191,7 @@ test("watchdog exposes a missing or stale scheduler heartbeat", () => {
 test("failed scheduled scans mark every specialist as error without granting execution", () => {
   const failed = markAiWorkforceFailure(buildAiWorkforceRun(context()), new Error("provider timeout"), 1_100_000);
   assert.equal(failed.status, "error");
-  assert.equal(failed.counts.error, 12);
+  assert.equal(failed.counts.error, 13);
   assert.ok(failed.workers.every((worker) => worker.status === "error"));
   assert.ok(failed.workers.every((worker) => worker.execution_authorized === false));
 });
@@ -178,7 +199,7 @@ test("failed scheduled scans mark every specialist as error without granting exe
 test("missing workforce data starts honestly in waiting state and stale runs are labeled", () => {
   const empty = readAiWorkforceStatus(null, {}, 1_000_000);
   assert.equal(empty.status, "waiting");
-  assert.equal(empty.worker_count, 12);
+  assert.equal(empty.worker_count, 13);
   assert.ok(empty.workers.every((worker) => worker.status === "waiting"));
 
   const stale = readAiWorkforceStatus(buildAiWorkforceRun(context()), {}, 1_500_000);

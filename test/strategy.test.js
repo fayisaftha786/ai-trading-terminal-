@@ -55,6 +55,46 @@ test("analysis returns HOLD when candle integrity is not clean", () => {
   assert.equal(result.score, 0);
 });
 
+test("reversal diagnostics are observational and never alter the deterministic entry signal", () => {
+  const interval = 3600000;
+  const now = Date.now();
+  const lastClosed = Math.floor(now / interval) * interval - interval;
+  const candles = Array.from({ length: 180 }, (_, index) => {
+    const close = 180 - index * 0.22 + Math.sin(index / 2) * 0.08;
+    return {
+      time: lastClosed - ((179 - index) * interval),
+      open: close + 0.03,
+      high: close + 0.18,
+      low: close - 0.18,
+      close,
+      volume: 1000 + (index % 5) * 20
+    };
+  });
+  for (let index = 176; index < 180; index += 1) {
+    const previous = candles[index - 1].close;
+    const close = previous + 0.55;
+    candles[index] = {
+      ...candles[index],
+      open: previous,
+      high: close + 0.15,
+      low: previous - 0.08,
+      close,
+      volume: 1100
+    };
+  }
+  const audit = auditCandles(candles, interval, now, 150);
+  assert.equal(audit.ok, true);
+  const result = analyzeTimeframe(audit);
+  assert.ok(result.reversal_watch);
+  assert.equal(typeof result.reversal_watch.status, "string");
+  assert.ok(Array.isArray(result.reversal_watch.evidence));
+  assert.equal(result.reversal_watch.execution_authorized, false);
+  assert.equal(result.signal === "BUY_CANDIDATE", result.regime === "UPTREND" &&
+    result.score >= 75 && result.atr_pct < 8 && result.adx14 >= 18 &&
+    result.plus_di14 > result.minus_di14 && result.rsi14 < 68);
+  assert.match(result.reversal_watch.caveat, /not a BUY signal/);
+});
+
 
 test("new PAPER candidates are Coinbase-only even while legacy Bitstamp exits remain supported", () => {
   const now = Date.now();
