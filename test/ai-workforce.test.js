@@ -218,4 +218,8 @@ test("production engine enforces Risk Guardian before Paper entries and serves w
   assert.ok(engineSource.includes("markAiWorkforceFailure"));
   assert.ok(dashboardSource.includes('id="aiWorkforcePanel"'));
   assert.ok(dashboardSource.includes("renderAiWorkforce(data.workforce)"));
+  assert.ok(dashboardSource.includes("13 deterministic analysis roles"));
+  assert.ok(dashboardSource.includes('<strong id="workforceTotal">13</strong>'));
+  assert.ok(dashboardSource.includes('const displayedCount=Number.isFinite(reportedCount)&&reportedCount>=0?reportedCount:workers.length;'));
+  assert.ok(!dashboardSource.includes("12 deterministic analysis roles"));
 });

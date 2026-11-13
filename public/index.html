@@ -302,11 +302,11 @@ section[id]{scroll-margin-top:82px}
 <section class="panel" id="marketIntelligencePanel"><div class="row"><h2>Market intelligence</h2><span id="lastScan" class="status">No scan yet</span></div><p class="note">Deep market gate: validated closed 1H/6H candles; EMA20/EMA50 alignment; RSI14, ATR14, ADX14 and +DI/-DI; 20-bar volume context; same-provider quote/book/candle provenance; ticker age ≤120s; order-book snapshot age ≤15s; spread ≤25 bps; bid/ask depth ≥$5,000 per side; quote volume ≥$1,000,000. The 1H and 6H regimes must both be UPTREND. Scores are transparent rule scores, not win probabilities. This is a deterministic indicator system, not a trained predictive AI. News, sentiment, social and on-chain signals are not included. The separate 1M/5M module is research-only.</p><div class="table-wrap"><table><thead><tr><th>MARKET</th><th>LAST / BID</th><th>SPREAD</th><th>1H SIGNAL</th><th>1H / 6H REGIME</th><th>DATA QUALITY</th><th>ENTRY GATE</th><th>RESEARCH-ONLY STRATEGIES</th></tr></thead><tbody id="markets"><tr><td colspan="8">Waiting for public market data.</td></tr></tbody></table></div><p class="note" id="entryDecision">Research candidates are offline hypotheses only; they do not authorize paper entries. Per-market gate results are read-only diagnostics. Portfolio, full-market-universe and circuit-breaker checks can still block a PAPER entry.</p></section>
 <section class="panel ai-brain-panel" id="aiWorkforcePanel">
   <div class="row ai-brain-header">
-    <div><div class="eyebrow">COORDINATED SPECIALIST ANALYSIS · PAPER ONLY</div><h2>AI Workforce</h2><div class="muted">One Coinbase snapshot · 12 deterministic analysis roles · one risk-controlled engine</div></div>
+    <div><div class="eyebrow">COORDINATED SPECIALIST ANALYSIS · PAPER ONLY</div><h2>AI Workforce</h2><div class="muted">One Coinbase snapshot · 13 deterministic analysis roles · one risk-controlled engine</div></div>
     <div class="workforce-status-line"><span id="workforceStatus" class="tag">WAITING</span><span class="tag">LIVE ORDERS OFF</span></div>
   </div>
   <div class="ai-brain-kpis">
-    <article class="ai-brain-kpi"><div class="label">SPECIALIST ROLES</div><strong id="workforceTotal">12</strong><small>Bounded read-only checks</small></article>
+    <article class="ai-brain-kpi"><div class="label">SPECIALIST ROLES</div><strong id="workforceTotal">13</strong><small>Bounded read-only checks</small></article>
     <article class="ai-brain-kpi"><div class="label">COMPLETED</div><strong id="workforceComplete">—</strong><small>Latest verified scan</small></article>
     <article class="ai-brain-kpi"><div class="label">BLOCKED / UNAVAILABLE</div><strong id="workforceBlocked">—</strong><small>Reasons shown per role</small></article>
     <article class="ai-brain-kpi"><div class="label">LAST RUN DURATION</div><strong id="workforceDuration">—</strong><small>Server-side analysis time</small></article>
@@ -314,7 +314,7 @@ section[id]{scroll-margin-top:82px}
   <div class="ai-brain-pipeline"><span>COINBASE MARKET DATA</span><i>→</i><span>MARKET / TECHNICAL ANALYSIS</span><i>→</i><span>STRATEGY RESEARCH</span><i>→</i><span>RISK GUARDIAN VETO</span><i>→</i><span>SCHEDULER WATCHDOG</span></div>
   <div class="row"><span id="workforceRunMeta" class="status">Waiting for first full scan.</span><span id="workforceNextRun" class="status">Next scan estimate —</span></div>
   <div class="workforce-grid" id="workforceCards"><div class="workforce-empty">Waiting for the next verified full market scan. Worker statuses are not assumed ready.</div></div>
-  <p class="note" id="workforceNote">These are deterministic analysis roles, not twelve separately trained AI models. They receive the same validated server-side market snapshot; none can place, approve or sign exchange orders. Existing Paper / Shadow safeguards remain authoritative. Live trading stays locked.</p>
+  <p class="note" id="workforceNote">These are deterministic analysis roles, not thirteen separately trained AI models. They receive the same validated server-side market snapshot; none can place, approve or sign exchange orders. Existing Paper / Shadow safeguards remain authoritative. Live trading stays locked.</p>
 </section>
 <section class="panel" id="microScalpPanel"><div class="row"><h2>Micro-scalping intelligence · 1M trigger / 5M setup</h2><span class="tag">RESEARCH ONLY</span></div>
 <p class="note">Closed 1-minute breakout + volume trigger, 5-minute trend setup, with 1H/6H context. Costs assume 60 bps/side taker fee (placeholder until the account tier is verified), 10 bps/side slippage and the current observed spread. These are research candidates only: no order is sent. The current 90-second scheduled scanner is not a real-time exchange feed or scalping execution engine.</p>
@@ -972,7 +972,9 @@ function renderAiWorkforce(workforce){
   const badge=$("workforceStatus");
   badge.textContent=status.replaceAll("_"," ").toUpperCase();
   badge.className="tag "+workforceStatusClass(status);
-  $("workforceTotal").textContent=String(Number(value.worker_count)||12);
+  const reportedCount=Number(value.worker_count);
+  const displayedCount=Number.isFinite(reportedCount)&&reportedCount>=0?reportedCount:workers.length;
+  $("workforceTotal").textContent=displayedCount>0?String(displayedCount):"—";
   $("workforceComplete").textContent=String(Number(counts.complete)||0);
   $("workforceBlocked").textContent=String((Number(counts.blocked)||0)+(Number(counts.unavailable)||0)+(Number(counts.error)||0));
   $("workforceDuration").textContent=value.duration_ms!==null&&value.duration_ms!==undefined&&Number.isFinite(Number(value.duration_ms))?Number(value.duration_ms).toFixed(0)+" ms":"—";
