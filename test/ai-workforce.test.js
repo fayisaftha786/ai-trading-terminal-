@@ -99,7 +99,7 @@ test("workforce creates thirteen unique deterministic roles and never authorizes
   const result = buildAiWorkforceRun(context());
   assert.equal(result.worker_count, 13);
   assert.equal(result.workers.length, 13);
-  assert.equal(new Set(result.workers.map((worker) => worker.id)).size, 12);
+  assert.equal(new Set(result.workers.map((worker) => worker.id)).size, 13);
   assert.equal(result.mode, "paper_only_read_only");
   assert.equal(result.execution_authorized, false);
   assert.equal(result.paper_auto_entry_eligible, false);
