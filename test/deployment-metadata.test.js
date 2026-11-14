@@ -64,10 +64,15 @@ test("deployment verification bypasses cached health responses and reports prove
 });
 
 test("production watchdog checks the injected deployment SHA, not optional version tags", () => {
-  assert.match(watchdogWorkflow, /deployedCommitMatchesMain: health\.deployment_commit_sha === process\.env\.EXPECTED_MAIN_SHA/);
-  assert.doesNotMatch(watchdogWorkflow, /deployedCommitMatchesMain: health\.worker_version\?\.tag/);
-  assert.match(watchdogWorkflow, /freshness_state: currentFeed\.freshness_state/);
-  assert.match(watchdogWorkflow, /strict 15-second freshness gate/);
+  const watchdogValidator = readFileSync(
+    new URL("../scripts/production-paper-watchdog-check.mjs", import.meta.url),
+    "utf8"
+  );
+  assert.match(watchdogValidator, /deployedCommitMatchesMain: typeof expectedMainSha === "string"/);
+  assert.match(watchdogValidator, /health\?\.deployment_commit_sha === expectedMainSha\.toLowerCase\(\)/);
+  assert.doesNotMatch(watchdogValidator, /health\.worker_version\?\.tag/);
+  assert.match(watchdogValidator, /currentFeed\.freshness_state === "fresh"/);
+  assert.match(watchdogWorkflow, /sleep 5/);
 });
 
 const authLimiterSource = readFileSync(new URL("../src/auth-rate-limiter.js", import.meta.url), "utf8");
