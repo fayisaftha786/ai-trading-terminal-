@@ -271,9 +271,9 @@ test("production watchdog verifies current 3-market feed and per-side 50-level l
   assert.match(validator, /currentMarketFeedHealthy:\s*currentFeed\.status === "healthy"/);
   assert.match(validator, /currentMarketUniverseComplete:/);
   assert.match(validator, /currentBidAskDepthComplete:\s*depthComplete/);
-  assert.match(validator, /row\.bid_depth_quote >= 5000/);
-  assert.match(validator, /row\.ask_depth_quote >= 5000/);
-  assert.match(validator, /row\.depth_levels === 50/);
+  assert.match(validator, /row\.bid_depth_quote >= MINIMUM_DEPTH_QUOTE/);
+  assert.match(validator, /row\.ask_depth_quote >= MINIMUM_DEPTH_QUOTE/);
+  assert.match(validator, /row\.depth_levels === REQUIRED_DEPTH_LEVELS/);
   assert.match(validator, /current_market_book_depth: depthRows/);
   assert.match(validator, /refresh_in_progress/);
   assert.match(workflow, /sleep 5/);
