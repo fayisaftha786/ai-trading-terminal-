@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080d1a">
-<title>AI Trading Terminal · Free Paper Cloud</title>
+<title>AI Trading Terminal · Coinbase Intelligence</title>
 <style>
 :root{color-scheme:dark;--bg:#080d1a;--panel:#111a2e;--panel2:#0d1527;--line:#26334d;--text:#f4f7ff;--muted:#9eacc7;--purple:#9a88ff;--green:#49d7a2;--red:#ff6f82}
 *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 12% 0%,#1a2140 0,transparent 34%),var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -232,6 +232,118 @@ section[id]{scroll-margin-top:82px}
   #performancePanel .performance-chart svg{min-height:150px}
 }
 @media(prefers-reduced-motion:reduce){.dashboard-view.active{animation:none}}
+
+
+/* 2026 ULTRA TERMINAL VISUAL SYSTEM — presentation-only, existing trading logic/IDs preserved */
+:root{
+ color-scheme:dark;
+ --bg:#060a13;--panel:#0c1422;--panel2:#0a111e;--line:#22344c;
+ --text:#edf4ff;--muted:#91a3bd;--purple:#9d8cff;--green:#4fe0b0;
+ --red:#ff718a;--gold:#efc779;--cyan:#6ad9ee;
+}
+html{scroll-behavior:smooth}
+body{
+ background:
+ radial-gradient(ellipse at 12% -12%,rgba(93,76,190,.25),transparent 34%),
+ radial-gradient(ellipse at 92% 0%,rgba(26,142,161,.15),transparent 30%),
+ linear-gradient(180deg,#060a13 0%,#080f1b 52%,#060a13 100%);
+ color:var(--text);font-size:14px;letter-spacing:.01em
+}
+main{max-width:1600px;padding:26px clamp(12px,2.2vw,34px) 72px}
+.top{
+ position:relative;isolation:isolate;overflow:hidden;align-items:center;
+ padding:24px 26px;margin:0 0 18px;border:1px solid #334461;
+ border-radius:22px;background:linear-gradient(112deg,#111c32 0%,#11182b 50%,#102532 100%);
+ box-shadow:0 24px 70px #0008,inset 0 1px #ffffff12
+}
+.top:before{content:"";position:absolute;z-index:-1;width:420px;height:260px;right:-100px;top:-145px;
+ background:radial-gradient(circle,#6f62d755 0,transparent 68%);pointer-events:none}
+.top:after{content:"";position:absolute;z-index:-1;height:2px;left:26px;right:26px;bottom:0;
+ background:linear-gradient(90deg,transparent,#8e80ff,#4fd7d0,transparent);opacity:.8}
+.brand{font-size:clamp(25px,3vw,38px);font-weight:950;letter-spacing:-.055em;line-height:1.1;margin:5px 0 7px}
+.top .muted{font-size:12px;letter-spacing:.035em}
+.eyebrow{color:#b6aaff;letter-spacing:.22em;font-size:9px}
+.actions{align-items:center}
+#apiState{padding:7px 12px;background:#142b2c;border-color:#28665a;color:#7af0c7}
+#scan{background:linear-gradient(135deg,#b4a8ff,#7d75eb);color:#100e20;border:0;padding:12px 18px}
+#logout{background:#111b2d}
+.app-nav{
+ position:sticky;top:8px;z-index:40;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));
+ gap:7px;padding:8px;margin:0 0 20px;border:1px solid #2c3e58;border-radius:17px;
+ background:rgba(7,13,24,.9);backdrop-filter:blur(20px);box-shadow:0 14px 35px #0007
+}
+.app-nav a{min-height:44px;border-radius:11px;font-size:10px;letter-spacing:.12em;color:#a9b8d0}
+.app-nav a[aria-current="page"]{background:linear-gradient(120deg,#8276ed,#427f9f);border-color:#b7adff66;color:white;box-shadow:0 6px 18px #6559c544}
+.dashboard-view{min-width:0}
+.panel,.card{
+ border:1px solid #263953;border-radius:19px;
+ background:linear-gradient(145deg,rgba(15,26,44,.97),rgba(9,17,30,.98));
+ box-shadow:0 16px 42px #0005,inset 0 1px #ffffff09
+}
+.panel{padding:clamp(16px,2vw,25px);margin-top:15px}
+.panel h2{font-size:clamp(16px,1.5vw,21px);font-weight:850;letter-spacing:-.025em}
+.card{padding:18px;min-height:116px}
+.card .label{font-size:9px;letter-spacing:.15em;color:#9bacc7}
+.card .value{font-size:clamp(24px,2.2vw,32px);letter-spacing:-.045em;font-variant-numeric:tabular-nums}
+#modePanel{border-color:#554d8b;background:radial-gradient(circle at 90% 0%,#8575ff28,transparent 35%),linear-gradient(135deg,#171c36,#0b1728)}
+.mode-switch{gap:8px}
+.mode-switch button{min-height:44px}
+.mode-switch button.active{background:linear-gradient(120deg,#a99cff,#6d79df);box-shadow:0 7px 20px #8276ef38}
+.note{background:linear-gradient(110deg,#121f33,#0c1728);border:1px solid #2a3d59;border-radius:13px;color:#c1cee2}
+.tag{border-color:#344761;background:#111e31;color:#b9c8df;padding:6px 10px}
+.tag.good{background:#0d302b;color:#71edc5;border-color:#286f5b}
+.tag.bad{background:#351923;color:#ff9aaa;border-color:#76404f}
+button{border-radius:11px;min-height:39px;background:linear-gradient(180deg,#1b2b43,#122036);border-color:#344b69}
+button.primary{background:linear-gradient(120deg,#a99cff,#7478e5);color:#100e20;border:0}
+button.danger{background:linear-gradient(120deg,#62273a,#3a1a29)}
+.ticker-grid{gap:14px}
+.ticker-card{border-radius:18px;padding:19px;background:linear-gradient(145deg,#14243b,#0a1425);border-color:#304663;box-shadow:inset 0 1px #ffffff0b}
+.ticker-symbol{letter-spacing:.15em;color:#c4d2e8}
+.ticker-price{font-size:clamp(26px,3vw,36px);letter-spacing:-.06em}
+.ticker-meta{border-color:#2b405b}
+.chart-shell{border-radius:16px;border-color:#2a3d57;background:#07111e}
+.chart-toolbar select,.radar-toolbar input,.radar-toolbar select{border-radius:10px;border-color:#344963;background:#081422}
+.table-wrap{border:1px solid #283c57;border-radius:14px;background:#081321}
+table{min-width:700px}
+th{background:#101d30;color:#9eb1cc;font-size:9px;letter-spacing:.14em}
+td,th{border-bottom:1px solid #22344b;padding:12px 11px}
+tbody tr:hover td{background:#ffffff08}
+#riskPanel .note{margin:10px 0}
+#realModePanel{border-color:#31536a;background:radial-gradient(circle at 95% 0%,#2a9ca21a,transparent 30%),linear-gradient(145deg,#0e1b2b,#0a1422)}
+.coinbase-connect-shell{border-radius:18px;background:linear-gradient(145deg,#102438,#0a1525);border-color:#31506b}
+.connection-tile,.connection-data-card{border-radius:12px;background:#091522;border-color:#2a4058}
+#automationPanel{background:radial-gradient(circle at 95% 0%,#9b8cff13,transparent 28%),linear-gradient(145deg,#111a30,#0a1423)}
+#marketIntelligencePanel{border-color:#2e5363}
+.ai-brain-panel{border-radius:20px}
+.ai-brain-kpi,.workforce-card{border-radius:14px;background:linear-gradient(145deg,#172741,#0b1728);border-color:#2c4561}
+.performance-chart{border-radius:17px;background:#091523;border-color:#2b405a}
+.advanced-drawer{border:1px solid #2c405b;border-radius:13px;padding:10px 13px;background:#091523}
+.advanced-drawer summary{cursor:pointer;color:#c2cfea;font-size:12px;font-weight:800}
+.drawer-content{padding-top:10px}
+.footer{padding:17px 4px;border-top:1px solid #25364d;font-size:11px;line-height:1.7}
+#view-overview>.grid{gap:12px}
+@media(max-width:760px){
+ main{padding:12px 10px 42px}
+ .top{padding:19px 16px;border-radius:17px;align-items:flex-start}
+ .top .actions{width:100%;display:grid;grid-template-columns:1fr 1fr}
+ #apiState{grid-column:1/-1;text-align:center}
+ #scan,#logout{width:100%}
+ .app-nav{grid-template-columns:repeat(3,minmax(0,1fr));top:4px;gap:5px;padding:6px;border-radius:14px}
+ .app-nav a{min-height:40px;font-size:9px;padding:7px 4px;letter-spacing:.07em}
+ .panel{padding:14px;border-radius:16px}
+ .grid{gap:9px}
+ .card{padding:13px;min-height:100px}
+ .card .value{font-size:23px}
+ .ticker-grid{grid-template-columns:1fr}
+ .ticker-card{padding:15px}
+ .connection-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .connection-data-grid{grid-template-columns:1fr}
+}
+@media(prefers-reduced-motion:no-preference){
+ .dashboard-view.active{animation:dashboard-view-in .22s ease-out both}
+ .panel{transition:border-color .18s ease,box-shadow .18s ease}
+ .panel:hover{border-color:#405777;box-shadow:0 19px 48px #0006,inset 0 1px #ffffff0c}
+}
 
 </style></head>
 <body><main>
