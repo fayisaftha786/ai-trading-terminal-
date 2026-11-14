@@ -18,20 +18,25 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 3
     steps:
+      - name: Checkout production source
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Check public health and scheduler heartbeat
         shell: bash
         env:
           WORKER_HEALTH_URL: https://ai-trading-terminal.fayisaftha786.workers.dev/api/health
         run: |
           set -euo pipefail
-          response=""
-          for attempt in 1 2 3; do
-            response="$(curl --fail --silent --show-error --max-time 15 "$WORKER_HEALTH_URL" 2>/dev/null || true)"
-            if [ -n "$response" ]; then break; fi
-            echo "Health request attempt $attempt/3 failed; retrying."
-            sleep 5
-          done
-          test -n "$response" || { echo "::error::Production Worker health endpoint is unreachable."; exit 1; }
+          health_file="$(mktemp)"
+          trap 'rm -f "$health_file"' EXIT
+
           expected_main_sha="$(curl --fail --silent --show-error --max-time 15 https://api.github.com/repos/fayisaftha786/ai-trading-terminal-/commits/main | node -e '
             let raw = "";
             process.stdin.setEncoding("utf8");
@@ -48,89 +53,34 @@ jobs:
             });
           ')"
           test -n "$expected_main_sha" || { echo "::error::Could not resolve current main commit SHA."; exit 1; }
-          export EXPECTED_MAIN_SHA="$expected_main_sha"
-          printf 'Expected main commit: %s\n' "$EXPECTED_MAIN_SHA"
-          printf '%s' "$response" | node -e '
-            let raw = "";
-            process.stdin.setEncoding("utf8");
-            process.stdin.on("data", chunk => { raw += chunk; });
-            process.stdin.on("end", () => {
-              try {
-                const health = JSON.parse(raw);
-                const scheduler = health.scheduler || {};
-                const diagnostics = health.scan_diagnostics || {};
-                const currentFeed = diagnostics.current_market_feed || {};
-                const maxAgeMs = 45 * 60 * 1000;
-                const validAge = value => Number.isFinite(value) && value >= 0 && value <= maxAgeMs;
-                const scheduledHealthy = Number(diagnostics.last_scheduled_scan_healthy_market_count);
-                const scheduledExpected = Number(diagnostics.last_scheduled_scan_expected_market_count);
-                const scheduledAge = scheduler.last_scheduled_scan_age_ms ??
-                  diagnostics.last_scheduled_scan_age_ms;
-                const depthRows = Array.isArray(diagnostics.market_book_depth)
-                  ? diagnostics.market_book_depth : [];
-                const currentHealthy = Number(currentFeed.healthy_market_count);
-                const currentExpected = Number(currentFeed.expected_market_count);
-                const depthComplete = depthRows.length === 3 && depthRows.every(row =>
-                  typeof row.symbol === "string" &&
-                  Number.isFinite(row.bid_depth_quote) && row.bid_depth_quote >= 5000 &&
-                  Number.isFinite(row.ask_depth_quote) && row.ask_depth_quote >= 5000 &&
-                  row.minimum_depth_quote_per_side === 5000 && row.depth_levels === 50
-                );
-                const checks = {
-                  statusOk: health.status === "ok",
-                  paperOnly: health.mode === "paper_only",
-                  liveTradingDisabled: health.live_trading_enabled === false,
-                  workerVersionIdPresent: typeof health.worker_version?.id === "string" && health.worker_version.id.length > 0,
-                  deployedCommitMatchesMain: health.deployment_commit_sha === process.env.EXPECTED_MAIN_SHA,
-                  schedulerHeartbeatFresh: validAge(scheduler.last_alarm_age_ms),
-                  schedulerNotStale: ["healthy", "running"].includes(scheduler.status),
-                  lastScheduledScanHealthy: ["completed", "running"].includes(scheduler.last_scheduled_scan_status),
-                  lastScheduledScanFresh: validAge(scheduledAge),
-                  lastScheduledUniverseComplete: Number.isInteger(scheduledHealthy) &&
-                    Number.isInteger(scheduledExpected) && scheduledExpected === 3 &&
-                    scheduledHealthy === scheduledExpected,
-                  currentMarketFeedHealthy: currentFeed.status === "healthy" &&
-                    currentFeed.freshness_state === "fresh",
-                  currentMarketUniverseComplete: Number.isInteger(currentHealthy) &&
-                    Number.isInteger(currentExpected) && currentExpected === 3 &&
-                    currentHealthy === currentExpected,
-                  currentBidAskDepthComplete: depthComplete,
-                  lastHealthyScanFresh: validAge(scheduler.last_healthy_scan_age_ms)
-                };
-                console.log(JSON.stringify({
-                  checks,
-                  worker_version: health.worker_version,
-                  scheduler: {
-                    status: scheduler.status ?? null,
-                    last_scheduled_scan_status: scheduler.last_scheduled_scan_status ?? null,
-                    last_alarm_age_ms: scheduler.last_alarm_age_ms ?? null,
-                    last_scheduled_scan_age_ms: scheduledAge ?? null,
-                    last_healthy_scan_age_ms: scheduler.last_healthy_scan_age_ms ?? null
-                  },
-                  last_scheduled_market_feed: {
-                    healthy_market_count: Number.isFinite(scheduledHealthy) ? scheduledHealthy : null,
-                    expected_market_count: Number.isFinite(scheduledExpected) ? scheduledExpected : null,
-                    issues: diagnostics.last_scheduled_scan_issues ?? []
-                  },
-                  current_market_book_depth: depthRows,
-                  current_market_snapshots: {
-                    status: currentFeed.status ?? health.market_data_status ?? "unknown",
-                    freshness_state: currentFeed.freshness_state ?? "not_reported",
-                    freshness_reason: currentFeed.freshness_reason ?? null,
-                    healthy_market_count: currentFeed.healthy_market_count ?? null,
-                    expected_market_count: currentFeed.expected_market_count ?? null,
-                    note: "Order-book snapshots have a strict 15-second freshness gate; scheduled scans run every 90 seconds. Expired cached snapshots are reported separately from the last completed scan."
-                  }
-                }, null, 2));
-                if (!Object.values(checks).every(Boolean)) {
-                  console.error("Production PAPER watchdog checks failed.");
-                  process.exitCode = 1;
-                } else {
-                  console.log("Production PAPER Worker and scheduled heartbeat verified.");
-                }
-              } catch (error) {
-                console.error("Invalid production health JSON:", error.message);
-                process.exitCode = 1;
-              }
-            });
-          '
+          printf 'Expected main commit: %s\n' "$expected_main_sha"
+
+          for attempt in $(seq 1 12); do
+            response="$(curl --fail --silent --show-error --max-time 15 "$WORKER_HEALTH_URL" 2>/dev/null || true)"
+            if [ -z "$response" ]; then
+              echo "Health endpoint unavailable on attempt $attempt/12."
+              verdict=2
+            else
+              printf '%s' "$response" > "$health_file"
+              set +e
+              node scripts/production-paper-watchdog-check.mjs "$health_file" "$expected_main_sha"
+              verdict=$?
+              set -e
+            fi
+
+            if [ "$verdict" -eq 0 ]; then
+              echo "Production PAPER Worker and scheduled heartbeat verified."
+              exit 0
+            fi
+            if [ "$verdict" -ne 2 ]; then
+              echo "::error::Production PAPER watchdog detected a non-retryable health failure."
+              exit 1
+            fi
+            if [ "$attempt" -lt 12 ]; then
+              echo "Retryable health window; waiting 5 seconds before the next read-only check."
+              sleep 5
+            fi
+          done
+
+          echo "::error::Production health did not recover from the transient refresh window within 60 seconds."
+          exit 1
