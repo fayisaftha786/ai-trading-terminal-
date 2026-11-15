@@ -345,12 +345,62 @@ tbody tr:hover td{background:#ffffff08}
  .panel:hover{border-color:#405777;box-shadow:0 19px 48px #0006,inset 0 1px #ffffff0c}
 }
 
+
+/* Command Center v2 — structural workspace redesign */
+#app{display:grid;grid-template-columns:218px minmax(0,1fr);grid-template-areas:"head head" "intro intro" "nav content" "foot foot";column-gap:22px;align-items:start;max-width:1600px;margin:0 auto}
+#app>.top{grid-area:head;min-width:0;padding:14px 0 20px;margin-bottom:0;border-bottom:1px solid #263854}
+#app>.terminal-intro{grid-area:intro;display:flex;align-items:flex-end;justify-content:space-between;gap:20px;padding:24px 26px;margin:20px 0 18px;border:1px solid #34466a;border-radius:20px;background:radial-gradient(ellipse at 88% 0%,#4b75c833,transparent 36%),linear-gradient(115deg,#141f36 0%,#101a2d 55%,#101e31 100%);box-shadow:0 18px 44px #02061155;position:relative;overflow:hidden}
+.terminal-intro:after{content:"";position:absolute;right:-40px;bottom:-100px;width:280px;height:280px;border:1px solid #8da8dc22;border-radius:50%;box-shadow:0 0 0 28px #8da8dc09,0 0 0 58px #8da8dc06;pointer-events:none}
+.terminal-kicker{font-size:9px;letter-spacing:.2em;font-weight:900;color:#8eabff}
+.terminal-intro h1{font-size:clamp(25px,3vw,38px);line-height:1.08;letter-spacing:-.045em;margin:8px 0}
+.terminal-intro p{margin:0;color:#aab8d2;font-size:13px}
+.terminal-intro-tags{display:flex;justify-content:flex-end;flex-wrap:wrap;gap:7px;position:relative;z-index:1}
+.terminal-intro-tags span{font-size:9px;font-weight:900;letter-spacing:.08em;padding:7px 9px;border:1px solid #405475;border-radius:8px;background:#0a1425;color:#c4d2ed;white-space:nowrap}
+.top-brand{display:flex;align-items:center;gap:13px}
+.brand-mark{width:43px;height:43px;display:grid;place-items:center;border-radius:13px;background:linear-gradient(145deg,#8d82f4,#3f83c8);box-shadow:0 8px 22px #7568e544;color:#fff;font-size:22px;font-weight:950}
+.top-brand-copy .brand{font-size:clamp(19px,1.8vw,25px)}
+#app>.app-nav{grid-area:nav;position:sticky;top:14px;display:flex;flex-direction:column;align-items:stretch;gap:6px;overflow:visible;padding:10px;margin:0;border:1px solid #2c3d5a;border-radius:17px;background:linear-gradient(180deg,#101b30f5,#0a1425f5);box-shadow:0 14px 34px #02061155;backdrop-filter:blur(18px)}
+#app>.app-nav:before{content:"WORKSPACE";display:block;padding:7px 10px 9px;color:#7486a8;font-size:9px;font-weight:900;letter-spacing:.18em}
+#app>.app-nav a{justify-content:flex-start;text-align:left;min-height:43px;padding:10px 12px;font-size:10px;letter-spacing:.1em;border-radius:10px}
+#app>.app-nav a:before{content:"";width:6px;height:6px;flex:0 0 6px;border-radius:50%;background:#536783;margin-right:9px}
+#app>.app-nav a[aria-current="page"]:before{background:#fff;box-shadow:0 0 0 4px #ffffff20}
+#app>.dashboard-view{grid-area:content;min-width:0;width:100%;padding:0 0 12px}
+#app>.footer{grid-area:foot}
+#app .dashboard-view>.panel:first-child{margin-top:0}
+#app .dashboard-view>.panel{border-radius:17px}
+#app #modePanel{padding:19px 21px}
+#app #portfolioOverview .card{min-height:112px}
+#app #liveMarketPanel .ticker-card{min-height:210px}
+#app .dashboard-view .panel h2{font-size:18px}
+#app .dashboard-view .note{line-height:1.6}
+@media(max-width:900px){
+ #app{grid-template-columns:176px minmax(0,1fr);column-gap:13px}
+ #app>.terminal-intro{padding:19px;display:block}
+ .terminal-intro-tags{justify-content:flex-start;margin-top:14px}
+ #app>.app-nav a{font-size:9px;padding:9px 8px}
+}
+@media(max-width:680px){
+ #app{display:flex;flex-direction:column;gap:0}
+ #app>.top{width:100%;align-items:flex-start}
+ #app>.top .actions{width:100%;justify-content:flex-start}
+ #app>.terminal-intro{width:100%;padding:18px;margin:13px 0}
+ #app>.app-nav{width:100%;position:sticky;top:4px;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:5px;padding:7px;margin:0 0 13px;z-index:40}
+ #app>.app-nav:before{grid-column:1/-1;padding:2px 5px 4px}
+ #app>.app-nav a{justify-content:center;text-align:center;min-height:38px;padding:7px 4px;font-size:9px}
+ #app>.app-nav a:before{display:none}
+ #app>.dashboard-view{width:100%}
+ #app>.footer{width:100%}
+ .top-brand{align-items:flex-start}
+ .brand-mark{width:37px;height:37px;flex:0 0 37px}
+}
+
 </style></head>
 <body><main>
 <section id="login" class="panel login hidden"><div class="eyebrow">PRIVATE INSTANCE</div><h1>AI Trading Terminal</h1><p class="muted">Sign in to your private paper-trading dashboard. API keys are not used here.</p>
 <form id="loginForm"><label>Username<input id="username" autocomplete="username" value="admin" required maxlength="128"></label><label>Password<input id="password" type="password" autocomplete="current-password" required maxlength="256"></label><button class="primary" type="submit">Sign in</button><p id="loginError" class="status"></p></form></section>
 <section id="app" class="hidden">
-<header class="top"><div><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Coinbase live market feed · paper ledger · live execution locked</div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan">Scan now</button><button id="logout">Sign out</button></div></header>
+<header class="top"><div class="top-brand"><div class="brand-mark" aria-hidden="true">K</div><div class="top-brand-copy"><div class="eyebrow">PRIVATE CLOUD / PAPER AUTOMATION</div><div class="brand">AI TRADING TERMINAL</div><div class="muted">Market intelligence · paper execution · risk-first controls</div></div></div><div class="actions"><span id="apiState" class="tag">CONNECTING</span><button id="scan" class="primary">Run market scan</button><button id="logout">Sign out</button></div></header>
+<section class="terminal-intro" aria-label="Trading workspace introduction"><div><div class="terminal-kicker">TRADING WORKSPACE / 01</div><h1>Market command center</h1><p>One focused workspace for Coinbase market conditions, strategy decisions and portfolio risk.</p></div><div class="terminal-intro-tags"><span>COINBASE ONLY</span><span>PAPER MODE DEFAULT · live execution locked</span><span>LIVE ORDERS LOCKED</span></div></section>
 <nav class="app-nav" aria-label="Trading terminal sections">
   <a href="#modePanel" data-view-target="overview" aria-current="page">OVERVIEW</a>
   <a href="#liveMarketPanel" data-view-target="markets">MARKETS</a>
